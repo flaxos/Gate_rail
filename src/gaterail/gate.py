@@ -1,69 +1,75 @@
-"""Wormhole gate model and condition/slot logic."""
+"""Wormhole gate power and slot logic for the tick simulation."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from gaterail.models import GameState, GatePowerStatus, LinkMode, NetworkLink
 
 
-@dataclass(slots=True)
-class WormholeGate:
-    """Transit gate with finite daily throughput and wear."""
+def _gate_status_for_link(
+    state: GameState,
+    link: NetworkLink,
+    allocated_by_world: dict[str, int],
+) -> GatePowerStatus:
+    """Resolve one gate's power status against current allocations."""
 
-    name: str = "Primary Gate"
-    max_slots_per_day: int = 12
-    wear: float = 0.0
-    wear_per_jump: float = 0.8
-    max_wear: float = 100.0
-    base_daily_cost: float = 240.0
-    cost_per_wear_point: float = 1.4
-    slots_used_today: int = 0
+    source_world_id = state.link_power_source_world_id(link)
+    source_world = state.worlds[source_world_id]
+    allocated = allocated_by_world.get(source_world_id, 0)
+    power_available = max(0, source_world.base_power_margin - allocated)
+    powered = link.active and power_available >= link.power_required
+    power_shortfall = 0 if powered else max(0, link.power_required - power_available)
+    if powered:
+        allocated_by_world[source_world_id] = allocated + link.power_required
+    return GatePowerStatus(
+        link_id=link.id,
+        source_world_id=source_world_id,
+        source_world_name=source_world.name,
+        power_required=link.power_required,
+        power_available=power_available,
+        power_shortfall=power_shortfall,
+        powered=powered,
+        active=link.active,
+        slot_capacity=link.capacity_per_tick,
+    )
 
-    def reset_daily_slots(self) -> None:
-        """Reset slot usage for new day."""
 
-        self.slots_used_today = 0
+def preview_gate_power(state: GameState) -> dict[str, GatePowerStatus]:
+    """Return gate power status without mutating world reservations."""
 
-    @property
-    def slots_remaining(self) -> int:
-        """Transit slots available today."""
+    allocated_by_world: dict[str, int] = {}
+    statuses: dict[str, GatePowerStatus] = {}
+    for link in state.links_by_mode(LinkMode.GATE):
+        statuses[link.id] = _gate_status_for_link(state, link, allocated_by_world)
+    return statuses
 
-        return max(0, self.max_slots_per_day - self.slots_used_today)
 
-    @property
-    def condition(self) -> float:
-        """Gate health as a 0..1 ratio."""
+def evaluate_gate_power(state: GameState) -> dict[str, GatePowerStatus]:
+    """Resolve powered gates and reserve their power for the current tick."""
 
-        if self.max_wear <= 0:
-            return 0.0
-        return max(0.0, 1.0 - (self.wear / self.max_wear))
+    for world in state.worlds.values():
+        world.gate_power_used = 0
+    statuses = preview_gate_power(state)
+    for status in statuses.values():
+        if status.powered:
+            state.worlds[status.source_world_id].gate_power_used += status.power_required
+    state.gate_statuses = statuses
+    return statuses
 
-    @property
-    def operational(self) -> bool:
-        """Whether gate can accept transits."""
 
-        return self.condition > 0.0
+def reserve_gate_slots(state: GameState, link_ids: tuple[str, ...]) -> tuple[bool, str | None]:
+    """Reserve one slot on every gate link in a route."""
 
-    def can_allocate_slots(self, count: int = 1) -> bool:
-        """Return whether ``count`` additional slots can be reserved."""
-
-        return self.operational and count >= 0 and self.slots_remaining >= count
-
-    def allocate_slots(self, count: int = 1) -> bool:
-        """Reserve ``count`` slots if possible."""
-
-        if not self.can_allocate_slots(count):
-            return False
-        self.slots_used_today += count
-        return True
-
-    def apply_wear(self, jumps: int) -> None:
-        """Apply wear accumulated from gate jumps."""
-
-        if jumps <= 0:
-            return
-        self.wear = min(self.max_wear, self.wear + jumps * self.wear_per_jump)
-
-    def daily_operating_cost(self) -> float:
-        """Operating cost grows with accumulated wear."""
-
-        return self.base_daily_cost + (self.wear * self.cost_per_wear_point)
+    gate_links = [
+        state.links[link_id]
+        for link_id in link_ids
+        if state.links[link_id].mode == LinkMode.GATE
+    ]
+    for link in gate_links:
+        status = state.gate_statuses.get(link.id)
+        if status is None or not status.powered:
+            return False, f"gate {link.id} unpowered"
+        if status.slots_remaining <= 0:
+            return False, f"gate slots full on {link.id}"
+    for link in gate_links:
+        state.gate_statuses[link.id].slots_used += 1
+    return True, None

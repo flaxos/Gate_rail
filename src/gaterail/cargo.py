@@ -13,6 +13,21 @@ class CargoType(StrEnum):
     PASSENGERS = "passengers"
     MACHINERY = "machinery"
     ORE = "ore"
+    CARBON_FEEDSTOCK = "carbon_feedstock"
+    STONE = "stone"
+    BIOMASS = "biomass"
+    WATER = "water"
+    FUEL = "fuel"
+    COOLANT = "coolant"
+    METAL = "metal"
+    PARTS = "parts"
+    ELECTRONICS = "electronics"
+    CONSTRUCTION_MATERIALS = "construction_materials"
+    CONSUMER_GOODS = "consumer_goods"
+    MEDICAL_SUPPLIES = "medical_supplies"
+    RESEARCH_EQUIPMENT = "research_equipment"
+    REACTOR_PARTS = "reactor_parts"
+    GATE_COMPONENTS = "gate_components"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +64,96 @@ CARGO_METADATA: dict[CargoType, CargoMetadata] = {
         base_unit_revenue=18.0,
         preferred_origin="Frontier",
         preferred_destination="Core",
+    ),
+    CargoType.CARBON_FEEDSTOCK: CargoMetadata(
+        priority=65,
+        base_unit_revenue=13.0,
+        preferred_origin="Frontier",
+        preferred_destination="Core",
+    ),
+    CargoType.STONE: CargoMetadata(
+        priority=45,
+        base_unit_revenue=7.0,
+        preferred_origin="Frontier",
+        preferred_destination="Frontier",
+    ),
+    CargoType.BIOMASS: CargoMetadata(
+        priority=55,
+        base_unit_revenue=9.0,
+        preferred_origin="Frontier",
+        preferred_destination="Core",
+    ),
+    CargoType.WATER: CargoMetadata(
+        priority=85,
+        base_unit_revenue=6.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.FUEL: CargoMetadata(
+        priority=95,
+        base_unit_revenue=20.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.COOLANT: CargoMetadata(
+        priority=75,
+        base_unit_revenue=16.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.METAL: CargoMetadata(
+        priority=68,
+        base_unit_revenue=19.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.PARTS: CargoMetadata(
+        priority=78,
+        base_unit_revenue=24.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.ELECTRONICS: CargoMetadata(
+        priority=72,
+        base_unit_revenue=32.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.CONSTRUCTION_MATERIALS: CargoMetadata(
+        priority=82,
+        base_unit_revenue=14.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.CONSUMER_GOODS: CargoMetadata(
+        priority=60,
+        base_unit_revenue=18.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.MEDICAL_SUPPLIES: CargoMetadata(
+        priority=88,
+        base_unit_revenue=30.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.RESEARCH_EQUIPMENT: CargoMetadata(
+        priority=50,
+        base_unit_revenue=45.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.REACTOR_PARTS: CargoMetadata(
+        priority=92,
+        base_unit_revenue=55.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
+    ),
+    CargoType.GATE_COMPONENTS: CargoMetadata(
+        priority=98,
+        base_unit_revenue=70.0,
+        preferred_origin="Core",
+        preferred_destination="Frontier",
     ),
 }
 
