@@ -1,1 +1,3 @@
-# Gate_rail
+# GateRail
+
+Initial project scaffold for the GateRail package.

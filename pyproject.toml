@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gaterail"
+version = "0.1.0"
+description = "GateRail simulation project scaffold"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "GateRail Contributors" }]
+dependencies = []
+
+[project.scripts]
+gaterail = "gaterail.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
