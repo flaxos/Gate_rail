@@ -1,13 +1,13 @@
 # GateRail
 
-GateRail is a CLI-first simulation project for a logistics and world-building game about **trains, wormholes, frontier development, and interplanetary supply chains**.
+GateRail is a simulation-first game project for logistics and world-building about **trains, wormholes, frontier development, and interplanetary supply chains**.
 
 The long-term game fantasy combines three angles:
 - railroad tycoon across impossible distances,
 - industrial supply-chain optimizer,
 - frontier builder growing worlds from outposts into major civil and industrial hubs.
 
-The current repository focus is the backend. We are building the simulation in Python first so the rules, data model, and progression can be tested in terminal workflows before committing to a final engine or presentation layer.
+The current repository focus is the Python backend plus the first Godot 2D client scaffold. The backend remains authoritative and is tested through terminal and JSON-over-stdio workflows; Godot is the Stage 2 view/input layer.
 
 ## Product direction
 
@@ -16,9 +16,10 @@ GateRail is built around these assumptions:
 - wormholes are powerful but energy-hungry infrastructure,
 - worlds progress through development tiers,
 - expansion depends on building stable interdependent supply chains,
-- the product surface stays CLI-first during backend development.
+- the backend product surface stays CLI/stdio-first,
+- the Godot client talks to the backend through the documented JSON bridge.
 
-This is not a visual prototype yet. It is a systems-first game project.
+This is now entering the first visual-client phase, but remains systems-first.
 
 ## Design goals
 
@@ -31,7 +32,7 @@ This is not a visual prototype yet. It is a systems-first game project.
 
 Stage 1 is the current Python simulation: no graphics, with cargo demand, train schedules, gate slots, colony stockpiles, income, costs, and monthly text tables.
 
-Stage 2 is a future Godot 2D prototype: tile-based rail, simple moving trains, cargo counters, one wormhole gate, route UI, and gate schedule UI.
+Stage 2 is the Godot 2D prototype: tile-based rail presentation, simple moving trains, cargo counters, wormhole gates, route UI, gate schedule UI, and staged construction controls.
 
 Stage 3 is the proper game expansion: more worlds, contracts, corporate finance, rival operators, tech tree, modular stations, and advanced rail types.
 
@@ -69,6 +70,8 @@ That is the current MVP target.
 
 - [DESIGN_NOTES.md](DESIGN_NOTES.md): design principles and simulation boundaries
 - [GAME_VISION.md](GAME_VISION.md): canonical concept brief and gameplay framing
+- [PHASE2_PLAN.md](PHASE2_PLAN.md): Godot client and Stage 2 sprint plan
+- [PHASE2_UI_WIREFRAME.md](PHASE2_UI_WIREFRAME.md): implementation summary from the Claude Design handoff
 - [SPRINTS.md](SPRINTS.md): sprint-by-sprint development plan
 
 ## Setup
@@ -124,10 +127,31 @@ gaterail --ticks 15 --save saves/playtest.json
 gaterail --load saves/playtest.json --ticks 15 --report traffic,finance,schedules
 ```
 
+Run the Stage 2 JSON bridge contract from a source checkout:
+
+```bash
+printf '{"ticks":1}\n' | PYTHONPATH=src python3 -m gaterail.main --stdio
+```
+
+Send a player command through the bridge:
+
+```bash
+printf '{"commands":[{"type":"SetScheduleEnabled","schedule_id":"core_food_service","enabled":false}],"ticks":1}\n' \
+  | PYTHONPATH=src python3 -m gaterail.main --stdio
+```
+
+Open the Godot 4 client scaffold:
+
+```bash
+godot --path godot
+```
+
+The Godot scene draws a fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. It currently exposes bridge status, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
+
 Run the test suite:
 
 ```bash
 pytest
 ```
 
-The codebase now contains the full Sprint 9 objectives layer — cargo-delivery, frontier-support, and gate-recovery contract kinds plus reputation — layered on the Sprint 8 CLI playability prototype, with three new scenario presets (`sprint9_logistics`, `sprint9_frontier`, `sprint9_recovery`) exercising each kind. The legacy daily-colony prototype has been retired so the fixed-tick backend is now the single source of truth ahead of the Stage 2 Godot 2D port.
+The codebase now contains the full Sprint 9 objectives layer plus the Stage 2 bridge contract: cargo-delivery, frontier-support, and gate-recovery contracts; reputation; stable render snapshots; Python-level player commands; and a JSON-over-stdio mode for a future Godot subprocess. The fixed-tick backend is now the single source of truth ahead of the Stage 2 Godot 2D port.
