@@ -15,7 +15,8 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 6 is complete: worlds now have specialization profiles, recipe-driven exports, and a mining to manufacturing to research dependency chain.
 - Sprint 7 is complete: route dispatch now reserves link capacity, queues overloaded departures, reports traffic pressure, and models recoverable disruptions.
 - Sprint 8 is complete: the CLI now supports scenario discovery, scenario inspection, report filters, JSON save/load, schedule status tables, and a balanced benchmark scenario.
-- Sprint 9 is complete: cargo-delivery, frontier-support, and gate-recovery contract kinds all resolve against tick state; reputation tracking, reward and penalty resolution, and monthly contract reporting are in place; sprint9_logistics, sprint9_frontier, and sprint9_recovery scenario presets exercise each contract kind through the CLI.
+- Sprint 9 is complete: cargo-delivery, frontier-support, and gate-recovery contract kinds all resolve against tick state; reputation tracking, reward and penalty resolution, monthly contract reporting, stable render snapshots, player commands, and the JSON-over-stdio bridge are in place.
+- Phase 2 is approved for this repository: Godot client work is allowed under `godot/`, while the Python backend remains authoritative and CLI/stdio-first.
 
 ## Long-term stages
 
@@ -30,6 +31,7 @@ Stage 2: Godot 2D prototype
 - cargo counters
 - one wormhole gate
 - route UI and gate schedule UI
+- staged construction, starting with existing-galaxy expansion
 
 Stage 3: Proper game expansion
 - more worlds
@@ -286,9 +288,111 @@ Slices 2–4 completed state:
 - three scenario presets ship: `sprint9_logistics` stretches sprint8 with a 10-unit PARTS contract into Ashfall; `sprint9_frontier` adds a support-streak contract on Brink Frontier; `sprint9_recovery` turns the frontier-outer gate into a full outage for ticks 1–12 and adds a 3-tick recovery contract
 - persistence round-trips the new `target_world_id`, `target_link_id`, and `progress` fields; scenario inspection and tick/monthly reports render all three kinds
 
+Stage 2 bridge completed state:
+- `render_snapshot()` returns a stable JSON object with `SNAPSHOT_VERSION = 1`, covering tick, worlds, nodes, links, trains, schedules, orders, contracts, finance, and reputation separately from the rich text reports
+- `PlayerCommand` supports `SetScheduleEnabled`, `DispatchOrder`, and `CancelOrder` through `GameState.apply_command(cmd)`
+- `gaterail --stdio` reads newline-delimited JSON, applies commands, steps N ticks, and emits one render snapshot JSON line per input line
+- the bridge architecture is Python subprocess plus JSON over stdio; Python owns deterministic galaxy-scale world coordinates, and Godot will own visual/intra-world placement metadata
+
 Deferred (not blocking Stage 2 prep):
 - optional accept/offer flow so contracts can be refused or negotiated before becoming active
 - per-faction reputation (the single integer stays until rival operators arrive)
+- full construction commands for building stations, rails, gates, trains, schedules, and eventually new worlds
+
+## Sprint 10: Godot Bridge Prototype
+
+Goal:
+- prove Stage 2 can render and control the Python simulation without rewriting the backend
+
+Deliverables:
+- `godot/` sibling project scaffold
+- `GateRailBridge` autoload that launches `gaterail --stdio`
+- one main 2D scene that renders `render_snapshot()` worlds, links, nodes, trains, contracts, finance, and reputation
+- route/schedule controls that send the existing Stage 2 player commands
+- smoke tests or scripts that verify the bridge contract outside the editor
+
+Exit criteria:
+- Godot can start the Python subprocess, receive snapshots, toggle a schedule, queue a one-shot order, step the sim, and redraw from the returned snapshot
+
+Working slice:
+- scaffold a Godot 4 project under `godot/`
+- add a `GateRailBridge` autoload that can send JSON lines and parse snapshot JSON
+- add one `Main` scene that draws worlds, links, nodes, trains, and key HUD labels from a fixture or live bridge snapshot
+- keep all simulation decisions in Python
+
+Slice 1 completed state:
+- `godot/project.godot` defines the Stage 2 client and autoloads `GateRailBridge`
+- `Main` renders a fixture snapshot immediately, then requests a live `{"ticks":0}` snapshot from `gaterail --stdio`
+- `GateRailBridge` computes the repository root from `res://`, starts the Python subprocess with an absolute command, validates `snapshot_version`, guards writes, reports bridge errors, and shuts down the subprocess on exit
+- the scene exposes step and schedule-toggle controls backed by the live stdio bridge
+- Godot headless smoke and Python tests pass
+
+Slice 2 completed state:
+- `Main` now has a visible bridge status panel showing bridge running/stopped state, snapshot source, and schedule count
+- the hardcoded food-service toggle was replaced with a schedule list generated from the live snapshot
+- each schedule row shows active state, cargo, units, route, next departure tick, and an enable/disable command wired to `SetScheduleEnabled`
+- command results from the bridge are surfaced in the status text so live backend control is visible in-scene
+
+Slice 3 completed state:
+- `Main` now includes a finance and reputation panel sourced from the current snapshot
+- contracts render in a UI panel with progress, due tick, and fulfilled/failed color state
+- the dispatch form is populated from snapshot trains, nodes, and cargo ids
+- `Queue DispatchOrder` sends a one-shot order with `ticks:0`, so it appears as pending before simulation advances
+- pending active orders render in a list with per-order `CancelOrder` buttons
+
+Slice 4 completed state:
+- Antigravity placeholder SVGs are documented and wired into the Godot scene
+- worlds, nodes, trains, schedule cargo icons, contract rows, and primary action buttons now use the placeholder asset pack with shape/color fallbacks
+- `PHASE2_UI_WIREFRAME.md` captures the Claude Design handoff summary so implementation is not dependent on a temporary HTML export
+
+Slice 5 completed state:
+- `Main` now includes the wireframe alert/status strip as a bottom panel
+- the strip keeps recent bridge command results and bridge errors visible as compact chips
+- current link disruptions, degraded capacity, and high gate slot usage are rendered as live warning/congestion chips from the snapshot
+
+## Sprint 11: Playable Operations UI
+
+Goal:
+- make the current Sprint 8/Sprint 9 scenarios playable from Godot without construction
+
+Deliverables:
+- schedule panel with enable/disable controls
+- one-shot dispatch form backed by `DispatchOrder`
+- cancel pending order control backed by `CancelOrder`
+- contract progress, finance, and reputation HUD
+- pause, step, and run controls backed by stdio bridge messages
+
+Exit criteria:
+- a player can change scenario outcomes from the Godot UI without terminal commands
+
+## Sprint 12: Construction Slice 1
+
+Goal:
+- start full construction by expanding existing worlds and routes
+
+Deliverables:
+- backend command for building logistics nodes on existing worlds
+- backend command for building rail links between valid nodes
+- cash costs, validation errors, and JSON bridge error frames
+- Godot build mode for placing a node and drawing a rail link
+- snapshot support for newly built entities
+
+Exit criteria:
+- the player can add rail infrastructure to the benchmark scenario and see it affect logistics
+
+## Sprint 13: Construction Slice 2
+
+Goal:
+- add high-impact expansion infrastructure and train/schedule creation
+
+Deliverables:
+- backend commands for gate hubs, gate links, train purchase, and schedule creation
+- Godot UI for gate construction, train creation, and schedule creation
+- visible cost, power, and capacity feedback
+- tests for all new backend commands and bridge frames
+
+Exit criteria:
+- the player can expand an existing network with stations, rail, gates, trains, and schedules from Godot
 
 ## Interactive cadence
 
@@ -302,8 +406,4 @@ For collaborative development:
 
 ## Current next step
 
-Sprint 9 slice 1 (cargo-delivery contracts + reputation) is implemented. The next concrete slice should be frontier-support contracts:
-- add a `FRONTIER_SUPPORT` contract kind that tracks a named world's support streak or promotion within a deadline,
-- hook contract resolution into `progression.py` so streak milestones and tier promotions trigger fulfillment,
-- add a scenario preset (candidate: `sprint9_frontier`) that pushes the player to promote Brink Frontier within one month,
-- add tests for support-streak fulfillment, missed-promotion failure, and regression consequences.
+Sprint 9 is complete. The next concrete slice is Sprint 10: create the Godot sibling project and render the first `--stdio` snapshots without adding new simulation rules.

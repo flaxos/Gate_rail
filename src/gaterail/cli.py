@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 
+from gaterail.bridge import run_stdio_bridge
 from gaterail.persistence import load_simulation, save_simulation
 from gaterail.reporting import (
     format_monthly_report,
@@ -57,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--inspect",
         action="store_true",
         help="Print scenario setup details and exit without advancing time.",
+    )
+    parser.add_argument(
+        "--stdio",
+        action="store_true",
+        help="Run the JSON-over-stdio bridge for Stage 2 clients.",
     )
     parser.add_argument(
         "--ticks",
@@ -126,10 +132,15 @@ def _format_scenario_catalog() -> str:
     return "\n".join(lines)
 
 
-def run_cli(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int:
+def run_cli(
+    argv: Sequence[str] | None = None,
+    output: TextIO | None = None,
+    input_stream: TextIO | None = None,
+) -> int:
     """Execute CLI workflow."""
 
     stream = sys.stdout if output is None else output
+    stdin = sys.stdin if input_stream is None else input_stream
     parser = build_parser()
     args = parser.parse_args(argv)
     report_sections = _parse_report_sections(args.report, parser)
@@ -149,6 +160,9 @@ def run_cli(argv: Sequence[str] | None = None, output: TextIO | None = None) -> 
             simulation = TickSimulation.from_scenario(args.scenario)
         except ValueError as exc:
             parser.error(str(exc))
+
+    if args.stdio:
+        return run_stdio_bridge(simulation, input_stream=stdin, output_stream=stream)
 
     if args.inspect:
         stream.write(format_scenario_inspection(simulation.state, sections=report_sections))

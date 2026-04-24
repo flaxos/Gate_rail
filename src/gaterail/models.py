@@ -538,6 +538,13 @@ class GameState:
             raise ValueError(f"contract {contract.id} has unsupported kind {contract.kind}")
         self.contracts[contract.id] = contract
 
+    def apply_command(self, command: object) -> dict[str, object]:
+        """Apply a player command to this state."""
+
+        from gaterail.commands import apply_player_command
+
+        return apply_player_command(self, command)
+
     def links_from(self, node_id: str, mode: LinkMode | None = None) -> list[NetworkLink]:
         """Return active links traversable from ``node_id``."""
 

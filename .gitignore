@@ -5,3 +5,5 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+godot/.godot/
+godot/imported/

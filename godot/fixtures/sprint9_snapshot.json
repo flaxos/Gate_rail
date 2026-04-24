@@ -1,0 +1,293 @@
+{
+  "snapshot_version": 1,
+  "tick": 0,
+  "finance": {
+    "cash": 10000.0,
+    "revenue": 0.0,
+    "costs": 0.0,
+    "net": 0.0,
+    "revenue_total": 0.0,
+    "costs_total": 0.0,
+    "net_total": 0.0
+  },
+  "reputation": 0,
+  "worlds": [
+    {
+      "id": "core",
+      "name": "Vesta Core",
+      "tier": 4,
+      "tier_name": "core_world",
+      "population": 8500000,
+      "stability": 0.96,
+      "specialization": "manufacturing",
+      "power": {
+        "available": 600,
+        "used": 220,
+        "gate_used": 0,
+        "margin": 380
+      },
+      "progression": {
+        "progress": 0,
+        "support_streak": 0,
+        "shortage_streak": 0,
+        "trend": "stalled"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "frontier",
+      "name": "Brink Frontier",
+      "tier": 0,
+      "tier_name": "outpost",
+      "population": 12000,
+      "stability": 0.62,
+      "specialization": "mining",
+      "power": {
+        "available": 160,
+        "used": 60,
+        "gate_used": 0,
+        "margin": 100
+      },
+      "progression": {
+        "progress": 0,
+        "support_streak": 0,
+        "shortage_streak": 0,
+        "trend": "stalled"
+      },
+      "position": {
+        "x": 360,
+        "y": 0
+      }
+    },
+    {
+      "id": "outer",
+      "name": "Ashfall Spur",
+      "tier": 0,
+      "tier_name": "outpost",
+      "population": 1800,
+      "stability": 0.52,
+      "specialization": "survey_outpost",
+      "power": {
+        "available": 35,
+        "used": 25,
+        "gate_used": 0,
+        "margin": 10
+      },
+      "progression": {
+        "progress": 0,
+        "support_streak": 0,
+        "shortage_streak": 0,
+        "trend": "stalled"
+      },
+      "position": {
+        "x": 720,
+        "y": 0
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "core_yard",
+      "name": "Core Classification Yard",
+      "world_id": "core",
+      "kind": "depot",
+      "inventory": {
+        "food": 80,
+        "machinery": 40,
+        "construction_materials": 30
+      },
+      "demand": {},
+      "production": {
+        "food": 5,
+        "machinery": 1
+      },
+      "storage": {
+        "used": 150,
+        "capacity": 500
+      }
+    },
+    {
+      "id": "core_gate",
+      "name": "Core Gate Hub",
+      "world_id": "core",
+      "kind": "gate_hub",
+      "inventory": {},
+      "demand": {},
+      "production": {},
+      "storage": {
+        "used": 0,
+        "capacity": 300
+      }
+    },
+    {
+      "id": "frontier_gate",
+      "name": "Frontier Gate Hub",
+      "world_id": "frontier",
+      "kind": "gate_hub",
+      "inventory": {},
+      "demand": {},
+      "production": {},
+      "storage": {
+        "used": 0,
+        "capacity": 240
+      }
+    },
+    {
+      "id": "frontier_settlement",
+      "name": "Brink Landing",
+      "world_id": "frontier",
+      "kind": "settlement",
+      "inventory": {
+        "food": 6,
+        "construction_materials": 3,
+        "medical_supplies": 8
+      },
+      "demand": {
+        "food": 2,
+        "construction_materials": 1
+      },
+      "production": {},
+      "storage": {
+        "used": 17,
+        "capacity": 160
+      }
+    },
+    {
+      "id": "outer_outpost",
+      "name": "Ashfall Survey Camp",
+      "world_id": "outer",
+      "kind": "settlement",
+      "inventory": {},
+      "demand": {
+        "food": 1,
+        "medical_supplies": 1
+      },
+      "production": {},
+      "storage": {
+        "used": 0,
+        "capacity": 80
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "gate_core_frontier",
+      "origin": "core_gate",
+      "destination": "frontier_gate",
+      "mode": "gate",
+      "travel_ticks": 1,
+      "capacity": 2,
+      "base_capacity": 2,
+      "active": true,
+      "bidirectional": true,
+      "power_required": 80,
+      "powered": true,
+      "slots_used": 0,
+      "disrupted": false,
+      "disruption_reasons": []
+    },
+    {
+      "id": "gate_frontier_outer",
+      "origin": "frontier_gate",
+      "destination": "outer_gate",
+      "mode": "gate",
+      "travel_ticks": 1,
+      "capacity": 2,
+      "base_capacity": 2,
+      "active": true,
+      "bidirectional": true,
+      "power_required": 90,
+      "powered": true,
+      "slots_used": 0,
+      "disrupted": false,
+      "disruption_reasons": []
+    },
+    {
+      "id": "rail_core_yard_gate",
+      "origin": "core_yard",
+      "destination": "core_gate",
+      "mode": "rail",
+      "travel_ticks": 3,
+      "capacity": 2,
+      "base_capacity": 2,
+      "active": true,
+      "bidirectional": true,
+      "power_required": 0,
+      "powered": null,
+      "slots_used": 0,
+      "disrupted": false,
+      "disruption_reasons": []
+    }
+  ],
+  "trains": [
+    {
+      "id": "atlas",
+      "name": "Atlas",
+      "node_id": "core_yard",
+      "status": "idle",
+      "destination": null,
+      "capacity": 20,
+      "cargo": null,
+      "cargo_units": 0,
+      "remaining_ticks": 0,
+      "route_node_ids": [],
+      "route_link_ids": [],
+      "order_id": null,
+      "blocked_reason": null
+    },
+    {
+      "id": "mercy",
+      "name": "Mercy",
+      "node_id": "frontier_settlement",
+      "status": "idle",
+      "destination": null,
+      "capacity": 8,
+      "cargo": null,
+      "cargo_units": 0,
+      "remaining_ticks": 0,
+      "route_node_ids": [],
+      "route_link_ids": [],
+      "order_id": null,
+      "blocked_reason": null
+    }
+  ],
+  "schedules": [
+    {
+      "id": "core_food_service",
+      "train_id": "atlas",
+      "origin": "core_yard",
+      "destination": "frontier_settlement",
+      "cargo": "food",
+      "units_per_departure": 16,
+      "interval_ticks": 8,
+      "next_departure_tick": 1,
+      "active": true,
+      "trips_dispatched": 0,
+      "trips_completed": 0,
+      "delivered_units": 0
+    }
+  ],
+  "orders": [],
+  "contracts": [
+    {
+      "id": "brink_food_relief",
+      "kind": "cargo_delivery",
+      "title": "Brink Food Relief",
+      "client": "Brink Frontier",
+      "cargo": "food",
+      "destination": "frontier_settlement",
+      "progress": 0,
+      "target": 30,
+      "due_tick": 30,
+      "status": "active",
+      "reward_cash": 900.0,
+      "penalty_cash": 400.0,
+      "reward_reputation": 5,
+      "penalty_reputation": 6,
+      "resolved_tick": null
+    }
+  ]
+}

@@ -6,9 +6,11 @@ Repository-level guidance for GateRail agents.
 
 All changes in this repository must follow these constraints unless a higher-priority instruction explicitly overrides them.
 
-1. **CLI-only product surface**
-   - Implement and expose features through command-line workflows.
-   - Do not add GUI, browser, game-engine, or graphics-rendering interfaces.
+1. **Backend product surface stays CLI/stdio-first**
+   - Implement and expose Python simulation features through command-line or JSON-over-stdio workflows.
+   - Do not add browser interfaces.
+   - Godot client work is allowed only under `godot/` and must communicate with the Python backend through the documented stdio bridge unless explicitly approved otherwise.
+   - Do not duplicate simulation rules in Godot; the Python fixed-tick backend remains authoritative.
 
 2. **No external runtime dependencies without approval**
    - Prefer Python standard library and existing project dependencies.
@@ -20,6 +22,8 @@ All changes in this repository must follow these constraints unless a higher-pri
 
 4. **Text-first outputs**
    - Keep simulation/report output readable in plain terminal text.
+   - Keep bridge contracts JSON-readable and versioned.
+   - Godot scene, script, and project files must remain text-serializable.
    - Avoid introducing formats that require proprietary tools to interpret.
 
 ## Test-update policy
