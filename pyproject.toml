@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 authors = [{ name = "GateRail Contributors" }]
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 gaterail = "gaterail.main:main"
 

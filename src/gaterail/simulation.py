@@ -5,194 +5,157 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from gaterail.cargo import CargoType
-from gaterail.colony import Colony
-from gaterail.finance import CorporateFinance
-from gaterail.gate import WormholeGate
-from gaterail.schedule import DailySchedule, ScheduleResult
-from gaterail.train import Train
-from gaterail.world import World
+from gaterail.contracts import advance_contracts
+from gaterail.economy import apply_node_demand, apply_node_production, apply_specialized_production
+from gaterail.freight import advance_freight
+from gaterail.gate import evaluate_gate_power
+from gaterail.models import GameState, GatePowerStatus, LinkMode
+from gaterail.operations import build_monthly_report
+from gaterail.progression import apply_world_progression
+from gaterail.scenarios import DEFAULT_SCENARIO, load_scenario
+from gaterail.traffic import build_traffic_report, reset_traffic_usage
+
+
+def _plain_cargo_map(mapping: dict[CargoType, int]) -> dict[str, int]:
+    """Convert cargo-keyed maps to stable report dictionaries."""
+
+    return {cargo_type.value: units for cargo_type, units in sorted(mapping.items(), key=lambda item: item[0].value)}
+
+
+def _plain_node_cargo_map(mapping: dict[str, dict[CargoType, int]]) -> dict[str, dict[str, int]]:
+    """Convert node cargo rollups to stable report dictionaries."""
+
+    return {
+        node_id: _plain_cargo_map(cargo_map)
+        for node_id, cargo_map in sorted(mapping.items())
+    }
+
+
+def _plain_gate_status_map(mapping: dict[str, GatePowerStatus]) -> dict[str, dict[str, object]]:
+    """Convert gate power statuses to stable report dictionaries."""
+
+    return {
+        link_id: {
+            "source_world": status.source_world_id,
+            "source_world_name": status.source_world_name,
+            "power_required": status.power_required,
+            "power_available": status.power_available,
+            "power_shortfall": status.power_shortfall,
+            "powered": status.powered,
+            "active": status.active,
+            "slot_capacity": status.slot_capacity,
+            "slots_used": status.slots_used,
+            "slots_remaining": status.slots_remaining,
+        }
+        for link_id, status in sorted(mapping.items())
+    }
 
 
 @dataclass(slots=True)
-class Simulation:
-    """Coordinates all game systems in strict daily sequence."""
+class TickSimulation:
+    """Fixed-tick simulation foundation for the multi-world prototype."""
 
-    world: World = field(default_factory=World.default)
-    gate: WormholeGate = field(default_factory=WormholeGate)
-    trains: list[Train] = field(default_factory=lambda: [Train(name="Atlas"), Train(name="Nova", capacity=16)])
-    colony: Colony = field(default_factory=Colony)
-    finance: CorporateFinance = field(default_factory=CorporateFinance)
-    day: int = 0
-    max_days: int = 365
+    state: GameState
     status: str = "running"
     reports: list[dict[str, object]] = field(default_factory=list)
+    monthly_reports: list[dict[str, object]] = field(default_factory=list)
 
-    def build_default_schedule(self) -> DailySchedule:
-        """Build default schedule using required cargo priorities."""
+    @classmethod
+    def from_scenario(cls, name: str = DEFAULT_SCENARIO) -> TickSimulation:
+        """Create a tick simulation from a built-in scenario."""
 
-        return DailySchedule.generate_default(self.world)
+        return cls(state=load_scenario(name))
 
-    def run_day(self, schedule: DailySchedule | None = None) -> dict[str, object]:
-        """Execute one simulation day in strict order and return a report."""
+    def step_tick(self) -> dict[str, object]:
+        """Advance the simulation by one deterministic tick."""
 
         if self.status != "running":
-            return {"day": self.day, "status": self.status, "message": "simulation not running"}
+            return {"tick": self.state.tick, "status": self.status, "message": "simulation not running"}
 
-        self.day += 1
-        self.world.reset_day()
         phase_order: list[str] = []
-        delivered_to_frontier: dict[CargoType, int] = {}
+        self.state.finance.reset_tick()
+        self.state.tick += 1
+        phase_order.append("advance_time")
 
-        # 1) reset gate slots
-        self.gate.reset_daily_slots()
-        for train in self.trains:
-            train.reset_day()
-        self.finance.reset_daily_totals()
-        phase_order.append("reset_gate_slots")
+        produced = apply_node_production(self.state)
+        phase_order.append("node_production")
 
-        # 2) world production
-        produced = self.world.produce()
-        phase_order.append("world_production")
+        demand_result = apply_node_demand(self.state)
+        phase_order.append("node_demand")
 
-        # 3) build schedule
-        working_schedule = schedule if schedule is not None else self.build_default_schedule()
-        phase_order.append("build_schedule")
+        economy_result = apply_specialized_production(self.state)
+        phase_order.append("specialized_production")
 
-        # 4) process by priority
-        ordered = working_schedule.ordered()
-        phase_order.append("process_by_priority")
+        gate_result = evaluate_gate_power(self.state)
+        gate_power_cost = sum(status.power_required for status in gate_result.values() if status.powered) * 0.5
+        self.state.finance.record_cost(gate_power_cost)
+        phase_order.append("gate_power")
 
-        # 5) move cargo
-        result = ScheduleResult()
-        jumps = 0
-        for movement in ordered:
-            if movement.units <= 0:
-                continue
-            if not self.gate.allocate_slots(1):
-                result.skipped.append(
-                    f"No gate slot available for {movement.cargo_type} {movement.origin}->{movement.destination}"
-                )
-                continue
+        reset_traffic_usage(self.state)
+        phase_order.append("traffic_reset")
 
-            planned_units = self.world.available(movement.origin, movement.cargo_type)
-            planned_units = min(planned_units, movement.units)
-            if planned_units <= 0:
-                result.skipped.append(
-                    f"No cargo available for {movement.cargo_type} at {movement.origin}"
-                )
-                continue
+        freight_result = advance_freight(self.state)
+        phase_order.append("freight_movement")
 
-            remaining = planned_units
-            for train in self.trains:
-                if remaining <= 0:
-                    break
-                trip = train.move(
-                    movement.cargo_type,
-                    movement.origin,
-                    movement.destination,
-                    requested_units=remaining,
-                )
-                if trip is None:
-                    continue
-                loaded = self.world.remove_cargo(movement.origin, movement.cargo_type, trip.units)
-                self.world.add_cargo(movement.destination, movement.cargo_type, loaded)
-                remaining -= loaded
-                result.executed.append(
-                    {
-                        "train": trip.train_name,
-                        "cargo": trip.cargo_type,
-                        "origin": trip.origin,
-                        "destination": trip.destination,
-                        "units": loaded,
-                        "revenue": trip.revenue,
-                        "cost": trip.cost,
-                    }
-                )
-                result.moved_units[movement.cargo_type] = result.moved_units.get(movement.cargo_type, 0) + loaded
-                self.finance.record_revenue(trip.revenue)
-                self.finance.record_cost(trip.cost)
-                if movement.destination == "Frontier":
-                    delivered_to_frontier[movement.cargo_type] = (
-                        delivered_to_frontier.get(movement.cargo_type, 0) + loaded
-                    )
-            jumps += 1
-        phase_order.append("move_cargo")
+        traffic_result = build_traffic_report(self.state)
+        phase_order.append("traffic_report")
 
-        # 6) train revenue/costs
-        train_financials = {
-            "revenue": self.finance.revenue_today,
-            "costs": self.finance.costs_today,
-            "net": self.finance.revenue_today - self.finance.costs_today,
-        }
-        phase_order.append("train_revenue_costs")
+        progression_result = apply_world_progression(self.state)
+        phase_order.append("world_progression")
 
-        # 7) gate costs
-        gate_cost = self.gate.daily_operating_cost()
-        self.finance.record_cost(gate_cost)
-        phase_order.append("gate_costs")
+        contracts_result = advance_contracts(self.state, freight_result, progression_result)
+        phase_order.append("contract_resolution")
 
-        # 8) wear
-        self.gate.apply_wear(jumps)
-        phase_order.append("wear")
+        rail_links = self.state.links_by_mode(LinkMode.RAIL)
+        gate_links = self.state.links_by_mode(LinkMode.GATE)
+        phase_order.append("network_snapshot")
 
-        # 9) colony updates
-        colony_update = self.colony.update(delivered_to_frontier)
-        phase_order.append("colony_updates")
-
-        # 10) debt payment
-        interest = self.finance.accrue_daily_interest()
-        interest_cost = interest
-        if interest_cost > 0:
-            self.finance.record_cost(interest_cost)
-        debt_payment = self.finance.pay_debt()
-        phase_order.append("debt_payment")
-
-        # 11) reporting data
-        finance_snapshot = self.finance.close_day()
-        report = {
-            "day": self.day,
+        report: dict[str, object] = {
+            "tick": self.state.tick,
+            "status": self.status,
             "phase_order": phase_order,
-            "produced": produced,
-            "schedule_result": result,
-            "train_financials": train_financials,
-            "gate_cost": gate_cost,
-            "colony": colony_update,
-            "interest": interest,
-            "debt_payment": debt_payment,
-            "finance": finance_snapshot,
-            "status": "running",
+            "produced": _plain_node_cargo_map(produced),
+            "consumed": _plain_node_cargo_map(demand_result.consumed),
+            "shortages": _plain_node_cargo_map(demand_result.shortages),
+            "economy": economy_result,
+            "gates": _plain_gate_status_map(gate_result),
+            "traffic": traffic_result,
+            "freight": freight_result,
+            "contracts": contracts_result,
+            "progression": progression_result,
+            "finance": self.state.finance.snapshot(),
+            "reputation": self.state.reputation,
+            "network": {
+                "worlds": len(self.state.worlds),
+                "nodes": len(self.state.nodes),
+                "rail_links": len(rail_links),
+                "gate_links": len(gate_links),
+                "powered_gate_links": sum(1 for status in gate_result.values() if status.powered),
+                "unpowered_gate_links": sum(1 for status in gate_result.values() if not status.powered),
+                "trains": len(self.state.trains),
+                "orders": len(self.state.orders),
+                "gate_power_required": sum(
+                    status.power_required for status in gate_result.values() if status.powered
+                ),
+            },
         }
         self.reports.append(report)
-        phase_order.append("reporting_data")
-
-        # 12) failure/success checks
-        if self.finance.insolvent:
-            self.status = "failed"
-            report["status"] = self.status
-            report["reason"] = "insolvent"
-        elif not self.gate.operational:
-            self.status = "failed"
-            report["status"] = self.status
-            report["reason"] = "gate_failed"
-        elif self.colony.failed:
-            self.status = "failed"
-            report["status"] = self.status
-            report["reason"] = "colony_failed"
-        elif self.day >= self.max_days and self.finance.cash > 0 and self.colony.population > 0:
-            self.status = "success"
-            report["status"] = self.status
-            report["reason"] = "survived_duration"
-        phase_order.append("failure_success_checks")
-
+        if self.state.tick % self.state.month_length == 0:
+            self.monthly_reports.append(
+                build_monthly_report(
+                    self.state,
+                    self.reports[-self.state.month_length:],
+                    month_length=self.state.month_length,
+                )
+            )
         return report
 
-    def run(self, days: int | None = None) -> list[dict[str, object]]:
-        """Run the simulation for up to ``days`` (or until completion)."""
+    def run_ticks(self, ticks: int) -> list[dict[str, object]]:
+        """Run a bounded number of fixed ticks."""
 
-        target = self.max_days if days is None else min(self.max_days, max(0, days))
-        runs: list[dict[str, object]] = []
-        for _ in range(target):
+        reports: list[dict[str, object]] = []
+        for _ in range(max(0, ticks)):
             if self.status != "running":
                 break
-            runs.append(self.run_day())
-        return runs
+            reports.append(self.step_tick())
+        return reports
