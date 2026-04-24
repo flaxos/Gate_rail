@@ -1,0 +1,1 @@
+"""Colony module for GateRail."""
