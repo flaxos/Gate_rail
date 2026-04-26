@@ -169,6 +169,103 @@ class NodeRecipe:
     outputs: dict[CargoType, int] = field(default_factory=dict)
 
 
+class FacilityComponentKind(StrEnum):
+    """Internal facility component roles."""
+
+    PLATFORM = "platform"
+    LOADER = "loader"
+    UNLOADER = "unloader"
+    STORAGE_BAY = "storage_bay"
+    FACTORY_BLOCK = "factory_block"
+    POWER_MODULE = "power_module"
+    GATE_INTERFACE = "gate_interface"
+
+
+class PortDirection(StrEnum):
+    """Direction of cargo flow through a facility port."""
+
+    INPUT = "input"
+    OUTPUT = "output"
+
+
+@dataclass(frozen=True, slots=True)
+class FacilityPort:
+    """Typed input or output connector on a facility component."""
+
+    id: str
+    direction: PortDirection
+    cargo_type: CargoType | None = None
+    rate: int = 0
+    capacity: int = 0
+
+
+@dataclass(slots=True)
+class FacilityComponent:
+    """One component inside a facility (loader, bay, factory block, etc.)."""
+
+    id: str
+    kind: FacilityComponentKind
+    ports: dict[str, FacilityPort] = field(default_factory=dict)
+    capacity: int = 0
+    rate: int = 0
+    power_required: int = 0
+    inputs: dict[CargoType, int] = field(default_factory=dict)
+    outputs: dict[CargoType, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class InternalConnection:
+    """A wire between two ports inside one facility."""
+
+    id: str
+    source_component_id: str
+    source_port_id: str
+    destination_component_id: str
+    destination_port_id: str
+
+
+@dataclass(slots=True)
+class Facility:
+    """Internal layout owned by one NetworkNode."""
+
+    components: dict[str, FacilityComponent] = field(default_factory=dict)
+    connections: dict[str, InternalConnection] = field(default_factory=dict)
+
+    def _components_of(self, kind: FacilityComponentKind) -> list[FacilityComponent]:
+        """Return components of one kind."""
+
+        return [component for component in self.components.values() if component.kind == kind]
+
+    def storage_capacity_override(self) -> int | None:
+        """Return summed storage-bay capacity, or None if no bays exist."""
+
+        bays = self._components_of(FacilityComponentKind.STORAGE_BAY)
+        if not bays:
+            return None
+        return sum(max(0, component.capacity) for component in bays)
+
+    def loader_rate_override(self) -> int | None:
+        """Return summed loader rate, or None if no loaders exist."""
+
+        loaders = self._components_of(FacilityComponentKind.LOADER)
+        if not loaders:
+            return None
+        return sum(max(0, component.rate) for component in loaders)
+
+    def unloader_rate_override(self) -> int | None:
+        """Return summed unloader rate, or None if no unloaders exist."""
+
+        unloaders = self._components_of(FacilityComponentKind.UNLOADER)
+        if not unloaders:
+            return None
+        return sum(max(0, component.rate) for component in unloaders)
+
+    def power_required(self) -> int:
+        """Return total power required by all components."""
+
+        return sum(max(0, component.power_required) for component in self.components.values())
+
+
 @dataclass(slots=True)
 class NetworkNode:
     """A logistics point on a world."""
@@ -185,6 +282,45 @@ class NetworkNode:
     layout_x: float | None = None
     layout_y: float | None = None
     recipe: NodeRecipe | None = None
+    facility: Facility | None = None
+
+    def effective_storage_capacity(self) -> int:
+        """Return active storage cap, derived from facility bays when present."""
+
+        if self.facility is not None:
+            override = self.facility.storage_capacity_override()
+            if override is not None:
+                return override
+        return self.storage_capacity
+
+    def effective_outbound_rate(self) -> int:
+        """Return active outbound transfer cap, derived from facility loaders when present."""
+
+        if self.facility is not None:
+            override = self.facility.loader_rate_override()
+            if override is not None:
+                return override
+        return self.transfer_limit_per_tick
+
+    def effective_inbound_rate(self) -> int:
+        """Return active inbound transfer cap, derived from facility unloaders when present."""
+
+        if self.facility is not None:
+            override = self.facility.unloader_rate_override()
+            if override is not None:
+                return override
+        return self.transfer_limit_per_tick
+
+    def effective_combined_rate(self) -> int:
+        """Return the combined per-tick transfer cap used for saturation rollups."""
+
+        if self.facility is None:
+            return self.transfer_limit_per_tick
+        loader = self.facility.loader_rate_override()
+        unloader = self.facility.unloader_rate_override()
+        if loader is None and unloader is None:
+            return self.transfer_limit_per_tick
+        return max(loader or 0, unloader or 0)
 
     def total_inventory(self) -> int:
         """Return all stored cargo units."""
@@ -201,7 +337,7 @@ class NetworkNode:
 
         if units <= 0:
             return 0
-        available_space = max(0, self.storage_capacity - self.total_inventory())
+        available_space = max(0, self.effective_storage_capacity() - self.total_inventory())
         accepted = min(units, available_space)
         if accepted > 0:
             self.inventory[cargo_type] = self.stock(cargo_type) + accepted
@@ -422,6 +558,7 @@ class GameState:
     shortages: dict[str, dict[CargoType, int]] = field(default_factory=dict)
     buffer_distribution: dict[str, dict[str, dict[CargoType, int]]] = field(default_factory=dict)
     recipe_blocked: dict[str, dict[CargoType, int]] = field(default_factory=dict)
+    facility_blocked: dict[str, list[str]] = field(default_factory=dict)
     transfer_used_this_tick: dict[str, int] = field(default_factory=dict)
     transfer_saturation_streak: dict[str, int] = field(default_factory=dict)
     gate_statuses: dict[str, GatePowerStatus] = field(default_factory=dict)

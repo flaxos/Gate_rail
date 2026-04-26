@@ -583,6 +583,22 @@ For collaborative development:
 4. Run tests and inspect terminal output.
 5. Decide whether the result is fun, clear, and extensible before expanding scope.
 
+Slice 16A completed state:
+- `Facility`, `FacilityComponent`, `FacilityPort`, `InternalConnection`, `FacilityComponentKind`, and `PortDirection` are first-class backend models attached to `NetworkNode` via the new `facility` field.
+- `NetworkNode` exposes `effective_storage_capacity()`, `effective_outbound_rate()`, `effective_inbound_rate()`, and `effective_combined_rate()` that derive caps from facility components when present and fall back to the raw `storage_capacity` / `transfer_limit_per_tick` fields otherwise; `add_inventory` now respects the effective storage cap.
+- A new `apply_facility_components` phase runs each tick between `node_recipes` and `node_demand`, executing FACTORY_BLOCK input→output flow with all-or-nothing input consumption. Blocked components are recorded on `state.facility_blocked` and surfaced in the per-tick report under `facilities`.
+- `economy.apply_buffer_distribution` and `economy.update_transfer_saturation_streaks` now consult the effective rates, and `freight._dispatch_trip` / `_attempt_unload` cap train load and unload by the origin's outbound and the destination's inbound rates respectively.
+- Snapshots expose `facility`, `facility_blocked`, `effective_inbound_rate`, `effective_outbound_rate`, `transfer_limit` (effective), `base_transfer_limit`, and `storage.{used, capacity, base_capacity}` so the Stage-2 client can render facility-derived caps without recomputing them.
+- `state_to_dict` / `state_from_dict` now persist `recipe` and `facility` for every node, with helpers for ports, components, and internal connections.
+- New `BuildFacilityComponent` and `PreviewBuildFacilityComponent` commands install or preview a component on a node, validate kind-specific invariants (storage_bay capacity, loader/unloader rate, factory_block inputs/outputs), reject duplicate component ids, charge `facility_component_build_cost(kind)`, and round-trip through `command_from_dict` (including ports + connections).
+- 25 new tests in `tests/test_sprint16a_facility_foundation.py` cover loader-rate caps on freight load, unloader-rate caps on freight unload, storage-bay capacity overrides, fall-through to raw fields when no relevant components exist, factory-block consume/produce/blocked behavior, output clamping by effective storage cap, full simulation phase ordering, snapshot exposure, persistence round-trip, all build/preview validation rules, command JSON parsing, and the Sprint 16 exit-criterion scenario (a slow loader caps throughput; swapping it for a fast one removes the bottleneck without touching any rail link).
+- Full pytest suite passes 179 tests; stdio bridge round-trip emits the new facility/effective-rate fields without regressions.
+
 ## Current next step
 
-Slice 15C landed and Sprint 15 is complete against the current plan. Next recommended sprint is 16A: facility simulation foundation, starting with backend-owned `Facility`, `FacilityComponent`, `FacilityPort`, and save/snapshot scaffolding before any 2D or 3D facility UI.
+Slice 16A landed (backend foundation only — no UI). Next recommended slice is 16B: extend the build/preview surface to the destructive and unwiring operations the player will need before the Sprint 17 UI lands. Suggested scope:
+- `DemolishFacilityComponent` and `PreviewDemolishFacilityComponent` (reject if removing the only loader/unloader would drop a node's effective rate below an active schedule's `units_per_departure`, or if removal would orphan an `InternalConnection`).
+- `BuildInternalConnection` / `RemoveInternalConnection` (and previews) so the player can rewire ports without rebuilding the whole component.
+- Tests covering: demolishing a loader strands an idle train order on the next tick, demolishing a storage bay re-clamps `add_inventory` to remaining bay capacity, and removing a connection drops a factory block to "blocked" if it depended on internal feed rather than node inventory.
+
+After 16B the next step is Sprint 17 (the 2D facility detail UI in Godot, drilling into one node to render its facility components and internal flow).

@@ -11,6 +11,7 @@ from gaterail.construction import (
     DEFAULT_GATE_POWER_REQUIRED,
     DEFAULT_GATE_TRAVEL_TICKS,
     DEFAULT_RAIL_CAPACITY_PER_TICK,
+    facility_component_build_cost,
     link_build_cost,
     link_build_time,
     node_build_cost,
@@ -20,7 +21,21 @@ from gaterail.construction import (
     train_purchase_cost,
     travel_ticks_from_layout_distance,
 )
-from gaterail.models import FreightOrder, FreightSchedule, FreightTrain, LinkMode, NetworkLink, NetworkNode, NodeKind
+from gaterail.models import (
+    Facility,
+    FacilityComponent,
+    FacilityComponentKind,
+    FacilityPort,
+    FreightOrder,
+    FreightSchedule,
+    FreightTrain,
+    InternalConnection,
+    LinkMode,
+    NetworkLink,
+    NetworkNode,
+    NodeKind,
+    PortDirection,
+)
 from gaterail.traffic import effective_link_capacity
 from gaterail.transport import shortest_route
 
@@ -194,6 +209,40 @@ class UpgradeNode:
     type: Literal["UpgradeNode"] = "UpgradeNode"
 
 
+@dataclass(frozen=True, slots=True)
+class BuildFacilityComponent:
+    """Install a facility component on an existing node."""
+
+    component_id: str
+    node_id: str
+    kind: FacilityComponentKind
+    capacity: int = 0
+    rate: int = 0
+    power_required: int = 0
+    inputs: dict[CargoType, int] | None = None
+    outputs: dict[CargoType, int] | None = None
+    ports: tuple[FacilityPort, ...] = ()
+    connections: tuple[InternalConnection, ...] = ()
+    type: Literal["BuildFacilityComponent"] = "BuildFacilityComponent"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewBuildFacilityComponent:
+    """Preview a facility component install without mutating state."""
+
+    component_id: str
+    node_id: str
+    kind: FacilityComponentKind
+    capacity: int = 0
+    rate: int = 0
+    power_required: int = 0
+    inputs: dict[CargoType, int] | None = None
+    outputs: dict[CargoType, int] | None = None
+    ports: tuple[FacilityPort, ...] = ()
+    connections: tuple[InternalConnection, ...] = ()
+    type: Literal["PreviewBuildFacilityComponent"] = "PreviewBuildFacilityComponent"
+
+
 PlayerCommand: TypeAlias = (
     SetScheduleEnabled
     | DispatchOrder
@@ -208,6 +257,8 @@ PlayerCommand: TypeAlias = (
     | CreateSchedule
     | PreviewCreateSchedule
     | UpgradeNode
+    | BuildFacilityComponent
+    | PreviewBuildFacilityComponent
 )
 
 
@@ -330,7 +381,64 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             storage_capacity_increase=int(data["storage_capacity_increase"]),
             transfer_limit_increase=int(data["transfer_limit_increase"]),
         )
+    if command_type in {"BuildFacilityComponent", "PreviewBuildFacilityComponent"}:
+        ports_payload = data.get("ports", []) or []
+        connections_payload = data.get("connections", []) or []
+        ports = tuple(_facility_port_from_dict(item) for item in ports_payload)
+        connections = tuple(_internal_connection_from_dict(item) for item in connections_payload)
+        inputs_data = data.get("inputs")
+        outputs_data = data.get("outputs")
+        component_command = (
+            BuildFacilityComponent
+            if command_type == "BuildFacilityComponent"
+            else PreviewBuildFacilityComponent
+        )
+        return component_command(
+            component_id=str(data["component_id"]),
+            node_id=str(data["node_id"]),
+            kind=FacilityComponentKind(str(data["kind"])),
+            capacity=int(data.get("capacity", 0)),
+            rate=int(data.get("rate", 0)),
+            power_required=int(data.get("power_required", 0)),
+            inputs=None if inputs_data is None else _facility_cargo_map_from_dict(inputs_data),
+            outputs=None if outputs_data is None else _facility_cargo_map_from_dict(outputs_data),
+            ports=ports,
+            connections=connections,
+        )
     raise ValueError(f"unknown command type: {command_type}")
+
+
+def _facility_cargo_map_from_dict(data: object) -> dict[CargoType, int]:
+    """Parse cargo→units maps in facility command payloads."""
+
+    if not isinstance(data, dict):
+        return {}
+    return {CargoType(str(cargo)): int(units) for cargo, units in data.items()}
+
+
+def _facility_port_from_dict(data: dict[str, Any]) -> FacilityPort:
+    """Parse a FacilityPort spec from a JSON command payload."""
+
+    cargo_type = data.get("cargo_type")
+    return FacilityPort(
+        id=str(data["id"]),
+        direction=PortDirection(str(data["direction"])),
+        cargo_type=None if cargo_type is None else CargoType(str(cargo_type)),
+        rate=int(data.get("rate", 0)),
+        capacity=int(data.get("capacity", 0)),
+    )
+
+
+def _internal_connection_from_dict(data: dict[str, Any]) -> InternalConnection:
+    """Parse an InternalConnection spec from a JSON command payload."""
+
+    return InternalConnection(
+        id=str(data["id"]),
+        source_component_id=str(data["source_component_id"]),
+        source_port_id=str(data["source_port_id"]),
+        destination_component_id=str(data["destination_component_id"]),
+        destination_port_id=str(data["destination_port_id"]),
+    )
 
 
 def command_result(
@@ -819,6 +927,88 @@ def _insufficient_cash_message(state: object, label: str, cost: float) -> str:
     return f"insufficient cash for {label}: need {cost:.0f}, have {state.finance.cash:.0f}"
 
 
+def _validate_facility_component(
+    state: object,
+    command: BuildFacilityComponent | PreviewBuildFacilityComponent,
+) -> tuple[float, dict[CargoType, int], dict[CargoType, int], tuple[FacilityPort, ...], tuple[InternalConnection, ...]]:
+    """Validate a facility component install and return its normalized fields."""
+
+    if command.node_id not in state.nodes:
+        raise ValueError(f"unknown node: {command.node_id}")
+    if not command.component_id.strip():
+        raise ValueError("component id cannot be empty")
+    node = state.nodes[command.node_id]
+    facility = node.facility
+    if facility is not None and command.component_id in facility.components:
+        raise ValueError(f"duplicate component id: {command.component_id}")
+    if command.capacity < 0:
+        raise ValueError("component capacity cannot be negative")
+    if command.rate < 0:
+        raise ValueError("component rate cannot be negative")
+    if command.power_required < 0:
+        raise ValueError("component power_required cannot be negative")
+    inputs = dict(command.inputs or {})
+    outputs = dict(command.outputs or {})
+    if command.kind == FacilityComponentKind.STORAGE_BAY and command.capacity <= 0:
+        raise ValueError("storage_bay capacity must be positive")
+    if command.kind == FacilityComponentKind.LOADER and command.rate <= 0:
+        raise ValueError("loader rate must be positive")
+    if command.kind == FacilityComponentKind.UNLOADER and command.rate <= 0:
+        raise ValueError("unloader rate must be positive")
+    if command.kind == FacilityComponentKind.FACTORY_BLOCK and not (inputs or outputs):
+        raise ValueError("factory_block requires at least one input or output")
+    seen_port_ids: set[str] = set()
+    for port in command.ports:
+        if port.id in seen_port_ids:
+            raise ValueError(f"duplicate port id on component: {port.id}")
+        seen_port_ids.add(port.id)
+    cost = facility_component_build_cost(command.kind)
+    return cost, inputs, outputs, command.ports, command.connections
+
+
+def _facility_component_payload(
+    command: BuildFacilityComponent | PreviewBuildFacilityComponent,
+    *,
+    inputs: dict[CargoType, int],
+    outputs: dict[CargoType, int],
+    ports: tuple[FacilityPort, ...],
+    connections: tuple[InternalConnection, ...],
+) -> dict[str, object]:
+    """Return a normalized BuildFacilityComponent command payload."""
+
+    return {
+        "type": "BuildFacilityComponent",
+        "component_id": command.component_id,
+        "node_id": command.node_id,
+        "kind": command.kind.value,
+        "capacity": int(command.capacity),
+        "rate": int(command.rate),
+        "power_required": int(command.power_required),
+        "inputs": {cargo.value: int(units) for cargo, units in sorted(inputs.items(), key=lambda item: item[0].value)},
+        "outputs": {cargo.value: int(units) for cargo, units in sorted(outputs.items(), key=lambda item: item[0].value)},
+        "ports": [
+            {
+                "id": port.id,
+                "direction": port.direction.value,
+                "cargo_type": None if port.cargo_type is None else port.cargo_type.value,
+                "rate": int(port.rate),
+                "capacity": int(port.capacity),
+            }
+            for port in ports
+        ],
+        "connections": [
+            {
+                "id": connection.id,
+                "source_component_id": connection.source_component_id,
+                "source_port_id": connection.source_port_id,
+                "destination_component_id": connection.destination_component_id,
+                "destination_port_id": connection.destination_port_id,
+            }
+            for connection in connections
+        ],
+    }
+
+
 def apply_player_command(state: object, command: PlayerCommand) -> dict[str, object]:
     """Apply one player command to a GameState-like object."""
 
@@ -1149,6 +1339,75 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             route_node_ids=list(route.node_ids),
             route_link_ids=list(route.link_ids),
             **route_context,
+        )
+
+    if isinstance(command, PreviewBuildFacilityComponent):
+        try:
+            cost, inputs, outputs, ports, connections = _validate_facility_component(state, command)
+        except ValueError as exc:
+            return _preview_error(command.type, command.component_id, exc)
+        normalized_command = _facility_component_payload(
+            command,
+            inputs=inputs,
+            outputs=outputs,
+            ports=ports,
+            connections=connections,
+        )
+        if not _cash_available(state, cost):
+            reason = _insufficient_cash_message(state, f"{command.kind.value} component", cost)
+            return command_result(
+                command.type,
+                ok=False,
+                target_id=command.component_id,
+                message=reason,
+                reason=reason,
+                cost=cost,
+                node_id=command.node_id,
+                kind=command.kind.value,
+                normalized_command=normalized_command,
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.component_id,
+            message=f"valid {command.kind.value} component preview for {cost:.0f}",
+            cost=cost,
+            node_id=command.node_id,
+            kind=command.kind.value,
+            normalized_command=normalized_command,
+        )
+
+    if isinstance(command, BuildFacilityComponent):
+        cost, inputs, outputs, ports, connections = _validate_facility_component(state, command)
+        if not _cash_available(state, cost):
+            raise ValueError(_insufficient_cash_message(state, f"{command.kind.value} component", cost))
+        node = state.nodes[command.node_id]
+        if node.facility is None:
+            node.facility = Facility()
+        component = FacilityComponent(
+            id=command.component_id,
+            kind=command.kind,
+            ports={port.id: port for port in ports},
+            capacity=int(command.capacity),
+            rate=int(command.rate),
+            power_required=int(command.power_required),
+            inputs=dict(inputs),
+            outputs=dict(outputs),
+        )
+        node.facility.components[component.id] = component
+        for connection in connections:
+            if connection.id in node.facility.connections:
+                raise ValueError(f"duplicate connection id: {connection.id}")
+            node.facility.connections[connection.id] = connection
+        state.finance.record_cost(cost)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.component_id,
+            message=f"installed {command.kind.value} component {command.component_id} for {cost:.0f}",
+            cost=cost,
+            node_id=command.node_id,
+            kind=command.kind.value,
         )
 
     if isinstance(command, UpgradeNode):

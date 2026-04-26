@@ -30,7 +30,7 @@ def update_transfer_saturation_streaks(state: GameState) -> None:
     streaks = state.transfer_saturation_streak
     used = state.transfer_used_this_tick
     for node_id, node in state.nodes.items():
-        limit = max(0, node.transfer_limit_per_tick)
+        limit = max(0, node.effective_combined_rate())
         if limit <= 0:
             streaks.pop(node_id, None)
             continue
@@ -469,7 +469,7 @@ def apply_buffer_distribution(state: GameState) -> dict[str, dict[str, dict[Carg
             continue
         if node.transfer_limit_per_tick <= 0:
             continue
-        budget = node.transfer_limit_per_tick
+        budget = node.effective_outbound_rate()
         if budget <= 0 or node.total_inventory() <= 0:
             continue
         for neighbour in _buffer_neighbours(state, node):

@@ -14,6 +14,7 @@ from gaterail.economy import (
     apply_specialized_production,
     update_transfer_saturation_streaks,
 )
+from gaterail.facilities import apply_facility_components
 from gaterail.freight import advance_freight
 from gaterail.gate import evaluate_gate_power
 from gaterail.models import GameState, GatePowerStatus, LinkMode
@@ -108,6 +109,9 @@ class TickSimulation:
         recipes_result = apply_node_recipes(self.state)
         phase_order.append("node_recipes")
 
+        facilities_result = apply_facility_components(self.state)
+        phase_order.append("facility_components")
+
         demand_result = apply_node_demand(self.state)
         phase_order.append("node_demand")
 
@@ -153,6 +157,7 @@ class TickSimulation:
             "shortages": _plain_node_cargo_map(demand_result.shortages),
             "buffer_distribution": _plain_buffer_distribution(buffer_distribution),
             "recipes": recipes_result,
+            "facilities": facilities_result,
             "economy": economy_result,
             "gates": _plain_gate_status_map(gate_result),
             "traffic": traffic_result,

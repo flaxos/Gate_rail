@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from gaterail.economy import BUFFER_NODE_KINDS
+from gaterail.facilities import facility_summary
 from gaterail.gate import preview_gate_power
 from gaterail.models import Contract, ContractKind, GameState, LinkMode
 from gaterail.traffic import effective_link_capacity
@@ -101,11 +102,12 @@ def render_snapshot(state: GameState) -> dict[str, object]:
     for node in sorted(state.nodes.values(), key=lambda item: item.id):
         node_shortages = state.shortages.get(node.id, {})
         used = node.total_inventory()
-        capacity = max(1, node.storage_capacity)
+        effective_capacity = node.effective_storage_capacity()
+        capacity = max(1, effective_capacity)
         transfer_used = int(state.transfer_used_this_tick.get(node.id, 0))
-        transfer_limit = int(node.transfer_limit_per_tick)
+        effective_transfer = int(node.effective_combined_rate())
         transfer_pressure = (
-            round(transfer_used / transfer_limit, 3) if transfer_limit > 0 else 0.0
+            round(transfer_used / effective_transfer, 3) if effective_transfer > 0 else 0.0
         )
         saturation_streak = int(state.transfer_saturation_streak.get(node.id, 0))
         if node.recipe is None:
@@ -116,6 +118,11 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "outputs": _cargo_map(node.recipe.outputs),
             }
         recipe_blocked_payload = _cargo_map(state.recipe_blocked.get(node.id, {}))
+        if node.facility is None:
+            facility_payload: dict[str, object] | None = None
+        else:
+            facility_payload = facility_summary(node.facility)
+        facility_blocked_payload = list(state.facility_blocked.get(node.id, []))
         is_buffer = node.kind in BUFFER_NODE_KINDS
         if is_buffer:
             buffer_fill_pct: float | None = round(used / capacity, 3)
@@ -143,18 +150,24 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "production": _cargo_map(node.production),
                 "storage": {
                     "used": used,
-                    "capacity": node.storage_capacity,
+                    "capacity": effective_capacity,
+                    "base_capacity": node.storage_capacity,
                 },
                 "pressure": round(used / capacity, 3),
                 "shortages": _cargo_map(node_shortages),
-                "transfer_limit": node.transfer_limit_per_tick,
+                "transfer_limit": effective_transfer,
+                "base_transfer_limit": node.transfer_limit_per_tick,
                 "transfer_used": transfer_used,
                 "transfer_pressure": transfer_pressure,
+                "effective_inbound_rate": int(node.effective_inbound_rate()),
+                "effective_outbound_rate": int(node.effective_outbound_rate()),
                 "saturation_streak": saturation_streak,
                 "buffer_fill_pct": buffer_fill_pct,
                 "served_last_tick": served_last_tick,
                 "recipe": recipe_payload,
                 "recipe_blocked": recipe_blocked_payload,
+                "facility": facility_payload,
+                "facility_blocked": facility_blocked_payload,
                 "layout": _node_layout(node),
             }
         )

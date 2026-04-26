@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gaterail.models import LinkMode, NodeKind
+from gaterail.models import FacilityComponentKind, LinkMode, NodeKind
 
 
 DEFAULT_RAIL_CAPACITY_PER_TICK = 24
@@ -90,3 +90,20 @@ def node_upgrade_cost(storage_increase: int, transfer_increase: int) -> float:
     """Return the cash cost to upgrade a node."""
 
     return (storage_increase * 0.5) + (transfer_increase * 25.0)
+
+
+FACILITY_COMPONENT_BUILD_COST: dict[FacilityComponentKind, float] = {
+    FacilityComponentKind.PLATFORM: 800.0,
+    FacilityComponentKind.LOADER: 1_200.0,
+    FacilityComponentKind.UNLOADER: 1_200.0,
+    FacilityComponentKind.STORAGE_BAY: 1_500.0,
+    FacilityComponentKind.FACTORY_BLOCK: 2_500.0,
+    FacilityComponentKind.POWER_MODULE: 1_800.0,
+    FacilityComponentKind.GATE_INTERFACE: 4_000.0,
+}
+
+
+def facility_component_build_cost(kind: FacilityComponentKind) -> float:
+    """Return the cash cost to install a facility component."""
+
+    return FACILITY_COMPONENT_BUILD_COST[kind]
