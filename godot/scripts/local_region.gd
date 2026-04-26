@@ -25,6 +25,7 @@ const COLOR_OK := Color("#2ecc71")
 const COLOR_WARN := Color("#e67e22")
 const COLOR_ERR := Color("#e74c3c")
 const COLOR_CYAN := Color("#58c6d8")
+const COLOR_RECIPE_BLOCKED := Color("#ff6f59")
 
 const TOOL_SELECT := "select"
 const TOOL_PAN := "pan"
@@ -67,6 +68,8 @@ var _planet_stab_fill: ColorRect
 
 var _inventory_list: VBoxContainer
 var _inventory_sub: Label
+var _overlay_list: VBoxContainer
+var _overlay_sub: Label
 var _gate_card: Control
 var _gate_title_value: Label
 var _gate_status_value: Label
@@ -100,6 +103,10 @@ var _rail_origin_id: String = ""
 var _node_kind_popup: PopupMenu
 var _cargo_kind_popup: PopupMenu
 var _cargo_popup_options: Array = []
+var _route_tuning_popup: PopupPanel
+var _route_tuning_meta: Label
+var _route_units_spin: SpinBox
+var _route_interval_spin: SpinBox
 var _build_seq: int = 0
 var _pending_node_local_pos: Vector2 = Vector2.ZERO
 var _pending_build_command: Dictionary = {}
@@ -109,6 +116,10 @@ var _last_preview_result: Dictionary = {}
 var _route_train_id: String = ""
 var _route_origin_id: String = ""
 var _pending_route_dest_id: String = ""
+var _pending_route_tuning_train_id: String = ""
+var _pending_route_tuning_origin_id: String = ""
+var _pending_route_tuning_dest_id: String = ""
+var _pending_route_tuning_cargo: String = ""
 
 # Inspection state (TOOL_SELECT)
 var _selected_local_kind: String = ""
@@ -138,6 +149,8 @@ var _last_terrain_world_id: String = ""
 
 const DEFAULT_TRAIN_CAPACITY: int = 8
 const DEFAULT_ROUTE_INTERVAL_TICKS: int = 4
+const DEFAULT_GATE_CAPACITY_PER_TICK: int = 4
+const DEFAULT_GATE_POWER_REQUIRED: int = 80
 const NODE_HIT_RADIUS: float = 30.0
 const LINK_HIT_DISTANCE: float = 12.0
 
@@ -147,6 +160,7 @@ func _ready() -> void:
 	_build_ui()
 	_build_node_kind_popup()
 	_build_cargo_kind_popup()
+	_build_route_tuning_popup()
 	GateRailBridge.snapshot_received.connect(_on_snapshot_received)
 	GateRailBridge.bridge_error.connect(_on_bridge_error)
 	GateRailBridge.bridge_status_changed.connect(_on_bridge_status_changed)
@@ -209,7 +223,141 @@ func _on_cargo_kind_confirmed(id: int) -> void:
 	var origin_id := _route_origin_id
 	var dest_id := _pending_route_dest_id
 	_pending_route_dest_id = ""
-	_request_schedule_preview(_route_train_id, origin_id, dest_id, cargo_id)
+	_open_route_tuning_popup(_route_train_id, origin_id, dest_id, cargo_id)
+
+
+func _build_route_tuning_popup() -> void:
+	_route_tuning_popup = PopupPanel.new()
+	_route_tuning_popup.title = "Route Tuning"
+	_route_tuning_popup.exclusive = true
+	_route_tuning_popup.popup_hide.connect(_on_route_tuning_popup_hidden)
+	add_child(_route_tuning_popup)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	_route_tuning_popup.add_child(margin)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	col.custom_minimum_size = Vector2(280, 0)
+	margin.add_child(col)
+
+	var title := Label.new()
+	title.text = "ROUTE PARAMETERS"
+	title.add_theme_color_override("font_color", COLOR_CYAN)
+	title.add_theme_font_size_override("font_size", 12)
+	col.add_child(title)
+
+	_route_tuning_meta = Label.new()
+	_route_tuning_meta.text = "—"
+	_route_tuning_meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_route_tuning_meta.add_theme_color_override("font_color", COLOR_STEEL_2)
+	_route_tuning_meta.add_theme_font_size_override("font_size", 10)
+	col.add_child(_route_tuning_meta)
+
+	_route_units_spin = _make_route_spinbox("Units / departure", col)
+	_route_interval_spin = _make_route_spinbox("Interval ticks", col)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	col.add_child(row)
+
+	var preview := _make_hud_button("Preview Route", COLOR_CYAN)
+	preview.pressed.connect(_on_route_tuning_preview_pressed)
+	row.add_child(preview)
+
+	var cancel := _make_hud_button("Cancel", COLOR_ERR)
+	cancel.pressed.connect(_on_route_tuning_cancel_pressed)
+	row.add_child(cancel)
+
+
+func _make_route_spinbox(label_text: String, parent: VBoxContainer) -> SpinBox:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+
+	var label := Label.new()
+	label.text = label_text
+	label.add_theme_color_override("font_color", COLOR_STEEL)
+	label.add_theme_font_size_override("font_size", 10)
+	label.custom_minimum_size = Vector2(112, 0)
+	row.add_child(label)
+
+	var spin := SpinBox.new()
+	spin.min_value = 1
+	spin.max_value = 999
+	spin.step = 1
+	spin.value = 1
+	spin.rounded = true
+	spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spin)
+	return spin
+
+
+func _open_route_tuning_popup(train_id: String, origin_id: String, destination_id: String, cargo_id: String) -> void:
+	_pending_route_tuning_train_id = train_id
+	_pending_route_tuning_origin_id = origin_id
+	_pending_route_tuning_dest_id = destination_id
+	_pending_route_tuning_cargo = cargo_id
+
+	var capacity := _train_capacity(train_id)
+	var suggested_units: int = min(DEFAULT_TRAIN_CAPACITY, capacity)
+	if _route_units_spin != null:
+		_route_units_spin.min_value = 1
+		_route_units_spin.max_value = max(1, capacity)
+		_route_units_spin.value = suggested_units
+	if _route_interval_spin != null:
+		_route_interval_spin.min_value = 1
+		_route_interval_spin.max_value = 240
+		_route_interval_spin.value = DEFAULT_ROUTE_INTERVAL_TICKS
+	if _route_tuning_meta != null:
+		_route_tuning_meta.text = "%s\n%s -> %s\nCargo: %s · Train cap: %d" % [
+			train_id,
+			_node_display_name(origin_id),
+			_node_display_name(destination_id),
+			cargo_id.replace("_", " "),
+			capacity,
+		]
+
+	_set_status_text("ROUTE · tune units and interval for %s -> %s" % [origin_id, destination_id], COLOR_CYAN)
+	_refresh_construction_hud()
+	_route_tuning_popup.position = Vector2i(get_viewport().get_mouse_position())
+	_route_tuning_popup.popup()
+
+
+func _on_route_tuning_preview_pressed() -> void:
+	if _pending_route_tuning_train_id.is_empty() or _pending_route_tuning_origin_id.is_empty() or _pending_route_tuning_dest_id.is_empty():
+		return
+	var units := int(round(_route_units_spin.value)) if _route_units_spin != null else DEFAULT_TRAIN_CAPACITY
+	var interval := int(round(_route_interval_spin.value)) if _route_interval_spin != null else DEFAULT_ROUTE_INTERVAL_TICKS
+	var train_id := _pending_route_tuning_train_id
+	var origin_id := _pending_route_tuning_origin_id
+	var destination_id := _pending_route_tuning_dest_id
+	var cargo_id := _pending_route_tuning_cargo
+	_clear_route_tuning_state()
+	_request_schedule_preview(train_id, origin_id, destination_id, cargo_id, units, interval)
+
+
+func _on_route_tuning_cancel_pressed() -> void:
+	_clear_route_tuning_state()
+	_set_status_text("ROUTE · tuning cancelled", COLOR_STEEL)
+	_refresh_construction_hud()
+
+
+func _on_route_tuning_popup_hidden() -> void:
+	_clear_route_tuning_state(false)
+
+
+func _clear_route_tuning_state(hide_popup: bool = true) -> void:
+	_pending_route_tuning_train_id = ""
+	_pending_route_tuning_origin_id = ""
+	_pending_route_tuning_dest_id = ""
+	_pending_route_tuning_cargo = ""
+	if hide_popup and _route_tuning_popup != null and _route_tuning_popup.visible:
+		_route_tuning_popup.hide()
 
 
 func _cargo_options_for_route(origin_id: String, destination_id: String) -> Array:
@@ -247,7 +395,7 @@ func _cancel_all(reason: String = "") -> void:
 	var had_state := not (_pending_build_command.is_empty() and _last_preview_result.is_empty()
 		and _pending_preview_kind.is_empty() and _rail_origin_id.is_empty()
 		and _route_train_id.is_empty() and _selected_local_id.is_empty()
-		and _pending_route_dest_id.is_empty())
+		and _pending_route_dest_id.is_empty() and _pending_route_tuning_train_id.is_empty())
 	_pending_build_command = {}
 	_pending_preview_kind = ""
 	_pending_preview_target_id = ""
@@ -256,6 +404,7 @@ func _cancel_all(reason: String = "") -> void:
 	_route_train_id = ""
 	_route_origin_id = ""
 	_pending_route_dest_id = ""
+	_clear_route_tuning_state()
 	_selected_local_kind = ""
 	_selected_local_id = ""
 	if _cargo_kind_popup != null and _cargo_kind_popup.visible:
@@ -411,6 +560,7 @@ func _clear_pending_preview() -> void:
 func _clear_route_builder() -> void:
 	_route_train_id = ""
 	_route_origin_id = ""
+	_clear_route_tuning_state()
 	_refresh_construction_hud()
 
 
@@ -472,9 +622,96 @@ func _handle_gate_click(local_pos: Vector2) -> void:
 	if _pending_preview_kind == "node" and not _pending_build_command.is_empty():
 		_send_pending_build("Building gate hub...", COLOR_AMBER_HOT)
 		return
+	if _pending_preview_kind == "gate_link" and not _pending_build_command.is_empty():
+		_send_pending_build("Building gate link...", COLOR_AMBER_HOT)
+		return
+
+	var nid := _hit_node_at(local_pos)
+	if not nid.is_empty():
+		var node := _node_snapshot(nid)
+		if str(node.get("kind", "")) != "gate_hub":
+			_clear_pending_preview()
+			_set_status_text("GATE · click empty tile to build a gate hub, or click an existing gate hub to link", COLOR_AMBER_HOT)
+			return
+		_request_gate_link_preview(nid)
+		return
+
 	_clear_pending_preview()
 	_pending_node_local_pos = local_pos
 	_request_node_preview("gate_hub", local_pos)
+
+
+func _request_gate_link_preview(origin_id: String) -> void:
+	var destination := _suggest_gate_destination(origin_id)
+	if destination.is_empty():
+		_clear_pending_preview()
+		_set_status_text("GATE LINK · no unlinked external gate hub available", COLOR_ERR)
+		_refresh_construction_hud()
+		return
+	var destination_id := str(destination.get("id", ""))
+	var link_id := _next_build_id("gate")
+	_pending_preview_kind = "gate_link"
+	_pending_preview_target_id = link_id
+	_pending_build_command = {}
+	_last_preview_result = {}
+	_set_status_text("PREVIEW · checking gate link %s -> %s..." % [origin_id, destination_id], COLOR_AMBER_HOT)
+	_refresh_construction_hud()
+	GateRailBridge.send_message({
+		"commands": [{
+			"type": "PreviewBuildLink",
+			"link_id": link_id,
+			"origin": origin_id,
+			"destination": destination_id,
+			"mode": "gate",
+			"travel_ticks": 1,
+			"capacity_per_tick": DEFAULT_GATE_CAPACITY_PER_TICK,
+			"power_required": DEFAULT_GATE_POWER_REQUIRED,
+			"power_source_world_id": _world_id,
+		}],
+		"ticks": 0
+	})
+
+
+func _suggest_gate_destination(origin_id: String) -> Dictionary:
+	var candidates: Array = []
+	var nodes: Array = _latest_snapshot.get("nodes", []) if typeof(_latest_snapshot.get("nodes")) == TYPE_ARRAY else []
+	for node in nodes:
+		if typeof(node) != TYPE_DICTIONARY:
+			continue
+		var candidate_id := str(node.get("id", ""))
+		if candidate_id == origin_id:
+			continue
+		if str(node.get("kind", "")) != "gate_hub":
+			continue
+		if str(node.get("world_id", "")) == _world_id:
+			continue
+		if _gate_link_between_exists(origin_id, candidate_id):
+			continue
+		candidates.append(node)
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_world := str(a.get("world_id", ""))
+		var b_world := str(b.get("world_id", ""))
+		if a_world == b_world:
+			return str(a.get("id", "")) < str(b.get("id", ""))
+		return a_world < b_world
+	)
+	if candidates.is_empty():
+		return {}
+	return candidates[0]
+
+
+func _gate_link_between_exists(a: String, b: String) -> bool:
+	var links: Array = _latest_snapshot.get("links", []) if typeof(_latest_snapshot.get("links")) == TYPE_ARRAY else []
+	for link in links:
+		if typeof(link) != TYPE_DICTIONARY:
+			continue
+		if str(link.get("mode", "")) != "gate":
+			continue
+		var origin_id := str(link.get("origin", ""))
+		var destination_id := str(link.get("destination", ""))
+		if (origin_id == a and destination_id == b) or (origin_id == b and destination_id == a):
+			return true
+	return false
 
 
 # --- Purchase Train ---
@@ -543,11 +780,23 @@ func _request_train_preview(node_id: String) -> void:
 	})
 
 
-func _request_schedule_preview(train_id: String, origin_id: String, destination_id: String, cargo_type: String = "") -> void:
+func _request_schedule_preview(
+	train_id: String,
+	origin_id: String,
+	destination_id: String,
+	cargo_type: String = "",
+	units_per_departure: int = 0,
+	interval_ticks: int = 0
+) -> void:
 	var schedule_id := _next_build_id("schedule")
 	if cargo_type.is_empty():
 		cargo_type = _suggest_cargo_for_route(origin_id, destination_id)
-	var units: int = min(DEFAULT_TRAIN_CAPACITY, _train_capacity(train_id))
+	var units: int = units_per_departure
+	if units <= 0:
+		units = min(DEFAULT_TRAIN_CAPACITY, _train_capacity(train_id))
+	var interval := interval_ticks
+	if interval <= 0:
+		interval = DEFAULT_ROUTE_INTERVAL_TICKS
 	_pending_preview_kind = "schedule"
 	_pending_preview_target_id = schedule_id
 	_pending_build_command = {}
@@ -563,7 +812,7 @@ func _request_schedule_preview(train_id: String, origin_id: String, destination_
 			"destination": destination_id,
 			"cargo_type": cargo_type,
 			"units_per_departure": units,
-			"interval_ticks": DEFAULT_ROUTE_INTERVAL_TICKS,
+			"interval_ticks": interval,
 		}],
 		"ticks": 0
 	})
@@ -861,6 +1110,7 @@ func _on_tool_pressed(tool_id: String) -> void:
 		_apply_tool_button_style(_tool_buttons.get(TOOL_LAYERS), _show_zone_overlay)
 		var lbl: String = "LAYERS · overlays %s" % ("ON" if _show_zone_overlay else "OFF")
 		_set_status_text(lbl, COLOR_CYAN)
+		_update_overlay_summary()
 		if _canvas_panel != null:
 			_canvas_panel.queue_redraw()
 		return
@@ -873,6 +1123,7 @@ func _on_tool_pressed(tool_id: String) -> void:
 		_selected_local_id = ""
 	if _cargo_kind_popup != null and _cargo_kind_popup.visible:
 		_cargo_kind_popup.hide()
+	_clear_route_tuning_state()
 	_clear_pending_preview()
 	_clear_route_builder()
 	for key in _tool_buttons.keys():
@@ -918,6 +1169,7 @@ func _on_canvas_draw() -> void:
 	_draw_scalebar(size)
 
 	_draw_links_and_nodes(size)
+	_draw_logistics_overlays(size)
 	_draw_trains(size)
 	_draw_build_preview(size)
 
@@ -1278,6 +1530,241 @@ func _draw_links_and_nodes(size: Vector2) -> void:
 		_canvas_panel.draw_string(font, pos + Vector2(-50, 58), kind_lbl, HORIZONTAL_ALIGNMENT_CENTER, 100, 10, COLOR_STEEL)
 
 
+func _draw_logistics_overlays(_size: Vector2) -> void:
+	if not _show_zone_overlay:
+		return
+	var font := ThemeDB.fallback_font
+	for node in _world_nodes:
+		if typeof(node) != TYPE_DICTIONARY:
+			continue
+		var node_id := str(node.get("id", ""))
+		if not _node_positions.has(node_id):
+			continue
+		var pos: Vector2 = _node_positions[node_id]
+		var transfer_pressure := float(node.get("transfer_pressure", 0.0))
+		var saturation_streak := int(node.get("saturation_streak", 0))
+		_draw_transfer_overlay(pos, transfer_pressure, saturation_streak)
+		_draw_inventory_overlay(pos, _node_storage_pressure(node))
+
+		var badges := _node_overlay_badges(node)
+		for i in range(badges.size()):
+			var badge: Dictionary = badges[i]
+			var offset := Vector2(-38 + float(i) * 19.0, -38)
+			_draw_overlay_badge(pos + offset, str(badge.get("label", "")), badge.get("color", COLOR_STEEL))
+
+		var note := _node_overlay_note(node)
+		if not note.is_empty():
+			var note_pos := pos + Vector2(34, -30)
+			var note_color := _node_overlay_note_color(node)
+			var note_rect := Rect2(note_pos + Vector2(-5, -14), Vector2(112, 20))
+			_canvas_panel.draw_rect(note_rect, Color(0.020, 0.043, 0.071, 0.78), true)
+			_canvas_panel.draw_rect(note_rect, Color(note_color.r, note_color.g, note_color.b, 0.48), false, 1.0)
+			_canvas_panel.draw_string(font, note_pos, note, HORIZONTAL_ALIGNMENT_LEFT, 104, 10, note_color)
+
+
+func _draw_transfer_overlay(pos: Vector2, pressure: float, saturation_streak: int) -> void:
+	if pressure <= 0.0 and saturation_streak <= 0:
+		return
+	var color := _transfer_pressure_color(pressure, saturation_streak)
+	var radius := 35.0 + clampf(pressure, 0.0, 1.0) * 5.0
+	var width := 1.4 + clampf(pressure, 0.0, 1.0) * 2.6
+	if pressure >= 0.95:
+		_canvas_panel.draw_circle(pos, radius + 2.0, Color(color.r, color.g, color.b, 0.10))
+	_canvas_panel.draw_arc(pos, radius, 0.0, TAU, 64, Color(color.r, color.g, color.b, 0.88), width, true)
+
+
+func _draw_inventory_overlay(pos: Vector2, storage_pressure: float) -> void:
+	var width := 54.0
+	var height := 6.0
+	var origin := pos + Vector2(-width * 0.5, 29.0)
+	var pct := clampf(storage_pressure, 0.0, 1.0)
+	var color := COLOR_CYAN
+	if pct >= 0.90:
+		color = COLOR_ERR
+	elif pct >= 0.70:
+		color = COLOR_AMBER_HOT
+	_canvas_panel.draw_rect(Rect2(origin, Vector2(width, height)), Color(0.020, 0.043, 0.071, 0.74), true)
+	_canvas_panel.draw_rect(Rect2(origin, Vector2(width, height)), Color(color.r, color.g, color.b, 0.42), false, 1.0)
+	if pct > 0.0:
+		_canvas_panel.draw_rect(Rect2(origin, Vector2(width * pct, height)), Color(color.r, color.g, color.b, 0.78), true)
+
+
+func _draw_overlay_badge(center: Vector2, label: String, color: Color) -> void:
+	_canvas_panel.draw_circle(center, 8.5, Color(color.r, color.g, color.b, 0.92))
+	_canvas_panel.draw_arc(center, 8.5, 0.0, TAU, 24, Color(1, 1, 1, 0.35), 1.0, true)
+	var font := ThemeDB.fallback_font
+	var text_offset := Vector2(-3.2, 3.6)
+	if label.length() > 1:
+		text_offset.x = -5.5
+	_canvas_panel.draw_string(font, center + text_offset, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.018, 0.035, 0.055, 1.0))
+
+
+func _node_overlay_badges(node: Dictionary) -> Array:
+	var badges: Array = []
+	if _dict_positive_total(node.get("shortages", {})) > 0:
+		badges.append({"label": "!", "color": COLOR_ERR})
+	if _dict_positive_total(node.get("recipe_blocked", {})) > 0:
+		badges.append({"label": "R", "color": COLOR_RECIPE_BLOCKED})
+	if _node_has_supply(node):
+		badges.append({"label": "S", "color": COLOR_OK})
+	if _node_has_demand(node):
+		badges.append({"label": "D", "color": COLOR_AMBER_HOT})
+	if _node_has_inventory(node):
+		badges.append({"label": "I", "color": COLOR_CYAN})
+	if float(node.get("transfer_pressure", 0.0)) >= 0.75:
+		badges.append({"label": "T", "color": _transfer_pressure_color(float(node.get("transfer_pressure", 0.0)), int(node.get("saturation_streak", 0)))})
+	return badges
+
+
+func _node_overlay_note(node: Dictionary) -> String:
+	var shortages := _cargo_dict(node.get("shortages", {}))
+	if _dict_positive_total(shortages) > 0:
+		return "short %s" % _format_top_cargo(shortages, 1)
+	var blocked := _cargo_dict(node.get("recipe_blocked", {}))
+	if _dict_positive_total(blocked) > 0:
+		return "recipe %s" % _format_top_cargo(blocked, 1)
+	var transfer_pressure := float(node.get("transfer_pressure", 0.0))
+	if transfer_pressure >= 0.95:
+		return "xfer %d%%" % int(round(transfer_pressure * 100.0))
+	if _node_has_demand(node):
+		var demand := _cargo_dict(node.get("demand", {}))
+		if demand.is_empty():
+			demand = _node_recipe_inputs(node)
+		return "needs %s" % _format_top_cargo(demand, 1)
+	if _node_has_supply(node):
+		var supply := _cargo_dict(node.get("production", {}))
+		if supply.is_empty():
+			supply = _node_recipe_outputs(node)
+		if not supply.is_empty():
+			return "makes %s" % _format_top_cargo(supply, 1)
+		return "served buffer"
+	return ""
+
+
+func _node_overlay_note_color(node: Dictionary) -> Color:
+	if _dict_positive_total(node.get("shortages", {})) > 0:
+		return COLOR_ERR
+	if _dict_positive_total(node.get("recipe_blocked", {})) > 0:
+		return COLOR_RECIPE_BLOCKED
+	if float(node.get("transfer_pressure", 0.0)) >= 0.95:
+		return COLOR_ERR
+	if _node_has_demand(node):
+		return COLOR_AMBER_HOT
+	if _node_has_supply(node):
+		return COLOR_OK
+	return COLOR_STEEL_2
+
+
+func _node_has_inventory(node: Dictionary) -> bool:
+	return _dict_positive_total(node.get("inventory", {})) > 0 or _node_storage_used(node) > 0
+
+
+func _node_has_supply(node: Dictionary) -> bool:
+	if _dict_positive_total(node.get("production", {})) > 0:
+		return true
+	if _dict_positive_total(_node_recipe_outputs(node)) > 0:
+		return true
+	return _nested_positive_total(node.get("served_last_tick", {})) > 0
+
+
+func _node_has_demand(node: Dictionary) -> bool:
+	if _dict_positive_total(node.get("demand", {})) > 0:
+		return true
+	return _dict_positive_total(_node_recipe_inputs(node)) > 0
+
+
+func _node_storage_used(node: Dictionary) -> int:
+	var storage = node.get("storage", {})
+	if typeof(storage) != TYPE_DICTIONARY:
+		return 0
+	return int(storage.get("used", 0))
+
+
+func _node_storage_pressure(node: Dictionary) -> float:
+	var storage = node.get("storage", {})
+	if typeof(storage) != TYPE_DICTIONARY:
+		return 0.0
+	var used := int(storage.get("used", 0))
+	var capacity := int(storage.get("capacity", 1))
+	if capacity < 1:
+		capacity = 1
+	return float(used) / float(capacity)
+
+
+func _node_recipe_inputs(node: Dictionary) -> Dictionary:
+	var recipe = node.get("recipe", null)
+	if typeof(recipe) != TYPE_DICTIONARY:
+		return {}
+	var inputs = recipe.get("inputs", {})
+	return _cargo_dict(inputs)
+
+
+func _node_recipe_outputs(node: Dictionary) -> Dictionary:
+	var recipe = node.get("recipe", null)
+	if typeof(recipe) != TYPE_DICTIONARY:
+		return {}
+	var outputs = recipe.get("outputs", {})
+	return _cargo_dict(outputs)
+
+
+func _cargo_dict(payload) -> Dictionary:
+	if typeof(payload) == TYPE_DICTIONARY:
+		return payload
+	return {}
+
+
+func _dict_positive_total(payload) -> int:
+	if typeof(payload) != TYPE_DICTIONARY:
+		return 0
+	var total := 0
+	for key in payload.keys():
+		var units := int(payload[key])
+		if units > 0:
+			total += units
+	return total
+
+
+func _nested_positive_total(payload) -> int:
+	if typeof(payload) != TYPE_DICTIONARY:
+		return 0
+	var total := 0
+	for key in payload.keys():
+		var value = payload[key]
+		if typeof(value) == TYPE_DICTIONARY:
+			total += _dict_positive_total(value)
+		else:
+			var units := int(value)
+			if units > 0:
+				total += units
+	return total
+
+
+func _format_top_cargo(payload: Dictionary, max_items: int = 2) -> String:
+	var parts: Array = []
+	var keys: Array = payload.keys()
+	keys.sort()
+	for key in keys:
+		var units := int(payload[key])
+		if units <= 0:
+			continue
+		parts.append("%s %d" % [str(key).replace("_", " "), units])
+		if parts.size() >= max_items:
+			break
+	if parts.is_empty():
+		return "none"
+	return ", ".join(parts)
+
+
+func _transfer_pressure_color(pressure: float, saturation_streak: int = 0) -> Color:
+	if pressure >= 0.95 or saturation_streak >= 2:
+		return COLOR_ERR
+	if pressure >= 0.75 or saturation_streak == 1:
+		return COLOR_AMBER_HOT
+	if pressure > 0.0:
+		return COLOR_OK
+	return COLOR_STEEL
+
+
 func _draw_build_preview(_size: Vector2) -> void:
 	var origin_id := ""
 	var line_color := COLOR_OK
@@ -1317,6 +1804,11 @@ func _preview_summary(result: Dictionary) -> String:
 	if result_type == "PreviewCreateSchedule":
 		var route_ticks := int(result.get("route_travel_ticks", 0))
 		return "VALID ROUTE · %d ticks · click destination again" % route_ticks
+	if result_type == "PreviewBuildLink" and str(result.get("mode", "")) == "gate":
+		var power_shortfall := int(result.get("power_shortfall", 0))
+		if power_shortfall > 0:
+			return "VALID GATE · power short %d MW · confirm to build" % power_shortfall
+		return "VALID GATE · powered · confirm to build"
 	var cost := int(round(float(result.get("cost", 0.0))))
 	var travel_ticks := int(result.get("travel_ticks", 0))
 	if travel_ticks > 0:
@@ -1442,6 +1934,7 @@ func _build_hud() -> void:
 	scroll.add_child(scroll_box)
 
 	_build_inventory_section(scroll_box)
+	_build_overlay_section(scroll_box)
 	_build_gate_section(scroll_box)
 	_build_queue_section(scroll_box)
 
@@ -1514,6 +2007,89 @@ func _build_inventory_section(parent: VBoxContainer) -> void:
 	_inventory_list = VBoxContainer.new()
 	_inventory_list.add_theme_constant_override("separation", 7)
 	parent.add_child(_inventory_list)
+
+
+func _build_overlay_section(parent: VBoxContainer) -> void:
+	var header := _make_hud_header("Local Overlays", "off")
+	parent.add_child(header)
+	_overlay_sub = header.get_meta("sub") as Label
+	_overlay_list = VBoxContainer.new()
+	_overlay_list.add_theme_constant_override("separation", 5)
+	parent.add_child(_overlay_list)
+	_update_overlay_summary()
+
+
+func _update_overlay_summary() -> void:
+	if _overlay_list == null:
+		return
+	for child in _overlay_list.get_children():
+		child.queue_free()
+
+	var counts := _overlay_counts()
+	var alert_count := int(counts.get("shortage", 0)) + int(counts.get("recipe_blocked", 0)) + int(counts.get("transfer_hot", 0))
+	if _overlay_sub != null:
+		_overlay_sub.text = "%s · %d alerts" % ["on" if _show_zone_overlay else "off", alert_count]
+
+	_overlay_list.add_child(_make_overlay_summary_row("Toggle", "L / layer tool", COLOR_CYAN))
+	_overlay_list.add_child(_make_overlay_summary_row("Supply", "%d nodes" % int(counts.get("supply", 0)), COLOR_OK))
+	_overlay_list.add_child(_make_overlay_summary_row("Demand", "%d nodes" % int(counts.get("demand", 0)), COLOR_AMBER_HOT))
+	_overlay_list.add_child(_make_overlay_summary_row("Inventory", "%d stocked" % int(counts.get("inventory", 0)), COLOR_CYAN))
+	_overlay_list.add_child(_make_overlay_summary_row("Shortage", "%d blocked" % int(counts.get("shortage", 0)), COLOR_ERR))
+	_overlay_list.add_child(_make_overlay_summary_row("Recipe", "%d waiting" % int(counts.get("recipe_blocked", 0)), COLOR_RECIPE_BLOCKED))
+	_overlay_list.add_child(_make_overlay_summary_row("Transfer", "%d hot" % int(counts.get("transfer_hot", 0)), _transfer_pressure_color(0.95) if int(counts.get("transfer_hot", 0)) > 0 else COLOR_STEEL))
+
+
+func _overlay_counts() -> Dictionary:
+	var counts := {
+		"supply": 0,
+		"demand": 0,
+		"inventory": 0,
+		"shortage": 0,
+		"recipe_blocked": 0,
+		"transfer_hot": 0,
+	}
+	for node in _world_nodes:
+		if typeof(node) != TYPE_DICTIONARY:
+			continue
+		if _node_has_supply(node):
+			counts["supply"] = int(counts["supply"]) + 1
+		if _node_has_demand(node):
+			counts["demand"] = int(counts["demand"]) + 1
+		if _node_has_inventory(node):
+			counts["inventory"] = int(counts["inventory"]) + 1
+		if _dict_positive_total(node.get("shortages", {})) > 0:
+			counts["shortage"] = int(counts["shortage"]) + 1
+		if _dict_positive_total(node.get("recipe_blocked", {})) > 0:
+			counts["recipe_blocked"] = int(counts["recipe_blocked"]) + 1
+		if float(node.get("transfer_pressure", 0.0)) >= 0.75 or int(node.get("saturation_streak", 0)) > 0:
+			counts["transfer_hot"] = int(counts["transfer_hot"]) + 1
+	return counts
+
+
+func _make_overlay_summary_row(label_text: String, value_text: String, color: Color) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 7)
+
+	var dot := ColorRect.new()
+	dot.color = color
+	dot.custom_minimum_size = Vector2(7, 7)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(dot)
+
+	var label := Label.new()
+	label.text = label_text
+	label.add_theme_color_override("font_color", COLOR_STEEL)
+	label.add_theme_font_size_override("font_size", 10)
+	label.custom_minimum_size = Vector2(70, 0)
+	row.add_child(label)
+
+	var value := Label.new()
+	value.text = value_text
+	value.add_theme_color_override("font_color", color)
+	value.add_theme_font_size_override("font_size", 10)
+	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(value)
+	return row
 
 
 func _build_gate_section(parent: VBoxContainer) -> void:
@@ -1609,7 +2185,12 @@ func _refresh_construction_hud() -> void:
 	if not _route_train_id.is_empty():
 		_add_planner_line("Route Train", _route_train_id, COLOR_CYAN)
 		_add_planner_line("Origin", _node_display_name(_route_origin_id), COLOR_ICE)
-		_add_planner_note("Click a destination node to pick a cargo and preview a schedule.", COLOR_STEEL)
+		if not _pending_route_tuning_train_id.is_empty():
+			_add_planner_line("Destination", _node_display_name(_pending_route_tuning_dest_id), COLOR_ICE)
+			_add_planner_line("Cargo", _pending_route_tuning_cargo.replace("_", " "), COLOR_AMBER_HOT)
+			_add_planner_note("Tune units and interval in the route popup, then preview through the backend.", COLOR_STEEL)
+		else:
+			_add_planner_note("Click a destination node to pick a cargo and preview a schedule.", COLOR_STEEL)
 
 	if _active_tool == TOOL_SELECT and not _selected_local_id.is_empty():
 		_add_select_inspection()
@@ -1632,6 +2213,8 @@ func _planner_state_label() -> String:
 		return "inspect"
 	if not _last_preview_result.is_empty():
 		return "blocked" if not bool(_last_preview_result.get("ok", false)) else "valid"
+	if not _pending_route_tuning_train_id.is_empty():
+		return "tuning"
 	if not _route_train_id.is_empty():
 		return "routing"
 	if _pending_preview_kind != "":
@@ -1669,6 +2252,8 @@ func _preview_kind_display(kind: String) -> String:
 			return "Train Purchase"
 		"schedule":
 			return "Route Schedule"
+		"gate_link":
+			return "Gate Link"
 		_:
 			return kind.capitalize()
 
@@ -1694,10 +2279,90 @@ func _add_preview_details(result: Dictionary) -> void:
 		_add_planner_line("Transfer", "%d / tick" % int(result.get("transfer_limit_per_tick", 0)), COLOR_STEEL_2)
 	if result.has("route_travel_ticks"):
 		_add_planner_line("Route", "%d ticks" % int(result.get("route_travel_ticks", 0)), COLOR_CYAN)
+	if result.has("gate_handoffs") or result.has("route_warnings"):
+		_add_route_gate_context(result)
+	if str(result.get("mode", "")) == "gate":
+		_add_gate_preview_context(result)
 
 	var normalized = result.get("normalized_command", {})
 	if typeof(normalized) == TYPE_DICTIONARY:
 		_add_normalized_command_details(normalized)
+
+
+func _add_gate_preview_context(result: Dictionary) -> void:
+	var origin_world := str(result.get("origin_world_name", result.get("origin_world_id", "—")))
+	var destination_world := str(result.get("destination_world_name", result.get("destination_world_id", "—")))
+	_add_planner_line("Worlds", "%s -> %s" % [origin_world, destination_world], COLOR_AMBER_HOT)
+	_add_planner_line("Power Source", str(result.get("power_source_world_name", result.get("power_source_world_id", "—"))), COLOR_STEEL_2)
+	_add_planner_line("Power Draw", "%d MW" % int(result.get("power_required", 0)), COLOR_AMBER_HOT)
+	var shortfall := int(result.get("power_shortfall", 0))
+	var available := int(result.get("power_available", 0))
+	var powered := bool(result.get("powered_if_built", false))
+	var power_color := COLOR_OK if powered else COLOR_ERR
+	_add_planner_line("Power Check", "%d MW available · short %d" % [available, shortfall], power_color)
+	if not powered:
+		_add_planner_note("Gate can be built now but will stay offline until the power shortfall is resolved.", COLOR_ERR)
+
+
+func _add_route_gate_context(result: Dictionary) -> void:
+	var gate_ids: Array = result.get("gate_link_ids", []) if typeof(result.get("gate_link_ids", [])) == TYPE_ARRAY else []
+	var handoffs: Array = result.get("gate_handoffs", []) if typeof(result.get("gate_handoffs", [])) == TYPE_ARRAY else []
+	var warnings: Array = result.get("route_warnings", []) if typeof(result.get("route_warnings", [])) == TYPE_ARRAY else []
+	if gate_ids.is_empty() and handoffs.is_empty() and warnings.is_empty():
+		return
+	if not gate_ids.is_empty():
+		_add_planner_line("Gate Route", ", ".join(_string_list(gate_ids)), COLOR_AMBER_HOT)
+	for item in handoffs:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var handoff: Dictionary = item
+		var label := "%s -> %s" % [
+			str(handoff.get("from_world_name", handoff.get("from_world_id", "—"))),
+			str(handoff.get("to_world_name", handoff.get("to_world_id", "—"))),
+		]
+		var powered := bool(handoff.get("powered", false))
+		var pressure := float(handoff.get("pressure", 0.0))
+		var shortfall := int(handoff.get("power_shortfall", 0))
+		var color := COLOR_OK
+		var state := "powered"
+		if not powered:
+			color = COLOR_ERR
+			state = "unpowered · short %d MW" % shortfall
+		elif pressure >= 1.0:
+			color = COLOR_ERR
+			state = "slots full"
+		elif pressure >= 0.75:
+			color = COLOR_AMBER_HOT
+			state = "%d%% slots" % int(round(pressure * 100.0))
+		elif bool(handoff.get("disrupted", false)):
+			color = COLOR_AMBER_HOT
+			state = "degraded"
+		var slots_text := "%d/%d slots" % [int(handoff.get("slots_used", 0)), int(handoff.get("slot_capacity", 0))]
+		_add_planner_line("Handoff", "%s · %s · %s" % [label, state, slots_text], color)
+	for item in warnings:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var warning: Dictionary = item
+		var severity := str(warning.get("severity", "warning"))
+		var warning_color := _route_warning_color(severity)
+		var link_id := str(warning.get("link_id", "gate"))
+		var reason := str(warning.get("reason", "route warning"))
+		_add_planner_note("%s · %s" % [link_id, reason], warning_color)
+
+
+func _route_warning_color(severity: String) -> Color:
+	if severity in ["blocked", "congested"]:
+		return COLOR_ERR
+	if severity in ["degraded", "hot"]:
+		return COLOR_AMBER_HOT
+	return COLOR_STEEL_2
+
+
+func _string_list(values: Array) -> Array:
+	var output: Array = []
+	for value in values:
+		output.append(str(value))
+	return output
 
 
 func _add_normalized_command_details(command: Dictionary) -> void:
@@ -1709,8 +2374,11 @@ func _add_normalized_command_details(command: Dictionary) -> void:
 			if typeof(layout) == TYPE_DICTIONARY:
 				_add_planner_line("Layout", "%.0f, %.0f" % [float(layout.get("x", 0.0)), float(layout.get("y", 0.0))], COLOR_STEEL_2)
 		"BuildLink":
+			_add_planner_line("Mode", str(command.get("mode", "rail")), COLOR_AMBER_HOT)
 			_add_planner_line("From", _node_display_name(str(command.get("origin", ""))), COLOR_ICE)
 			_add_planner_line("To", _node_display_name(str(command.get("destination", ""))), COLOR_ICE)
+			if str(command.get("mode", "")) == "gate":
+				_add_planner_line("Power", "%d MW" % int(command.get("power_required", 0)), COLOR_AMBER_HOT)
 		"PurchaseTrain":
 			_add_planner_line("Node", _node_display_name(str(command.get("node_id", ""))), COLOR_ICE)
 		"CreateSchedule":
@@ -1726,7 +2394,7 @@ func _add_idle_planner_guidance() -> void:
 		TOOL_NODE:
 			_add_planner_note("Click an empty local tile, choose a node type, then confirm after backend preview.", COLOR_STEEL)
 		TOOL_GATE:
-			_add_planner_note("Click a local tile to preview a gate hub. Interworld gate links are deferred.", COLOR_STEEL)
+			_add_planner_note("Click empty local tile to preview a gate hub. Click an existing gate hub to preview an interworld gate link.", COLOR_STEEL)
 		TOOL_RAIL:
 			_add_planner_note("Click an origin node, then a destination node. Backend validates same-world rail and cost.", COLOR_STEEL)
 		TOOL_TRAIN:
@@ -1903,6 +2571,8 @@ func _pending_commit_status() -> String:
 		"BuildNode":
 			return "Building %s..." % _kind_display(str(_pending_build_command.get("kind", "node")))
 		"BuildLink":
+			if str(_pending_build_command.get("mode", "")) == "gate":
+				return "Building gate link %s -> %s..." % [str(_pending_build_command.get("origin", "")), str(_pending_build_command.get("destination", ""))]
 			return "Building rail %s -> %s..." % [str(_pending_build_command.get("origin", "")), str(_pending_build_command.get("destination", ""))]
 		"PurchaseTrain":
 			return "Purchasing train at %s..." % str(_pending_build_command.get("node_id", ""))
@@ -2153,7 +2823,8 @@ func _handle_command_result(result: Dictionary) -> void:
 		"PreviewBuildNode":
 			_handle_preview_result(result, "node")
 		"PreviewBuildLink":
-			_handle_preview_result(result, "rail")
+			var preview_kind := "gate_link" if _pending_preview_kind == "gate_link" or str(result.get("mode", "")) == "gate" else "rail"
+			_handle_preview_result(result, preview_kind)
 		"PreviewPurchaseTrain":
 			_handle_preview_result(result, "train")
 		"PreviewCreateSchedule":
@@ -2256,6 +2927,7 @@ func _apply_snapshot(snapshot: Dictionary) -> void:
 	_update_region_label()
 	_update_planet_card()
 	_update_inventory_list()
+	_update_overlay_summary()
 	_update_gate_card(gate_link)
 	_refresh_construction_hud()
 	if _canvas_panel != null:
@@ -2422,7 +3094,7 @@ func _update_gate_card(gate_link: Dictionary) -> void:
 	for child in _gate_bars_box.get_children():
 		child.queue_free()
 
-	if gate_link.is_empty() or _gate_hub_node_id == "":
+	if _gate_hub_node_id == "":
 		_gate_title_value.text = "NO GATE HUB"
 		_gate_status_value.text = "offline"
 		_gate_status_value.add_theme_color_override("font_color", COLOR_STEEL)
@@ -2436,6 +3108,24 @@ func _update_gate_card(gate_link: Dictionary) -> void:
 			_gate_linked_value.text = "—"
 		if _gate_activation_value != null:
 			_gate_activation_value.text = "—"
+		return
+
+	if gate_link.is_empty():
+		_gate_title_value.text = "UNLINKED GATE HUB"
+		_gate_status_value.text = "ready"
+		_gate_status_value.add_theme_color_override("font_color", COLOR_AMBER_HOT)
+		var link_msg := Label.new()
+		link_msg.text = "Gate hub exists locally. Select the Gate Hub tool and click it to preview an interworld gate link."
+		link_msg.add_theme_color_override("font_color", COLOR_STEEL)
+		link_msg.add_theme_font_size_override("font_size", 10)
+		link_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_gate_bars_box.add_child(link_msg)
+		_gate_bars_box.add_child(_make_gate_bar("Planned slots", 0, DEFAULT_GATE_CAPACITY_PER_TICK, "0 / %d" % DEFAULT_GATE_CAPACITY_PER_TICK))
+		_gate_bars_box.add_child(_make_gate_bar("Power draw", DEFAULT_GATE_POWER_REQUIRED, DEFAULT_GATE_POWER_REQUIRED + 20, "%d mw" % DEFAULT_GATE_POWER_REQUIRED))
+		if _gate_linked_value != null:
+			_gate_linked_value.text = "pick external hub"
+		if _gate_activation_value != null:
+			_gate_activation_value.text = "preview required"
 		return
 
 	var link_id := str(gate_link.get("id", ""))

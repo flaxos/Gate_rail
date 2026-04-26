@@ -292,10 +292,10 @@ def test_build_link_rejects_duplicate_endpoint_pair() -> None:
         )
 
 
-def test_build_link_rejects_gate_mode_until_gate_construction_sprint() -> None:
+def test_build_link_rejects_duplicate_gate_endpoint_pair() -> None:
     state = build_sprint8_scenario()
 
-    with pytest.raises(ValueError, match="rail links only"):
+    with pytest.raises(ValueError, match="duplicate link endpoints"):
         state.apply_command(
             BuildLink(
                 link_id="new_gate_link",

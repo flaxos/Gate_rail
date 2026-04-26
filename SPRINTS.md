@@ -21,7 +21,8 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 11 is complete: the Godot client can auto-run the backend, inspect map entities, highlight selected objects, and show clearer link/train operational state.
 - Sprint 12 hardening is complete: backend construction commands are immediate, validated, and test-covered for same-world rail/node expansion; delayed construction queues are deferred until build-time simulation is worth modeling.
 - Sprint 13 is underway in the Local Region scene only. Slices 13A through 13D are complete: backend-owned previews drive node, rail, train, and route creation, with persisted local-world layout metadata, visible HUD preview context, ESC/tool-switch cancellation, an explicit cargo picker on route creation, and a Select-tool inspector for nodes and links. The galaxy map stays focused on run/inspect/dispatch/navigation.
-- Sprint 14 is in progress. Slices 14A (buffer distribution) and 14B (transfer-limit pressure visibility) are complete: depots/warehouses auto-feed neighbouring demand within their per-tick transfer budget, and node snapshots expose `transfer_pressure` plus `saturation_streak` so the Local Region inspector can flag saturated bottlenecks.
+- Sprint 14 is in progress. Slices 14A (buffer distribution), 14B (transfer-limit pressure visibility), and 14C (per-node recipes) are complete: depots/warehouses auto-feed neighbouring demand within their per-tick transfer budget, node snapshots expose transfer bottlenecks, and individual industry/extractor nodes can transform inputs into outputs through `NodeRecipe`.
+- Facility layer planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, components, ports, and internal cargo flow exist. Sprints 16-18 now cover facility simulation, 2D facility UI, and a 3D facility-view spike.
 
 ## Long-term stages
 
@@ -44,7 +45,8 @@ Stage 3: Proper game expansion
 - corporate finance
 - rival operators
 - tech tree
-- modular stations
+- facility/station automation
+- 3D facility presentation
 - advanced rail types
 
 ## Working rules
@@ -425,7 +427,7 @@ Slice 13A completed state:
 - Tests cover preview parsing, non-mutating previews, invalid preview results, persisted layout metadata, bridge preview behavior, and layout-derived rail travel ticks.
 
 Slice 13B completed state:
-- `docs/construction_rules.md` is the canonical local construction rules reference for node roles, rail constraints, layout travel-time derivation, train purchase, route schedules, and deferred queue/gate work.
+- `docs/construction_rules.md` is the canonical local construction rules reference for node roles, rail constraints, layout travel-time derivation, train purchase, route schedules, and deferred queue/expansion work.
 - `PreviewPurchaseTrain` and `PreviewCreateSchedule` extend the backend-owned preview contract to train and route creation.
 - `CreateSchedule` creates recurring freight schedules from existing infrastructure after validating train location, idle state, cargo units, interval, route existence, and next departure.
 - The Local Region Train tool now supports a first route loop: click an empty node to preview/buy a train, or click a node with an idle train to select an origin and click a destination to preview/create a route schedule.
@@ -471,6 +473,22 @@ Slice 14B completed state:
 - The Godot Local Region inspector now renders transfer as `used / limit (pct%)` with a steel/green/amber/red color depending on pressure, and shows a "SATURATED" or "Approaching limit" note when the saturation streak fires.
 - Tests cover buffer-side bumping on both ends, train load/unload bumping, multi-tick streak growth, streak reset when idle, the inclusive 95% threshold, and the snapshot contract.
 
+Slice 14C completed state:
+- `NodeRecipe` models per-node transformations with explicit cargo inputs and outputs.
+- `apply_node_recipes` runs as a fixed tick phase after buffer distribution and before demand consumption.
+- Recipes consume a full input batch or block cleanly without partial consumption when inputs are missing.
+- Recipe outputs respect node storage capacity through existing inventory acceptance rules.
+- Buffer distribution includes recipe input needs in a neighbour's effective pull demand, so depots and warehouses can feed industries even before declared consumer demand fires.
+- Node snapshots expose recipe inputs/outputs plus per-node recipe-blocked shortfalls.
+- Tests cover recipe success, missing inputs, nodes without recipes, buffer-fed recipe inputs, extractor-to-industry round trips, storage clamping, snapshot recipe fields, simulation phase ordering, and declared demand plus recipe input pull.
+
+Slice 14D completed state:
+- The Local Region `LAYERS` toggle now draws logistics overlays from backend snapshot fields: supply, demand, inventory/storage fill, node shortages, recipe-blocked inputs, and transfer pressure.
+- Nodes render compact overlay badges: `S` supply, `D` demand, `I` inventory, `!` shortage, `R` recipe blocked, and `T` hot transfer.
+- Transfer pressure renders as a colored ring using the same green/amber/red thresholds as the inspector; storage pressure renders as a bar under each node.
+- The right HUD now includes a `Local Overlays` summary/legend with counts for supply, demand, stocked nodes, shortages, recipe stalls, and hot transfer nodes.
+- No new backend schema was required; 14D consumes the snapshot contract created by 14A-14C.
+
 ## Sprint 15: Gate Expansion, Trains, and Schedule Creation
 
 Goal:
@@ -486,6 +504,75 @@ Deliverables:
 Exit criteria:
 - the player can expand an existing network with rail, warehouses/depots, gates, trains, and schedules from Godot
 
+Slice 15A completed state:
+- `BuildLink` and `PreviewBuildLink` now support `mode="gate"` for explicit interworld gate links between `gate_hub` endpoints on different worlds.
+- Gate-link validation rejects self-links, non-gate endpoints, same-world gate links, duplicate gate endpoint pairs, invalid capacity/travel values, invalid power sources, and insufficient cash.
+- JSON command parsing supplies gate defaults when omitted: 1 travel tick, 4 slots/tick, and 80 MW.
+- Gate previews return normalized build commands plus route context for UI: endpoint world names, power source, required power, available power, shortfall, and whether the link would be powered if built.
+- The Local Region Gate Hub tool keeps empty-click gate-hub construction, and adds existing-gate-hub click to preview a backend gate link to an available external gate hub.
+- The Gate Throughput HUD distinguishes "no gate hub", "unlinked gate hub", and linked gate states with planned slots and power draw context.
+- Tests cover command defaults, preview normalization, build mutation, snapshot-powered context, invalid endpoints, same-world rejection, and power-shortfall previews.
+
+Slice 15B completed state:
+- `PreviewCreateSchedule` and `CreateSchedule` now return route gate-handoff context: `gate_link_ids`, `gate_handoffs`, and `route_warnings`.
+- Gate handoffs expose endpoint world names, gate power state, power shortfall, effective slot capacity, used slots, pressure, disruption reasons, and per-gate warnings.
+- Schedule previews warn when a planned route depends on saturated, hot, degraded, blocked, or unpowered gates.
+- If no operational route exists because a gate is unpowered, an invalid schedule preview can still return structural gate-handoff context so the UI can explain the blocker rather than only saying "no route".
+- The Local Region Build Planner renders route gate links, world handoff labels, slot pressure, power shortfalls, and warning notes for route previews.
+- Tests cover normal gate handoff context, saturated gate warnings, disruption/degraded warnings, unpowered-gate invalid preview context, and create-result parity with preview context.
+
+Slice 15C completed state:
+- Local Region route creation now opens a route-tuning popup after cargo selection instead of sending fixed `units_per_departure=8` and `interval_ticks=4`.
+- The popup shows train id, origin, destination, cargo, and train capacity, and lets the player set units per departure and interval ticks before backend preview.
+- Schedule previews now use the tuned values and still return through the existing backend-owned `PreviewCreateSchedule` validation path.
+- The Build Planner shows route tuning state while the popup is active, then shows the normalized backend command with tuned units and interval after preview.
+- Backend tests lock that tuned units and interval survive preview normalization, are persisted by `CreateSchedule`, and reject non-positive or over-capacity values without mutation.
+- Sprint 15's planned deliverables are now satisfied: gate-link construction, train purchase, route schedule creation, and route/gate feedback all run through backend-owned previews.
+
+## Sprint 16: Facility Simulation Foundation
+
+Goal:
+- create the backend-owned facility layer before any station/depot/hub 3D presentation work
+
+Deliverables:
+- `Facility` model attached to `NetworkNode`
+- `FacilityComponent` model for platforms, loaders, unloaders, storage bays, factory blocks, power modules, and gate interfaces
+- typed `FacilityPort` inputs/outputs with cargo type, direction, rate, and capacity
+- `InternalConnection` between ports
+- save/load and snapshot support for facility state
+- backend preview/build commands for facility components
+- tests for loader rate, storage capacity, internal flow, and blocked components
+
+Exit criteria:
+- a depot or industry bottleneck can be caused and fixed by changing facility components rather than changing only local rail
+
+## Sprint 17: Facility UI Prototype
+
+Goal:
+- expose facility internals in 2D before attempting 3D
+
+Deliverables:
+- local node drill-in to a facility detail panel or scene
+- component boxes, ports, and internal cargo-flow arrows
+- backend-preview UI for loader, unloader, buffer, and factory components
+- blocked-flow and throughput-pressure readouts
+
+Exit criteria:
+- the player can diagnose and improve a depot/industry bottleneck by modifying facility components
+
+## Sprint 18: 3D Facility View Spike
+
+Goal:
+- prove Godot can render facility snapshots in 3D without owning simulation rules
+
+Deliverables:
+- one 3D depot scene rendered from backend facility snapshot data
+- rail platform, train placeholder, loader crane, and storage bay
+- read-only first pass unless the 2D facility UI contract is stable
+
+Exit criteria:
+- the 3D scene visually matches the same backend facility state as the 2D facility view
+
 ## Interactive cadence
 
 For collaborative development:
@@ -498,4 +585,4 @@ For collaborative development:
 
 ## Current next step
 
-Slice 14B landed (transfer-limit pressure visibility). Sprint 14 continues with 14C (extractor → industry recipe round-trip) and 14D (local overlays for supply / demand / shortage / inventory).
+Slice 15C landed and Sprint 15 is complete against the current plan. Next recommended sprint is 16A: facility simulation foundation, starting with backend-owned `Facility`, `FacilityComponent`, `FacilityPort`, and save/snapshot scaffolding before any 2D or 3D facility UI.

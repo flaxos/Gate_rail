@@ -7,6 +7,9 @@ from typing import Any, Literal, TypeAlias
 
 from gaterail.cargo import CargoType
 from gaterail.construction import (
+    DEFAULT_GATE_CAPACITY_PER_TICK,
+    DEFAULT_GATE_POWER_REQUIRED,
+    DEFAULT_GATE_TRAVEL_TICKS,
     DEFAULT_RAIL_CAPACITY_PER_TICK,
     link_build_cost,
     link_build_time,
@@ -18,6 +21,7 @@ from gaterail.construction import (
     travel_ticks_from_layout_distance,
 )
 from gaterail.models import FreightOrder, FreightSchedule, FreightTrain, LinkMode, NetworkLink, NetworkNode, NodeKind
+from gaterail.traffic import effective_link_capacity
 from gaterail.transport import shortest_route
 
 
@@ -275,15 +279,22 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
         )
     if command_type in {"BuildLink", "PreviewBuildLink"}:
         power_world = data.get("power_source_world_id")
+        mode = LinkMode(str(data.get("mode", LinkMode.RAIL.value)))
+        default_capacity = (
+            DEFAULT_GATE_CAPACITY_PER_TICK
+            if mode == LinkMode.GATE
+            else DEFAULT_RAIL_CAPACITY_PER_TICK
+        )
+        default_power = DEFAULT_GATE_POWER_REQUIRED if mode == LinkMode.GATE else 0
         link_command = BuildLink if command_type == "BuildLink" else PreviewBuildLink
         return link_command(
             link_id=str(data["link_id"]),
             origin=str(data["origin"]),
             destination=str(data["destination"]),
-            mode=LinkMode(str(data.get("mode", LinkMode.RAIL.value))),
+            mode=mode,
             travel_ticks=_optional_int(data.get("travel_ticks")),
-            capacity_per_tick=int(data.get("capacity_per_tick", DEFAULT_RAIL_CAPACITY_PER_TICK)),
-            power_required=int(data.get("power_required", 0)),
+            capacity_per_tick=int(data.get("capacity_per_tick", default_capacity)),
+            power_required=int(data.get("power_required", default_power)),
             power_source_world_id=None if power_world is None else str(power_world),
             bidirectional=bool(data.get("bidirectional", True)),
         )
@@ -422,30 +433,59 @@ def _layout_travel_ticks_for_nodes(state: object, origin: str, destination: str)
     return travel_ticks_from_layout_distance((dx * dx + dy * dy) ** 0.5)
 
 
-def _validate_build_link(state: object, command: BuildLink | PreviewBuildLink) -> tuple[int, int, float, int]:
-    """Validate and normalize a rail link build command."""
+def _validate_build_link(
+    state: object,
+    command: BuildLink | PreviewBuildLink,
+) -> tuple[int, int, int, str | None, float, int]:
+    """Validate and normalize a transport link build command."""
 
     if command.link_id in state.links:
         raise ValueError(f"duplicate link id: {command.link_id}")
-    if command.mode != LinkMode.RAIL:
-        raise ValueError("BuildLink currently supports rail links only")
     if command.origin == command.destination:
         raise ValueError("link origin and destination must be different")
     if command.origin not in state.nodes:
         raise ValueError(f"unknown link origin: {command.origin}")
     if command.destination not in state.nodes:
         raise ValueError(f"unknown link destination: {command.destination}")
-    origin_world_id = state.nodes[command.origin].world_id
-    destination_world_id = state.nodes[command.destination].world_id
-    if origin_world_id != destination_world_id:
-        raise ValueError("rail links must stay within one world")
-    travel_ticks = command.travel_ticks
-    if travel_ticks is None:
-        travel_ticks = _layout_travel_ticks_for_nodes(state, command.origin, command.destination) or 4
-    if travel_ticks <= 0:
-        raise ValueError("link travel_ticks must be positive")
     if command.capacity_per_tick <= 0:
         raise ValueError("link capacity_per_tick must be positive")
+    if command.power_required < 0:
+        raise ValueError("link power_required cannot be negative")
+
+    origin_world_id = state.nodes[command.origin].world_id
+    destination_world_id = state.nodes[command.destination].world_id
+
+    if command.mode == LinkMode.RAIL:
+        if origin_world_id != destination_world_id:
+            raise ValueError("rail links must stay within one world")
+        travel_ticks = command.travel_ticks
+        if travel_ticks is None:
+            travel_ticks = _layout_travel_ticks_for_nodes(state, command.origin, command.destination) or 4
+        power_required = 0
+        power_source_world_id = None
+    elif command.mode == LinkMode.GATE:
+        if origin_world_id == destination_world_id:
+            raise ValueError("gate links must connect different worlds")
+        origin_kind = state.nodes[command.origin].kind
+        destination_kind = state.nodes[command.destination].kind
+        if origin_kind != NodeKind.GATE_HUB or destination_kind != NodeKind.GATE_HUB:
+            raise ValueError("gate links require gate_hub endpoints")
+        travel_ticks = command.travel_ticks if command.travel_ticks is not None else DEFAULT_GATE_TRAVEL_TICKS
+        power_required = (
+            command.power_required
+            if command.power_required > 0
+            else DEFAULT_GATE_POWER_REQUIRED
+        )
+        power_source_world_id = command.power_source_world_id or origin_world_id
+        if power_source_world_id not in state.worlds:
+            raise ValueError(f"unknown gate power source: {power_source_world_id}")
+        if power_source_world_id not in {origin_world_id, destination_world_id}:
+            raise ValueError("gate power source must be one of the endpoint worlds")
+    else:
+        raise ValueError(f"unsupported link mode: {command.mode.value}")
+
+    if travel_ticks <= 0:
+        raise ValueError("link travel_ticks must be positive")
     duplicate_link_id = _duplicate_link_between(
         state,
         command.origin,
@@ -456,7 +496,7 @@ def _validate_build_link(state: object, command: BuildLink | PreviewBuildLink) -
         raise ValueError(f"duplicate link endpoints: {duplicate_link_id}")
     cost = link_build_cost(command.mode, travel_ticks)
     build_time = link_build_time(travel_ticks)
-    return travel_ticks, command.capacity_per_tick, cost, build_time
+    return travel_ticks, command.capacity_per_tick, power_required, power_source_world_id, cost, build_time
 
 
 def _link_build_payload(
@@ -464,6 +504,8 @@ def _link_build_payload(
     *,
     travel_ticks: int,
     capacity_per_tick: int,
+    power_required: int,
+    power_source_world_id: str | None,
 ) -> dict[str, object]:
     """Return a normalized BuildLink command payload."""
 
@@ -477,11 +519,56 @@ def _link_build_payload(
         "capacity_per_tick": capacity_per_tick,
         "bidirectional": command.bidirectional,
     }
-    if command.power_required:
-        payload["power_required"] = command.power_required
-    if command.power_source_world_id is not None:
-        payload["power_source_world_id"] = command.power_source_world_id
+    if power_required:
+        payload["power_required"] = power_required
+    if power_source_world_id is not None:
+        payload["power_source_world_id"] = power_source_world_id
     return payload
+
+
+def _gate_preview_payload(
+    state: object,
+    command: BuildLink | PreviewBuildLink,
+    *,
+    power_required: int,
+    power_source_world_id: str | None,
+) -> dict[str, object]:
+    """Return UI-friendly gate context for previews and build results."""
+
+    if command.mode != LinkMode.GATE:
+        return {}
+    if power_source_world_id is None:
+        raise ValueError("gate power source is required")
+
+    from gaterail.gate import preview_gate_power
+
+    origin_world_id = state.nodes[command.origin].world_id
+    destination_world_id = state.nodes[command.destination].world_id
+    origin_world = state.worlds[origin_world_id]
+    destination_world = state.worlds[destination_world_id]
+    power_world = state.worlds[power_source_world_id]
+    existing_statuses = preview_gate_power(state)
+    allocated_power = sum(
+        status.power_required
+        for status in existing_statuses.values()
+        if status.link_id != command.link_id
+        and status.powered
+        and status.source_world_id == power_source_world_id
+    )
+    power_available = max(0, power_world.base_power_margin - allocated_power)
+    power_shortfall = max(0, power_required - power_available)
+    return {
+        "origin_world_id": origin_world_id,
+        "origin_world_name": origin_world.name,
+        "destination_world_id": destination_world_id,
+        "destination_world_name": destination_world.name,
+        "power_required": power_required,
+        "power_source_world_id": power_source_world_id,
+        "power_source_world_name": power_world.name,
+        "power_available": power_available,
+        "power_shortfall": power_shortfall,
+        "powered_if_built": power_shortfall == 0,
+    }
 
 
 def _validate_purchase_train(state: object, command: PurchaseTrain | PreviewPurchaseTrain) -> float:
@@ -576,6 +663,134 @@ def _schedule_payload(
         "priority": command.priority,
         "active": command.active,
         "return_to_origin": command.return_to_origin,
+    }
+
+
+def _used_slots_for_route_context(state: object, link: NetworkLink, gate_status: object | None) -> int:
+    """Return current slot pressure for route preview context."""
+
+    used = int(state.link_usage_this_tick.get(link.id, 0))
+    if gate_status is not None:
+        used = max(used, int(getattr(gate_status, "slots_used", 0)))
+    return used
+
+
+def _route_context_payload(state: object, route: object) -> dict[str, object]:
+    """Return schedule-preview route context focused on gate handoffs."""
+
+    from gaterail.gate import preview_gate_power
+
+    gate_statuses = state.gate_statuses if state.gate_statuses else preview_gate_power(state)
+    gate_link_ids: list[str] = []
+    gate_handoffs: list[dict[str, object]] = []
+    route_warnings: list[dict[str, object]] = []
+    node_ids = tuple(route.node_ids)
+
+    for index, link_id in enumerate(route.link_ids):
+        link = state.links[link_id]
+        if link.mode != LinkMode.GATE:
+            continue
+        gate_link_ids.append(link.id)
+        from_node_id = node_ids[index] if index < len(node_ids) else link.origin
+        to_node_id = node_ids[index + 1] if index + 1 < len(node_ids) else link.destination
+        from_world = state.worlds[state.nodes[from_node_id].world_id]
+        to_world = state.worlds[state.nodes[to_node_id].world_id]
+        status = gate_statuses.get(link.id)
+        powered = bool(status.powered) if status is not None else state.link_operational(link)
+        power_shortfall = int(getattr(status, "power_shortfall", 0)) if status is not None else 0
+        capacity, disruptions = effective_link_capacity(state, link)
+        used = _used_slots_for_route_context(state, link, status)
+        remaining = max(0, capacity - used)
+        pressure = round(used / capacity, 3) if capacity > 0 else (1.0 if used > 0 else 0.0)
+        disruption_reasons = [disruption.reason for disruption in disruptions]
+
+        warnings: list[dict[str, object]] = []
+        if not powered:
+            warnings.append(
+                {
+                    "severity": "blocked",
+                    "reason": f"gate {link.id} unpowered",
+                }
+            )
+        if disruptions:
+            warnings.append(
+                {
+                    "severity": "blocked" if capacity == 0 else "degraded",
+                    "reason": ", ".join(disruption_reasons),
+                }
+            )
+        if capacity > 0 and used >= capacity:
+            warnings.append(
+                {
+                    "severity": "congested",
+                    "reason": f"gate slots full on {link.id}",
+                }
+            )
+        elif capacity > 0 and pressure >= 0.75:
+            warnings.append(
+                {
+                    "severity": "hot",
+                    "reason": f"gate {link.id} at {int(round(pressure * 100))}% slot pressure",
+                }
+            )
+
+        gate_handoff = {
+            "link_id": link.id,
+            "from_node_id": from_node_id,
+            "to_node_id": to_node_id,
+            "from_world_id": from_world.id,
+            "from_world_name": from_world.name,
+            "to_world_id": to_world.id,
+            "to_world_name": to_world.name,
+            "powered": powered,
+            "power_required": link.power_required,
+            "power_shortfall": power_shortfall,
+            "slots_used": used,
+            "slot_capacity": capacity,
+            "base_capacity": link.capacity_per_tick,
+            "slots_remaining": remaining,
+            "pressure": pressure,
+            "disrupted": bool(disruptions),
+            "disruption_reasons": disruption_reasons,
+            "warnings": warnings,
+        }
+        gate_handoffs.append(gate_handoff)
+        for warning in warnings:
+            route_warnings.append({"link_id": link.id, **warning})
+
+    return {
+        "gate_link_ids": gate_link_ids,
+        "gate_handoffs": gate_handoffs,
+        "route_warnings": route_warnings,
+    }
+
+
+def _structural_route_context_for_failed_schedule(
+    state: object,
+    command: PreviewCreateSchedule,
+) -> dict[str, object]:
+    """Return route context for previews blocked by gate power/capacity state."""
+
+    if command.origin not in state.nodes or command.destination not in state.nodes:
+        return {}
+    if command.origin == command.destination:
+        return {}
+    route = shortest_route(
+        state,
+        command.origin,
+        command.destination,
+        require_operational=False,
+    )
+    if route is None or route.travel_ticks <= 0:
+        return {}
+    context = _route_context_payload(state, route)
+    if not context["gate_handoffs"]:
+        return {}
+    return {
+        "route_travel_ticks": route.travel_ticks,
+        "route_node_ids": list(route.node_ids),
+        "route_link_ids": list(route.link_ids),
+        **context,
     }
 
 
@@ -724,13 +939,28 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
 
     if isinstance(command, PreviewBuildLink):
         try:
-            travel_ticks, capacity_per_tick, cost, build_time = _validate_build_link(state, command)
+            (
+                travel_ticks,
+                capacity_per_tick,
+                power_required,
+                power_source_world_id,
+                cost,
+                build_time,
+            ) = _validate_build_link(state, command)
         except ValueError as exc:
             return _preview_error(command.type, command.link_id, exc)
         normalized_command = _link_build_payload(
             command,
             travel_ticks=travel_ticks,
             capacity_per_tick=capacity_per_tick,
+            power_required=power_required,
+            power_source_world_id=power_source_world_id,
+        )
+        gate_context = _gate_preview_payload(
+            state,
+            command,
+            power_required=power_required,
+            power_source_world_id=power_source_world_id,
         )
         if not _cash_available(state, cost):
             reason = _insufficient_cash_message(state, f"{command.mode.value} link", cost)
@@ -745,6 +975,8 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
                 travel_ticks=travel_ticks,
                 capacity_per_tick=capacity_per_tick,
                 normalized_command=normalized_command,
+                mode=command.mode.value,
+                **gate_context,
             )
         return command_result(
             command.type,
@@ -756,10 +988,19 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             travel_ticks=travel_ticks,
             capacity_per_tick=capacity_per_tick,
             normalized_command=normalized_command,
+            mode=command.mode.value,
+            **gate_context,
         )
 
     if isinstance(command, BuildLink):
-        travel_ticks, capacity_per_tick, cost, build_time = _validate_build_link(state, command)
+        (
+            travel_ticks,
+            capacity_per_tick,
+            power_required,
+            power_source_world_id,
+            cost,
+            build_time,
+        ) = _validate_build_link(state, command)
         if not _cash_available(state, cost):
             raise ValueError(_insufficient_cash_message(state, f"{command.mode.value} link", cost))
         link = NetworkLink(
@@ -769,13 +1010,19 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             mode=command.mode,
             travel_ticks=travel_ticks,
             capacity_per_tick=capacity_per_tick,
-            power_required=command.power_required,
-            power_source_world_id=command.power_source_world_id,
+            power_required=power_required,
+            power_source_world_id=power_source_world_id,
             bidirectional=command.bidirectional,
             build_cost=cost,
             build_time=build_time,
         )
         state.add_link(link)
+        gate_context = _gate_preview_payload(
+            state,
+            command,
+            power_required=power_required,
+            power_source_world_id=power_source_world_id,
+        )
         state.finance.record_cost(cost)
         return command_result(
             command.type,
@@ -786,6 +1033,8 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             build_time=build_time,
             travel_ticks=travel_ticks,
             capacity_per_tick=capacity_per_tick,
+            mode=command.mode.value,
+            **gate_context,
         )
 
     if isinstance(command, DemolishLink):
@@ -855,8 +1104,11 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
         try:
             next_departure_tick, route = _validate_create_schedule(state, command)
         except ValueError as exc:
-            return _preview_error(command.type, command.schedule_id, exc)
+            result = _preview_error(command.type, command.schedule_id, exc)
+            result.update(_structural_route_context_for_failed_schedule(state, command))
+            return result
         normalized_command = _schedule_payload(command, next_departure_tick=next_departure_tick)
+        route_context = _route_context_payload(state, route)
         return command_result(
             command.type,
             ok=True,
@@ -867,6 +1119,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             route_node_ids=list(route.node_ids),
             route_link_ids=list(route.link_ids),
             normalized_command=normalized_command,
+            **route_context,
         )
 
     if isinstance(command, CreateSchedule):
@@ -885,6 +1138,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             return_to_origin=command.return_to_origin,
         )
         state.add_schedule(schedule)
+        route_context = _route_context_payload(state, route)
         return command_result(
             command.type,
             ok=True,
@@ -894,6 +1148,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             route_travel_ticks=route.travel_ticks,
             route_node_ids=list(route.node_ids),
             route_link_ids=list(route.link_ids),
+            **route_context,
         )
 
     if isinstance(command, UpgradeNode):

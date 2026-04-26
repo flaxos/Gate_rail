@@ -54,6 +54,11 @@ This means:
 - Local Region Construction view follows the Claude Design handoff archived at `docs/design_handoff/local_region_construction/`. Galaxy Map (`scenes/main.tscn`) and Local Region (`scenes/local_region.tscn`) are separate Godot scenes sharing the `GateRailBridge` autoload, with a `SceneNav` autoload carrying the selected `world_id` across the scene change.
 - Local construction rules are now pinned in `docs/construction_rules.md`; clients should preview node, rail, train, and route-schedule actions through Python before committing.
 - The Local Region right HUD now treats construction as a preview-driven build planner rather than a timed queue; delayed build jobs remain deferred.
+- Local Region layer overlays are presentation-only and consume backend snapshot fields for supply, demand, storage fill, shortages, recipe-blocked inputs, and transfer pressure. Godot should not infer logistics rules beyond choosing glyphs, colors, and counts.
+- Interworld gate-link construction is now backend-owned through `BuildLink(mode="gate")`; clients can propose existing gate-hub endpoints, but Python owns endpoint validation, default capacity/power, cost, power-shortfall context, and whether a newly built gate is usable.
+- Route and schedule previews now expose backend-owned gate handoff context. Clients should render the returned gate ids, endpoint worlds, power/slot/disruption state, and warnings rather than rechecking gate rules locally.
+- Local Region route creation lets the player choose cargo, units per departure, and interval before preview; Python remains authoritative for validating those values and returning normalized schedule commands.
+- The next major presentation layer should not be scoped as "3D first." It should be scoped as a backend-owned facility layer first: stations, depots, warehouses, industries, extractors, and gate hubs gain internal components, ports, loaders, unloaders, buffers, platforms, and factory blocks. A later 3D view should render that facility state rather than invent simulation rules in Godot.
 
 ## Simulation layers
 
@@ -84,6 +89,18 @@ Responsible for:
 - routes,
 - congestion and throughput constraints.
 
+### Facility layer
+
+Responsible for:
+- station, depot, warehouse, industry, extractor, and gate-hub internals,
+- platforms,
+- cargo loaders and unloaders,
+- storage bays and buffers,
+- factory blocks,
+- typed input/output ports,
+- internal component connections,
+- facility-level throughput and blocked-flow diagnostics.
+
 ### Gate layer
 
 Responsible for:
@@ -107,6 +124,10 @@ For the MVP:
 - links need travel time and simple capacity constraints.
 
 Detailed block signaling, train assembly, or fine-grained rail physics should wait until the game proves they materially improve play.
+
+### Facilities
+
+Facilities should become the bridge between abstract local nodes and the eventual 3D station/depot/hub view. The backend should own facility components and ports before any 3D scene is built. Godot can render the facility layer in 2D first, then render the same snapshot in 3D later.
 
 ### Worlds
 
