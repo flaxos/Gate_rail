@@ -6,7 +6,14 @@ from dataclasses import dataclass, field
 
 from gaterail.cargo import CargoType
 from gaterail.contracts import advance_contracts
-from gaterail.economy import apply_node_demand, apply_node_production, apply_specialized_production
+from gaterail.economy import (
+    apply_buffer_distribution,
+    apply_node_demand,
+    apply_node_production,
+    apply_node_recipes,
+    apply_specialized_production,
+    update_transfer_saturation_streaks,
+)
 from gaterail.freight import advance_freight
 from gaterail.gate import evaluate_gate_power
 from gaterail.models import GameState, GatePowerStatus, LinkMode
@@ -28,6 +35,20 @@ def _plain_node_cargo_map(mapping: dict[str, dict[CargoType, int]]) -> dict[str,
     return {
         node_id: _plain_cargo_map(cargo_map)
         for node_id, cargo_map in sorted(mapping.items())
+    }
+
+
+def _plain_buffer_distribution(
+    mapping: dict[str, dict[str, dict[CargoType, int]]],
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Convert buffer-distribution rollups to stable report dictionaries."""
+
+    return {
+        source_id: {
+            target_id: _plain_cargo_map(cargo_map)
+            for target_id, cargo_map in sorted(per_source.items())
+        }
+        for source_id, per_source in sorted(mapping.items())
     }
 
 
@@ -74,11 +95,18 @@ class TickSimulation:
 
         phase_order: list[str] = []
         self.state.finance.reset_tick()
+        self.state.transfer_used_this_tick = {}
         self.state.tick += 1
         phase_order.append("advance_time")
 
         produced = apply_node_production(self.state)
         phase_order.append("node_production")
+
+        buffer_distribution = apply_buffer_distribution(self.state)
+        phase_order.append("buffer_distribution")
+
+        recipes_result = apply_node_recipes(self.state)
+        phase_order.append("node_recipes")
 
         demand_result = apply_node_demand(self.state)
         phase_order.append("node_demand")
@@ -96,6 +124,12 @@ class TickSimulation:
 
         freight_result = advance_freight(self.state)
         phase_order.append("freight_movement")
+
+        update_transfer_saturation_streaks(self.state)
+        phase_order.append("transfer_saturation")
+
+        # Persist shortages on state for snapshot rendering
+        self.state.shortages = demand_result.shortages
 
         traffic_result = build_traffic_report(self.state)
         phase_order.append("traffic_report")
@@ -117,6 +151,8 @@ class TickSimulation:
             "produced": _plain_node_cargo_map(produced),
             "consumed": _plain_node_cargo_map(demand_result.consumed),
             "shortages": _plain_node_cargo_map(demand_result.shortages),
+            "buffer_distribution": _plain_buffer_distribution(buffer_distribution),
+            "recipes": recipes_result,
             "economy": economy_result,
             "gates": _plain_gate_status_map(gate_result),
             "traffic": traffic_result,

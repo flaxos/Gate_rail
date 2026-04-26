@@ -1,0 +1,1561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GateRail Stage 2 — Client Wireframe</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Kalam:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#1a1a1a;
+    --ink-2:#3a3a3a;
+    --ink-soft:#6a6a6a;
+    --paper:#f5f1e8;
+    --paper-2:#ece7d8;
+    --grid:#d9d3c2;
+    --accent:#d94a24;     /* gate / alert spot color */
+    --accent-soft:#f2c9bc;
+    --rail:#1a1a1a;
+    --gate:#d94a24;
+    --ok:#3b7a3b;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:"Kalam",cursive;}
+  body{
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(0,0,0,.03), transparent 40%),
+      radial-gradient(circle at 80% 90%, rgba(0,0,0,.04), transparent 40%),
+      repeating-linear-gradient(0deg, transparent 0 28px, rgba(0,0,0,.025) 28px 29px);
+    min-height:100vh;
+    padding: 28px 36px 80px;
+  }
+
+  /* ---------------- Header ---------------- */
+  header.doc{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    gap:24px; margin-bottom:18px; padding-bottom:18px;
+    border-bottom:2px dashed var(--ink);
+  }
+  h1.title{
+    font-family:"Caveat",cursive; font-weight:700;
+    font-size:56px; margin:0; line-height:1;
+    letter-spacing:.5px;
+  }
+  h1.title em{font-style:normal; color:var(--accent)}
+  .sub{
+    font-family:"Kalam"; font-size:15px; color:var(--ink-2);
+    max-width:560px; line-height:1.4;
+  }
+  .stamp{
+    font-family:"Caveat",cursive; color:var(--accent);
+    border:2px solid var(--accent); padding:6px 14px 4px;
+    transform:rotate(-4deg); font-size:22px;
+    letter-spacing:1px; white-space:nowrap;
+    box-shadow: 2px 2px 0 var(--accent-soft);
+  }
+
+  /* ---------------- Tabs ---------------- */
+  .tabs{
+    display:flex; gap:6px; margin-bottom:18px;
+    border-bottom:1px solid var(--ink);
+    padding-bottom:0;
+  }
+  .tab{
+    font-family:"Caveat",cursive; font-size:26px; line-height:1;
+    background:transparent; border:1px solid var(--ink);
+    border-bottom:none;
+    padding:10px 22px 8px; cursor:pointer;
+    border-radius:10px 14px 2px 0;
+    color:var(--ink-2); background:var(--paper-2);
+    transform:translateY(1px);
+  }
+  .tab:hover{ color:var(--ink); }
+  .tab.active{
+    background:var(--paper); color:var(--ink);
+    border-color:var(--ink); border-bottom:1px solid var(--paper);
+    transform:translateY(1px); font-weight:700;
+    box-shadow: 1px -1px 0 var(--ink);
+  }
+
+  .pane{display:none}
+  .pane.active{display:block}
+
+  /* ---------------- Common sketchy ---------------- */
+  .sketch{
+    background:var(--paper);
+    border:2px solid var(--ink);
+    border-radius:14px 4px 12px 6px / 6px 12px 4px 14px;
+    position:relative;
+    box-shadow: 3px 4px 0 rgba(0,0,0,.08);
+  }
+  .sketch.thin{ border-width:1.5px; }
+  .sketch-label{
+    position:absolute; top:-14px; left:14px;
+    background:var(--paper); padding:0 8px;
+    font-family:"Caveat",cursive; font-size:22px; line-height:1;
+    color:var(--ink);
+  }
+  .sketch-label.accent{ color:var(--accent); }
+  .note{
+    font-family:"Caveat",cursive; color:var(--ink-soft);
+    font-size:18px; line-height:1.1;
+  }
+  .hand{ font-family:"Caveat",cursive; }
+  .mono{ font-family:"JetBrains Mono",monospace; font-size:12px; }
+  .dim{ color:var(--ink-soft); }
+  .kbd{
+    display:inline-block; border:1px solid var(--ink); padding:1px 6px;
+    border-radius:4px; font-family:"JetBrains Mono",monospace; font-size:11px;
+    background:var(--paper-2);
+  }
+
+  /* dashed separators drawn inside panels */
+  .hr-dash{ border:none; border-top:1.5px dashed var(--ink-soft); margin:8px 0; }
+
+  /* Pills */
+  .pill{
+    display:inline-flex; align-items:center; gap:4px;
+    border:1.5px solid var(--ink); padding:1px 8px 0; border-radius:10px;
+    font-family:"Caveat"; font-size:16px; line-height:1.4; background:var(--paper);
+  }
+  .pill.accent{ border-color:var(--accent); color:var(--accent); }
+  .pill.ok{ border-color:var(--ok); color:var(--ok); }
+  .pill.off{ color:var(--ink-soft); border-style:dashed; }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ink);display:inline-block}
+  .dot.accent{background:var(--accent)}
+  .dot.ok{background:var(--ok)}
+  .dot.off{background:var(--ink-soft)}
+
+  /* Buttons wireframed */
+  .btn{
+    font-family:"Caveat",cursive; font-size:18px; line-height:1;
+    border:2px solid var(--ink); background:var(--paper);
+    padding:6px 12px 4px; border-radius:8px 14px 6px 12px / 10px 6px 14px 6px;
+    display:inline-flex; align-items:center; gap:6px; color:var(--ink);
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+  .btn.primary{ background:var(--ink); color:var(--paper); }
+  .btn.accent{ border-color:var(--accent); color:var(--accent); }
+  .btn.ghost{ border-style:dashed; box-shadow:none; }
+  .btn.sm{ font-size:15px; padding:3px 8px 2px; }
+
+  /* Inputs wireframed */
+  .field{
+    display:flex; flex-direction:column; gap:2px; min-width:0;
+  }
+  .field > label{ font-size:16px; color:var(--ink-soft); font-family:"Caveat"; }
+  .input, .select{
+    border:1.5px solid var(--ink); background:var(--paper);
+    border-radius:6px 10px 4px 8px / 8px 4px 10px 6px;
+    padding:4px 8px 2px; font-family:"Kalam"; font-size:14px;
+    min-height:28px; display:flex; align-items:center; gap:6px;
+  }
+  .select::after{ content:"▾"; margin-left:auto; color:var(--ink-soft); }
+  .input .placeholder{ color:var(--ink-soft); font-style:italic; }
+
+  /* ===================================================== */
+  /*              LAYOUTS PANE                              */
+  /* ===================================================== */
+
+  .layouts-intro{
+    display:grid; grid-template-columns: 2fr 1fr; gap:18px; margin-bottom:22px;
+  }
+  .legend{
+    display:grid; grid-template-columns: repeat(2,1fr); gap:6px 14px;
+    font-size:15px;
+  }
+  .legend .row{ display:flex; align-items:center; gap:8px; }
+  .swatch{width:22px;height:10px;border:1.5px solid var(--ink)}
+  .swatch.rail{background:repeating-linear-gradient(90deg, var(--ink) 0 4px, transparent 4px 7px);}
+  .swatch.gate{background:repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px); border-color:var(--accent)}
+  .swatch.disrupt{background:var(--accent); border-color:var(--accent); box-shadow: inset 0 0 0 1px var(--paper)}
+  .swatch.ok{background:var(--ok); border-color:var(--ok)}
+  .swatch.train{background:var(--paper); position:relative}
+  .swatch.train::after{content:"▮▮"; font-size:10px; position:absolute; inset:0; display:grid; place-items:center;}
+
+  .variants{
+    display:grid; grid-template-columns: 1fr; gap:26px;
+  }
+
+  /* Each variant shell */
+  .variant{ padding:18px 20px 22px; }
+  .variant > header{
+    display:flex; align-items:baseline; gap:14px; margin-bottom:12px;
+    flex-wrap:wrap;
+  }
+  .variant h2{
+    font-family:"Caveat"; font-size:34px; margin:0; line-height:1;
+  }
+  .variant .tag{
+    font-family:"Caveat"; color:var(--accent); font-size:20px;
+    border:1.5px dashed var(--accent); padding:2px 10px 0; border-radius:20px;
+  }
+  .variant p.brief{ margin:0; font-size:15px; color:var(--ink-2); flex:1 1 260px; }
+
+  /* ---- Layout A: classic sim ---- */
+  .layA{
+    display:grid;
+    grid-template-columns: 260px 1fr 280px;
+    grid-template-rows: 44px 1fr 120px 36px;
+    gap:10px;
+    height:520px;
+  }
+  .layA .hud{ grid-column: 1 / -1; }
+  .layA .opsL{ grid-column: 1; grid-row: 2 / 4; }
+  .layA .map { grid-column: 2; grid-row: 2 / 3; }
+  .layA .disp{ grid-column: 2; grid-row: 3; }
+  .layA .obj { grid-column: 3; grid-row: 2 / 4; }
+  .layA .strip{ grid-column: 1 / -1; grid-row: 4; }
+
+  /* ---- Layout B: bottom console ---- */
+  .layB{
+    display:grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: 44px 1fr 210px 36px;
+    gap:10px;
+    height:560px;
+  }
+  .layB .hud{ grid-column:1 / -1; }
+  .layB .map{ grid-column:1; grid-row:2 / 3; }
+  .layB .obj{ grid-column:2; grid-row:2 / 4; }
+  .layB .console{ grid-column:1; grid-row:3; display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
+  .layB .strip{ grid-column:1 / -1; grid-row:4; }
+
+  /* ---- Layout C: focus mode ---- */
+  .layC{
+    display:grid;
+    grid-template-columns: 56px 1fr 340px;
+    grid-template-rows: 44px 1fr 36px;
+    gap:10px;
+    height:520px;
+  }
+  .layC .hud{ grid-column:1 / -1; }
+  .layC .rail-nav{ grid-column:1; grid-row:2; }
+  .layC .map{ grid-column:2; grid-row:2; }
+  .layC .drawer{ grid-column:3; grid-row:2; }
+  .layC .strip{ grid-column:1 / -1; grid-row:3; }
+
+  /* Shared zone styles */
+  .zone{ padding:14px 14px 12px; }
+  .zone h3{
+    font-family:"Caveat"; font-size:22px; margin:0 0 6px; line-height:1;
+    color:var(--ink);
+  }
+  .zone h3 .count{ color:var(--ink-soft); font-size:16px; margin-left:6px; }
+
+  /* HUD */
+  .hudbar{
+    display:flex; align-items:center; gap:14px;
+    padding:6px 12px; height:100%;
+  }
+  .hudbar .grp{
+    display:flex; align-items:center; gap:6px;
+    border-right:1.5px dashed var(--ink-soft); padding-right:14px;
+  }
+  .hudbar .grp:last-of-type{ border-right:none; }
+  .hudbar .lbl{ color:var(--ink-soft); font-size:14px; font-family:"Caveat"; }
+  .hudbar .val{ font-family:"JetBrains Mono"; font-size:13px; }
+  .hudbar .val.accent{ color:var(--accent) }
+  .hudbar .controls{ margin-left:auto; display:flex; gap:6px; }
+  .hudbar .ctrl{
+    width:28px; height:26px; border:1.5px solid var(--ink); border-radius:6px;
+    display:grid; place-items:center; font-family:"JetBrains Mono"; font-size:14px;
+    background:var(--paper);
+  }
+  .hudbar .ctrl.active{ background:var(--ink); color:var(--paper); }
+
+  /* Strip */
+  .stripbar{
+    display:flex; align-items:center; gap:14px;
+    padding:4px 12px; height:100%;
+    font-family:"JetBrains Mono"; font-size:12px;
+  }
+  .stripbar .chip{
+    border:1.5px dashed var(--ink); padding:1px 8px; border-radius:12px;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .stripbar .chip.err{ border-color:var(--accent); color:var(--accent); border-style:solid; }
+  .stripbar .chip.ok{ border-color:var(--ok); color:var(--ok); }
+
+  /* Map area */
+  .map{ overflow:hidden; position:relative; }
+  .map-inner{
+    position:relative; width:100%; height:100%;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(0,0,0,.04), transparent 60%),
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/24px 24px,
+      var(--paper);
+  }
+
+  /* World glyphs: drawn with divs/svg */
+  .world{
+    position:absolute; transform:translate(-50%,-50%);
+    text-align:center; font-family:"Caveat"; font-size:15px;
+    color:var(--ink);
+  }
+  .world .disc{
+    width:70px; height:70px; border-radius:50%;
+    border:2px solid var(--ink); background:var(--paper);
+    margin:0 auto 2px; position:relative;
+    box-shadow: 2px 2px 0 rgba(0,0,0,.1);
+  }
+  .world .disc.tier4{ background:
+    radial-gradient(circle at 30% 30%, rgba(0,0,0,.1), transparent 60%),
+    var(--paper); }
+  .world .disc .tier{
+    position:absolute; top:-6px; right:-6px;
+    background:var(--paper); border:1.5px solid var(--ink);
+    border-radius:50%; width:22px; height:22px;
+    display:grid; place-items:center; font-family:"JetBrains Mono"; font-size:11px;
+  }
+  .world .disc .node{
+    position:absolute; width:10px; height:10px; border-radius:50%;
+    border:1.5px solid var(--ink); background:var(--paper);
+  }
+  .world .disc .node.gate{ background:var(--accent); border-color:var(--accent); }
+  .world .disc .node.settle{ background:var(--ink); }
+  .world .disc .node.depot{ background:var(--paper); }
+  .world .nm{ display:block; font-size:15px; line-height:1.1 }
+  .world .sub{ display:block; font-size:13px; color:var(--ink-soft); line-height:1; font-family:"JetBrains Mono"; }
+
+  /* Link lines */
+  .link-svg{position:absolute; inset:0; pointer-events:none;}
+
+  /* Train marker */
+  .train-mk{
+    position:absolute; transform:translate(-50%,-50%);
+    font-family:"JetBrains Mono"; font-size:10px;
+    border:1.5px solid var(--ink); background:var(--paper);
+    padding:1px 4px; border-radius:3px;
+  }
+
+  .disruption{
+    position:absolute; transform:translate(-50%,-50%);
+    background:var(--accent); color:var(--paper);
+    font-family:"Caveat"; font-size:14px; padding:0 6px;
+    border-radius:10px; border:1.5px solid var(--accent);
+    transform-origin:center; rotate:-3deg; translate:-50% -50%;
+  }
+
+  /* Map corner legend */
+  .maplegend{
+    position:absolute; right:10px; bottom:8px;
+    background:var(--paper); border:1.5px dashed var(--ink);
+    padding:4px 8px; font-family:"Caveat"; font-size:14px;
+    display:flex; gap:10px; align-items:center;
+  }
+
+  /* Schedule rows */
+  .row-list{ display:flex; flex-direction:column; gap:6px; }
+  .sched-row{
+    display:grid; grid-template-columns: 34px 1fr auto;
+    gap:6px; align-items:center;
+    border:1.5px dashed var(--ink-soft);
+    border-radius:8px 4px 8px 4px; padding:4px 6px;
+    background:var(--paper);
+  }
+  .sched-row.active{ border-style:solid; border-color:var(--ink); }
+  .sched-row .badge{
+    font-family:"JetBrains Mono"; font-size:10px;
+    text-align:center; padding:2px 0; border-radius:4px;
+    border:1.5px solid var(--ink);
+  }
+  .sched-row .badge.on{ background:var(--ok); color:var(--paper); border-color:var(--ok); }
+  .sched-row .badge.off{ color:var(--ink-soft); border-style:dashed; }
+  .sched-row .main{
+    font-family:"JetBrains Mono"; font-size:11px; line-height:1.3;
+  }
+  .sched-row .main .route{ color:var(--ink-2); }
+  .sched-row .main .hint{ color:var(--ink-soft); font-size:10px; }
+
+  /* Contracts */
+  .ct-row{
+    border:1.5px dashed var(--ink-soft); border-radius:8px;
+    padding:6px 8px; background:var(--paper);
+    display:grid; grid-template-columns: 1fr auto; gap:4px;
+  }
+  .ct-row.active{ border-style:solid; border-color:var(--ink); }
+  .ct-row.ok{ border-color:var(--ok); }
+  .ct-row.fail{ border-color:var(--accent); color:var(--accent); }
+  .ct-row .name{ font-family:"Caveat"; font-size:18px; line-height:1; }
+  .ct-row .detail{
+    font-family:"JetBrains Mono"; font-size:10px; color:var(--ink-soft);
+  }
+  .ct-row .bar{
+    grid-column:1 / -1;
+    height:7px; border:1.5px solid var(--ink); border-radius:4px;
+    overflow:hidden; background:var(--paper); position:relative;
+  }
+  .ct-row .bar .fill{ height:100%; background:
+      repeating-linear-gradient(45deg, var(--ink) 0 4px, transparent 4px 6px); }
+  .ct-row.ok .bar .fill{ background:
+      repeating-linear-gradient(45deg, var(--ok) 0 4px, transparent 4px 6px); }
+  .ct-row .foot{
+    grid-column:1 / -1; display:flex; justify-content:space-between;
+    font-family:"JetBrains Mono"; font-size:10px; color:var(--ink-soft);
+  }
+
+  /* Dispatch form */
+  .dispatch-grid{
+    display:grid; grid-template-columns: repeat(6, 1fr); gap:8px;
+  }
+  .dispatch-grid .field.wide{ grid-column: span 2; }
+  .dispatch-actions{
+    display:flex; gap:8px; margin-top:8px; align-items:center;
+    justify-content:space-between;
+  }
+
+  /* Orders list */
+  .ord-row{
+    display:grid; grid-template-columns: 1fr auto;
+    border-bottom:1.5px dashed var(--ink-soft);
+    padding:4px 2px; align-items:center;
+    font-family:"JetBrains Mono"; font-size:11px;
+    gap:6px;
+  }
+  .ord-row:last-child{ border-bottom:none }
+  .ord-row .id{ color:var(--ink-soft); font-size:10px; }
+
+  /* Rail nav C */
+  .rail-nav{ display:flex; flex-direction:column; align-items:center; padding-top:8px; gap:6px; }
+  .nav-ic{
+    width:36px; height:36px; border:1.5px solid var(--ink); border-radius:10px;
+    display:grid; place-items:center; font-family:"Caveat"; font-size:18px;
+    background:var(--paper);
+  }
+  .nav-ic.active{ background:var(--ink); color:var(--paper); }
+  .nav-ic.accent{ border-color:var(--accent); color:var(--accent); }
+  .nav-ic small{ font-size:10px; font-family:"JetBrains Mono"; display:block; line-height:1; }
+
+  /* ===================================================== */
+  /*              PANELS PANE                               */
+  /* ===================================================== */
+  .panels-grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap:20px;
+  }
+  .panel-card{
+    padding:18px 18px 16px;
+  }
+  .pc-title{
+    display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+    margin-bottom:8px;
+  }
+  .pc-title h3{
+    font-family:"Caveat"; font-size:30px; margin:0; line-height:1;
+  }
+  .pc-title .num{
+    font-family:"Caveat"; font-size:24px; color:var(--accent);
+    border:1.5px solid var(--accent); width:34px; height:34px; border-radius:50%;
+    display:grid; place-items:center; transform:rotate(-5deg);
+  }
+  .pc-desc{ font-size:14px; color:var(--ink-2); margin:0 0 10px; line-height:1.35; }
+  .pc-mock{
+    border:1.5px dashed var(--ink-soft);
+    border-radius:8px; padding:10px; background:var(--paper);
+    min-height:120px;
+  }
+  .pc-notes{
+    margin-top:10px; font-family:"Caveat"; font-size:17px; color:var(--ink-2);
+    line-height:1.2;
+  }
+  .pc-notes ul{ margin:4px 0 0; padding-left:18px; }
+  .pc-notes li{ margin:2px 0; }
+
+  .col-12{ grid-column: span 12; }
+  .col-8 { grid-column: span 8; }
+  .col-6 { grid-column: span 6; }
+  .col-4 { grid-column: span 4; }
+  .col-5 { grid-column: span 5; }
+  .col-7 { grid-column: span 7; }
+  @media (max-width: 1100px){
+    .col-4, .col-5, .col-6, .col-7, .col-8{ grid-column: span 12; }
+    .layA, .layB, .layC{ height:auto; grid-template-columns:1fr; grid-auto-rows:min-content; }
+    .layA .opsL, .layA .obj, .layA .map, .layA .disp, .layA .strip, .layA .hud,
+    .layB .map, .layB .obj, .layB .console, .layB .strip, .layB .hud,
+    .layC .rail-nav, .layC .map, .layC .drawer, .layC .strip, .layC .hud{
+      grid-column:1 / -1 !important; grid-row:auto !important;
+    }
+    .layB .console{ grid-template-columns:1fr; }
+  }
+
+  /* ===================================================== */
+  /*              PLAN PANE                                 */
+  /* ===================================================== */
+  .plan-grid{
+    display:grid;
+    grid-template-columns: 3fr 2fr;
+    gap:22px;
+  }
+  @media (max-width: 1000px){ .plan-grid{ grid-template-columns:1fr; } }
+
+  .slice{
+    padding:16px 18px; position:relative;
+  }
+  .slice h3{
+    font-family:"Caveat"; font-size:30px; margin:0 0 6px; line-height:1;
+    display:flex; align-items:center; gap:12px;
+  }
+  .slice h3 .chip{
+    font-family:"JetBrains Mono"; font-size:11px; color:var(--paper);
+    background:var(--ink); padding:2px 8px; border-radius:10px; letter-spacing:.5px;
+    text-transform:uppercase;
+  }
+  .slice h3 .chip.accent{ background:var(--accent); }
+  .slice h3 .chip.future{ background:var(--paper); color:var(--ink); border:1.5px dashed var(--ink); }
+  .slice ul{ margin:6px 0 0; padding-left:20px; font-size:15px; line-height:1.45; }
+  .slice ul li::marker{ content:"→ "; color:var(--accent); }
+  .slice .meta{ font-family:"JetBrains Mono"; font-size:11px; color:var(--ink-soft); margin-top:6px; }
+
+  .aside-card{
+    padding:16px 18px;
+  }
+  .aside-card h4{
+    font-family:"Caveat"; font-size:24px; margin:0 0 6px;
+  }
+  .aside-card p, .aside-card li{ font-size:14px; line-height:1.45; margin:2px 0; }
+
+  /* Icon asset suggestions table */
+  .asset-tbl{
+    width:100%; border-collapse:collapse; font-size:13px;
+  }
+  .asset-tbl th, .asset-tbl td{
+    text-align:left; padding:4px 6px; border-bottom:1.5px dashed var(--ink-soft);
+    vertical-align:top;
+  }
+  .asset-tbl th{ font-family:"Caveat"; font-size:18px; font-weight:700; }
+  .asset-tbl td.mono{ font-family:"JetBrains Mono"; font-size:11px; color:var(--ink-2); }
+
+  /* quick scribble arrow */
+  .scribble{
+    position:absolute; font-family:"Caveat"; color:var(--accent);
+    font-size:16px; transform:rotate(-4deg);
+    pointer-events:none;
+  }
+
+  /* footer */
+  footer.doc{
+    margin-top:40px; padding-top:16px; border-top:2px dashed var(--ink-soft);
+    display:flex; justify-content:space-between; align-items:center;
+    font-family:"Caveat"; color:var(--ink-soft);
+    font-size:18px;
+  }
+</style>
+</head>
+<body>
+
+<header class="doc">
+  <div>
+    <h1 class="title">GateRail <em>Stage 2</em> — Godot Client Wireframe</h1>
+    <p class="sub">Low-fi wireframe for the MVP operations client. Backend stays authoritative — Godot reads JSON snapshots, sends commands. Three layout directions, panel callouts, and a build order for the next few sprints.</p>
+  </div>
+  <div class="stamp">v0.1 · WIP</div>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab active" data-pane="layouts" role="tab">Layouts</button>
+  <button class="tab" data-pane="panels" role="tab">Panels</button>
+  <button class="tab" data-pane="plan" role="tab">Build plan</button>
+</div>
+
+<!-- ============================================================== -->
+<!--                        LAYOUTS                                  -->
+<!-- ============================================================== -->
+<section class="pane active" id="layouts">
+
+  <div class="layouts-intro">
+    <div class="sketch" style="padding:14px 18px;">
+      <span class="sketch-label">what we're exploring</span>
+      <p style="margin:4px 0 0; font-size:15px; line-height:1.45;">
+        Three takes on the same MVP data. All three read the same snapshot
+        (<span class="mono">tick · worlds · nodes · links · trains · schedules · orders · contracts · finance · reputation</span>)
+        and send the same four commands today. The layouts just differ in
+        <em>where attention sits</em>: <strong>A</strong> spreads everything at once (sim-classic),
+        <strong>B</strong> pushes the map forward with a bottom console,
+        <strong>C</strong> reveals one concern at a time through a rail of drawers.
+      </p>
+    </div>
+    <div class="sketch" style="padding:12px 14px;">
+      <span class="sketch-label">legend</span>
+      <div class="legend" style="margin-top:6px">
+        <div class="row"><span class="swatch rail"></span><span>rail link</span></div>
+        <div class="row"><span class="swatch gate"></span><span>gate link</span></div>
+        <div class="row"><span class="swatch disrupt"></span><span>disrupted / congested</span></div>
+        <div class="row"><span class="swatch ok"></span><span>powered / on</span></div>
+        <div class="row"><span class="swatch train"></span><span>train marker</span></div>
+        <div class="row"><span class="dot accent"></span><span>gate hub node</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="variants">
+
+    <!-- =================== VARIANT A =================== -->
+    <article class="sketch variant">
+      <span class="sketch-label">Layout A</span>
+      <header>
+        <h2>A — Sim-classic, all panels visible</h2>
+        <span class="tag">safest path · builds on current Godot scaffold</span>
+        <p class="brief">Every zone is always on screen. Left = ops, right = goals, map holds the middle, dispatch
+          sits under the map like a drafting bench, alerts crawl across the bottom. Best for dense playtests.</p>
+      </header>
+
+      <div class="layA">
+
+        <!-- HUD -->
+        <div class="sketch thin zone hud">
+          <div class="hudbar">
+            <div class="grp"><span class="lbl">tick</span><span class="val">0482</span></div>
+            <div class="grp"><span class="lbl">cash</span><span class="val">$ 28,410</span><span class="val dim">(+412)</span></div>
+            <div class="grp"><span class="lbl">net/t</span><span class="val accent">−62</span></div>
+            <div class="grp"><span class="lbl">rep</span><span class="val">+14</span></div>
+            <div class="grp"><span class="lbl">bridge</span><span class="pill ok"><span class="dot ok"></span>live</span></div>
+            <div class="controls">
+              <div class="ctrl" title="pause">❙❙</div>
+              <div class="ctrl active" title="play">▶</div>
+              <div class="ctrl" title="step">▷|</div>
+              <div class="ctrl" title="2x">2×</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ops left -->
+        <div class="sketch thin zone opsL">
+          <h3>Schedules <span class="count">3 / 5 on</span></h3>
+          <div class="row-list">
+            <div class="sched-row active">
+              <span class="badge on">ON</span>
+              <div class="main">
+                <div>sched_ore_run</div>
+                <div class="route">frontier_mine → core_yard · 8 ore</div>
+                <div class="hint">train T-02 · next t+6</div>
+              </div>
+              <button class="btn sm">disable</button>
+            </div>
+            <div class="sched-row active">
+              <span class="badge on">ON</span>
+              <div class="main">
+                <div>sched_food_loop</div>
+                <div class="route">core_yard → frontier_settle · 4 food</div>
+                <div class="hint">train T-01 · next t+2</div>
+              </div>
+              <button class="btn sm">disable</button>
+            </div>
+            <div class="sched-row">
+              <span class="badge off">OFF</span>
+              <div class="main">
+                <div>sched_med_surge</div>
+                <div class="route">core_yard → outer_camp · 2 medical</div>
+                <div class="hint">train T-03 · paused</div>
+              </div>
+              <button class="btn sm">enable</button>
+            </div>
+            <div class="sched-row active">
+              <span class="badge on">ON</span>
+              <div class="main">
+                <div>sched_gate_relief</div>
+                <div class="route">core_gate → frontier_gate · 6 parts</div>
+                <div class="hint">train T-04 · next t+1</div>
+              </div>
+              <button class="btn sm">disable</button>
+            </div>
+            <div class="sched-row">
+              <span class="badge off">OFF</span>
+              <div class="main">
+                <div>sched_spur_scout</div>
+                <div class="route">frontier_gate → outer_gate · 1 survey</div>
+                <div class="hint">train T-05</div>
+              </div>
+              <button class="btn sm">enable</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MAP -->
+        <div class="sketch thin zone map">
+          <div class="map-inner">
+            <!-- SVG links -->
+            <svg class="link-svg" viewBox="0 0 800 360" preserveAspectRatio="none">
+              <!-- rail: core yard <-> core gate -->
+              <line x1="150" y1="180" x2="230" y2="180" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+              <!-- gate: core gate <-> frontier gate -->
+              <line x1="250" y1="180" x2="520" y2="180" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+              <!-- gate: frontier gate <-> outer gate -->
+              <line x1="540" y1="180" x2="720" y2="180" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+              <!-- rail frontier internal -->
+              <line x1="500" y1="220" x2="560" y2="260" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+              <!-- disruption overlay -->
+              <line x1="540" y1="180" x2="720" y2="180" stroke="#d94a24" stroke-width="6" opacity=".18"/>
+            </svg>
+
+            <!-- Worlds -->
+            <div class="world" style="left:18%; top:50%;">
+              <div class="disc tier4">
+                <div class="tier">T4</div>
+                <div class="node depot" style="left:14px;top:22px"></div>
+                <div class="node gate" style="right:8px; top:30px"></div>
+              </div>
+              <span class="nm">Vesta Core</span>
+              <span class="sub">core_yard · core_gate</span>
+            </div>
+            <div class="world" style="left:50%; top:50%;">
+              <div class="disc">
+                <div class="tier">T0</div>
+                <div class="node gate" style="left:6px; top:30px"></div>
+                <div class="node settle" style="right:10px; top:18px"></div>
+                <div class="node depot" style="right:16px; top:42px"></div>
+              </div>
+              <span class="nm">Brink Frontier</span>
+              <span class="sub">frontier_gate · landing</span>
+            </div>
+            <div class="world" style="left:82%; top:50%;">
+              <div class="disc">
+                <div class="tier">T0</div>
+                <div class="node gate" style="left:8px; top:28px"></div>
+                <div class="node settle" style="right:12px; top:34px"></div>
+              </div>
+              <span class="nm">Ashfall Spur</span>
+              <span class="sub">outer_gate · camp</span>
+            </div>
+
+            <!-- trains -->
+            <div class="train-mk" style="left:34%; top:50%;">T-04 ▮▮</div>
+            <div class="train-mk" style="left:62%; top:60%;">T-02 ▮▮</div>
+
+            <!-- disruption -->
+            <div class="disruption" style="left:70%; top:44%;">! gate over capacity</div>
+
+            <div class="maplegend">
+              <span>pan · <span class="kbd">drag</span></span>
+              <span>zoom · <span class="kbd">scroll</span></span>
+              <span>focus · <span class="kbd">F</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dispatch -->
+        <div class="sketch thin zone disp">
+          <h3>Dispatch one-shot <span class="count">→ DispatchOrder</span></h3>
+          <div class="dispatch-grid">
+            <div class="field wide"><label>train</label><div class="select">T-03 (idle @ core_yard)</div></div>
+            <div class="field"><label>origin</label><div class="select">core_yard</div></div>
+            <div class="field"><label>dest</label><div class="select">outer_camp</div></div>
+            <div class="field"><label>cargo</label><div class="select">medical_supplies</div></div>
+            <div class="field"><label>units</label><div class="input"><span>4</span></div></div>
+            <div class="field"><label>priority</label><div class="input"><span>100</span></div></div>
+          </div>
+          <div class="dispatch-actions">
+            <span class="note">order_id auto · override with <span class="kbd">⌥</span>+id</span>
+            <div style="display:flex; gap:8px;">
+              <button class="btn ghost">clear</button>
+              <button class="btn primary">Queue DispatchOrder</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Objectives right -->
+        <div class="sketch thin zone obj">
+          <h3>Contracts <span class="count">2 active · 1 due soon</span></h3>
+          <div class="row-list">
+            <div class="ct-row active">
+              <div class="name">ct_relief_03</div>
+              <span class="pill accent">due t+18</span>
+              <div class="bar"><div class="fill" style="width:62%"></div></div>
+              <div class="detail">deliver 24 food → Brink Landing</div>
+              <div class="foot"><span>15 / 24 food</span><span>reward $4,200 · −$800</span></div>
+            </div>
+            <div class="ct-row active">
+              <div class="name">ct_gate_stream</div>
+              <span class="pill">due t+42</span>
+              <div class="bar"><div class="fill" style="width:30%"></div></div>
+              <div class="detail">gate_core_frontier · 40 tick streak</div>
+              <div class="foot"><span>12 / 40 ticks</span><span>reward $6,000</span></div>
+            </div>
+            <div class="ct-row ok">
+              <div class="name">ct_first_haul</div>
+              <span class="pill ok">fulfilled</span>
+              <div class="bar"><div class="fill" style="width:100%"></div></div>
+              <div class="detail">10 ore → core_yard</div>
+              <div class="foot"><span>rep +5</span><span>paid $1,500</span></div>
+            </div>
+          </div>
+
+          <hr class="hr-dash"/>
+
+          <h3>Pending orders <span class="count">→ CancelOrder</span></h3>
+          <div class="ord-row">
+            <div>
+              <div>manual_order_0482_1</div>
+              <div class="id">T-03 · 4 / 4 medical · core_yard → outer_camp</div>
+            </div>
+            <button class="btn sm accent">cancel</button>
+          </div>
+          <div class="ord-row">
+            <div>
+              <div>manual_order_0477_2</div>
+              <div class="id">T-05 · 2 / 6 parts · core_yard → frontier_gate</div>
+            </div>
+            <button class="btn sm accent">cancel</button>
+          </div>
+        </div>
+
+        <!-- Strip -->
+        <div class="sketch thin zone strip">
+          <div class="stripbar">
+            <span class="chip ok">✓ SetScheduleEnabled sched_ore_run=true</span>
+            <span class="chip err">! gate_frontier_outer over capacity (slots 3/2)</span>
+            <span class="chip">bridge: stepped 1 tick · 0 warnings</span>
+            <span style="margin-left:auto" class="dim">tail · last 6 messages</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="note" style="margin-top:10px">
+        Build signal → mirrors the current <span class="mono">main.gd</span> layout. Fastest to ship; feels crowded at 1280×720.
+      </p>
+    </article>
+
+    <!-- =================== VARIANT B =================== -->
+    <article class="sketch variant">
+      <span class="sketch-label">Layout B</span>
+      <header>
+        <h2>B — Map forward, console below</h2>
+        <span class="tag">playtest-friendly · reads left→right like a stack</span>
+        <p class="brief">Map takes the full top. Schedules / dispatch / orders become three equal tiles in a bottom console. Contracts stay on a persistent right rail because they're the goal. Keyboard-first (1/2/3 to switch console tabs).</p>
+      </header>
+
+      <div class="layB">
+
+        <div class="sketch thin zone hud">
+          <div class="hudbar">
+            <div class="grp"><span class="lbl">tick</span><span class="val">0482</span></div>
+            <div class="grp"><span class="lbl">$</span><span class="val">28,410</span></div>
+            <div class="grp"><span class="lbl">Δ</span><span class="val accent">−62</span></div>
+            <div class="grp"><span class="lbl">rep</span><span class="val">+14</span></div>
+            <div class="grp"><span class="lbl">br</span><span class="pill ok"><span class="dot ok"></span>live · stdio</span></div>
+            <div class="controls">
+              <div class="ctrl">❙❙</div>
+              <div class="ctrl active">▶</div>
+              <div class="ctrl">▷|</div>
+              <div class="ctrl">2×</div>
+              <div class="ctrl">4×</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MAP big -->
+        <div class="sketch thin zone map">
+          <div class="map-inner">
+            <svg class="link-svg" viewBox="0 0 900 360" preserveAspectRatio="none">
+              <line x1="180" y1="160" x2="260" y2="160" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+              <line x1="290" y1="160" x2="560" y2="160" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+              <line x1="600" y1="160" x2="780" y2="160" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+              <line x1="600" y1="160" x2="780" y2="160" stroke="#d94a24" stroke-width="6" opacity=".2"/>
+              <line x1="540" y1="200" x2="600" y2="240" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+            </svg>
+
+            <div class="world" style="left:20%; top:44%;">
+              <div class="disc tier4"><div class="tier">T4</div>
+                <div class="node depot" style="left:16px;top:24px"></div>
+                <div class="node gate" style="right:10px; top:34px"></div>
+              </div>
+              <span class="nm">Vesta Core</span>
+              <span class="sub">manufacturing · 8.5M</span>
+            </div>
+            <div class="world" style="left:52%; top:44%;">
+              <div class="disc"><div class="tier">T0</div>
+                <div class="node gate" style="left:8px; top:32px"></div>
+                <div class="node settle" style="right:12px; top:22px"></div>
+              </div>
+              <span class="nm">Brink Frontier</span>
+              <span class="sub">mining · 12k · stab 0.62</span>
+            </div>
+            <div class="world" style="left:84%; top:44%;">
+              <div class="disc"><div class="tier">T0</div>
+                <div class="node gate" style="left:10px; top:30px"></div>
+              </div>
+              <span class="nm">Ashfall Spur</span>
+              <span class="sub">survey · stab 0.52</span>
+            </div>
+            <div class="train-mk" style="left:36%; top:44%;">T-04</div>
+            <div class="train-mk" style="left:68%; top:44%;">T-02</div>
+            <div class="disruption" style="left:72%; top:34%;">! gate over cap</div>
+
+            <div class="maplegend">
+              <span><span class="dot"></span>rail</span>
+              <span><span class="dot accent"></span>gate</span>
+              <span>hold <span class="kbd">space</span> to pan</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right rail: contracts -->
+        <div class="sketch thin zone obj">
+          <h3>Contracts</h3>
+          <div class="row-list">
+            <div class="ct-row active">
+              <div class="name">ct_relief_03</div>
+              <span class="pill accent">t+18</span>
+              <div class="bar"><div class="fill" style="width:62%"></div></div>
+              <div class="foot"><span>15/24 food</span><span>$4,200</span></div>
+            </div>
+            <div class="ct-row active">
+              <div class="name">ct_gate_stream</div>
+              <span class="pill">t+42</span>
+              <div class="bar"><div class="fill" style="width:30%"></div></div>
+              <div class="foot"><span>12/40 streak</span><span>$6,000</span></div>
+            </div>
+            <div class="ct-row ok">
+              <div class="name">ct_first_haul</div>
+              <span class="pill ok">done</span>
+              <div class="bar"><div class="fill" style="width:100%"></div></div>
+              <div class="foot"><span>rep +5</span><span>paid</span></div>
+            </div>
+            <div class="ct-row fail">
+              <div class="name">ct_med_surge</div>
+              <span class="pill accent">failed</span>
+              <div class="bar"><div class="fill" style="width:20%"></div></div>
+              <div class="foot"><span>2/10 medical</span><span>−$800</span></div>
+            </div>
+          </div>
+          <hr class="hr-dash"/>
+          <p class="note">Later: filter bar (active / done / failed). Click a contract → pulse the route on the map.</p>
+        </div>
+
+        <!-- Bottom console, 3 tabs: schedules · dispatch · orders -->
+        <div class="console">
+          <div class="sketch thin zone">
+            <h3>1 · Schedules <span class="count">3/5 on</span></h3>
+            <div class="row-list">
+              <div class="sched-row active"><span class="badge on">ON</span>
+                <div class="main"><div>sched_ore_run</div><div class="route">frontier_mine → core_yard</div><div class="hint">8 ore · t+6</div></div>
+                <button class="btn sm">off</button>
+              </div>
+              <div class="sched-row active"><span class="badge on">ON</span>
+                <div class="main"><div>sched_food_loop</div><div class="route">core → frontier_settle</div><div class="hint">4 food · t+2</div></div>
+                <button class="btn sm">off</button>
+              </div>
+              <div class="sched-row"><span class="badge off">OFF</span>
+                <div class="main"><div>sched_med_surge</div><div class="route">core → outer_camp</div><div class="hint">2 med · paused</div></div>
+                <button class="btn sm">on</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sketch thin zone">
+            <h3>2 · Dispatch</h3>
+            <div class="dispatch-grid" style="grid-template-columns:1fr 1fr;">
+              <div class="field"><label>train</label><div class="select">T-03 idle</div></div>
+              <div class="field"><label>cargo</label><div class="select">medical</div></div>
+              <div class="field"><label>origin</label><div class="select">core_yard</div></div>
+              <div class="field"><label>dest</label><div class="select">outer_camp</div></div>
+              <div class="field"><label>units</label><div class="input"><span>4</span></div></div>
+              <div class="field"><label>priority</label><div class="input"><span>100</span></div></div>
+            </div>
+            <div class="dispatch-actions">
+              <span class="note">id auto</span>
+              <button class="btn primary">Queue order</button>
+            </div>
+          </div>
+
+          <div class="sketch thin zone">
+            <h3>3 · Pending orders <span class="count">2</span></h3>
+            <div class="ord-row">
+              <div><div>manual_order_0482_1</div><div class="id">T-03 · 4/4 med · core → outer</div></div>
+              <button class="btn sm accent">×</button>
+            </div>
+            <div class="ord-row">
+              <div><div>manual_order_0477_2</div><div class="id">T-05 · 2/6 parts · core → frontier_gate</div></div>
+              <button class="btn sm accent">×</button>
+            </div>
+            <div class="ord-row">
+              <div><div>manual_order_0472_1</div><div class="id">T-01 · 0/8 ore · frontier_mine → core</div></div>
+              <button class="btn sm accent">×</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sketch thin zone strip">
+          <div class="stripbar">
+            <span class="chip ok">✓ DispatchOrder queued manual_order_0482_1</span>
+            <span class="chip err">! congestion: link_core_frontier_rail slots 3/2</span>
+            <span class="chip">bridge: live · last frame 48 ms</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="note" style="margin-top:10px">
+        Works on a laptop. Dispatch / orders / schedules can also collapse into one tabbed pane for smaller screens.
+      </p>
+    </article>
+
+    <!-- =================== VARIANT C =================== -->
+    <article class="sketch variant">
+      <span class="sketch-label accent">Layout C</span>
+      <header>
+        <h2>C — Map-first with contextual drawer</h2>
+        <span class="tag">lowest chrome · best for later construction work</span>
+        <p class="brief">Map is the canvas. A thin nav rail on the left switches a single right drawer between Schedules / Dispatch / Orders / Contracts. Clicking a train or link on the map opens that entity's inspector in the same drawer — one UI surface for every concern.</p>
+      </header>
+
+      <div class="layC">
+
+        <div class="sketch thin zone hud">
+          <div class="hudbar">
+            <div class="grp"><span class="lbl">t</span><span class="val">0482</span></div>
+            <div class="grp"><span class="lbl">$</span><span class="val">28.4k</span><span class="val accent">Δ−62</span></div>
+            <div class="grp"><span class="lbl">rep</span><span class="val">+14</span></div>
+            <div class="grp"><span class="lbl">bridge</span><span class="pill ok">live</span></div>
+            <div class="controls">
+              <div class="ctrl">❙❙</div>
+              <div class="ctrl active">▶</div>
+              <div class="ctrl">▷|</div>
+              <div class="ctrl">2×</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- rail nav -->
+        <div class="sketch thin zone rail-nav">
+          <div class="nav-ic active" title="map">M<small>ap</small></div>
+          <div class="nav-ic" title="schedules">S<small>ched</small></div>
+          <div class="nav-ic" title="dispatch">D<small>isp</small></div>
+          <div class="nav-ic" title="orders">O<small>rd</small></div>
+          <div class="nav-ic" title="contracts">C<small>nt</small></div>
+          <div style="flex:1"></div>
+          <div class="nav-ic accent" title="build mode · future">+<small>build</small></div>
+        </div>
+
+        <!-- MAP full -->
+        <div class="sketch thin zone map">
+          <div class="map-inner">
+            <svg class="link-svg" viewBox="0 0 900 420" preserveAspectRatio="none">
+              <line x1="200" y1="210" x2="290" y2="210" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+              <line x1="320" y1="210" x2="580" y2="210" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+              <line x1="320" y1="210" x2="580" y2="210" stroke="#d94a24" stroke-width="8" opacity=".12"/>
+              <line x1="610" y1="210" x2="800" y2="210" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+              <line x1="560" y1="250" x2="620" y2="310" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+              <!-- selected train ring -->
+              <circle cx="380" cy="210" r="18" fill="none" stroke="#d94a24" stroke-width="2" stroke-dasharray="4 3"/>
+            </svg>
+
+            <div class="world" style="left:22%; top:50%;">
+              <div class="disc tier4"><div class="tier">T4</div>
+                <div class="node depot" style="left:16px;top:26px"></div>
+                <div class="node gate" style="right:10px; top:34px"></div>
+              </div>
+              <span class="nm">Vesta Core</span>
+            </div>
+            <div class="world" style="left:55%; top:50%;">
+              <div class="disc"><div class="tier">T0</div>
+                <div class="node gate" style="left:8px; top:32px"></div>
+                <div class="node settle" style="right:12px; top:22px"></div>
+              </div>
+              <span class="nm">Brink Frontier</span>
+            </div>
+            <div class="world" style="left:85%; top:50%;">
+              <div class="disc"><div class="tier">T0</div>
+                <div class="node gate" style="left:10px; top:30px"></div>
+              </div>
+              <span class="nm">Ashfall Spur</span>
+            </div>
+
+            <div class="train-mk" style="left:42%; top:50%;">T-04 ▮▮ <span style="color:var(--accent)">●</span></div>
+            <div class="train-mk" style="left:70%; top:58%;">T-02 ▮▮</div>
+            <div class="disruption" style="left:68%; top:40%;">! congestion</div>
+
+            <div class="maplegend">
+              <span>click train → inspect</span>
+              <span>click link → reroute (future)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- drawer -->
+        <div class="sketch thin zone drawer">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+            <h3>T-04 · inspector</h3>
+            <span class="pill"><span class="dot"></span>en-route</span>
+          </div>
+          <p class="note" style="margin:2px 0 8px">
+            selected from map · breadcrumbs:
+            <span class="mono">Map › gate_core_frontier › T-04</span>
+          </p>
+
+          <div class="pc-mock" style="padding:8px;">
+            <div class="mono" style="line-height:1.5">
+              id        &nbsp;T-04<br>
+              cargo     &nbsp;parts (6 / 6)<br>
+              route     &nbsp;core_gate → frontier_gate<br>
+              progress  &nbsp;58% · ETA t+3<br>
+              schedule  &nbsp;sched_gate_relief
+            </div>
+          </div>
+
+          <hr class="hr-dash"/>
+
+          <h3 style="margin-top:6px">actions</h3>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn sm">focus route</button>
+            <button class="btn sm">toggle schedule</button>
+            <button class="btn sm accent">cancel parent order</button>
+          </div>
+
+          <hr class="hr-dash"/>
+
+          <h3>linked contract</h3>
+          <div class="ct-row active">
+            <div class="name">ct_gate_stream</div>
+            <span class="pill">t+42</span>
+            <div class="bar"><div class="fill" style="width:30%"></div></div>
+            <div class="foot"><span>12/40 streak</span><span>$6,000</span></div>
+          </div>
+        </div>
+
+        <div class="sketch thin zone strip">
+          <div class="stripbar">
+            <span class="chip ok">✓ selection: T-04</span>
+            <span class="chip err">! gate_frontier_outer over capacity</span>
+            <span class="chip">bridge live · 48 ms</span>
+            <span style="margin-left:auto" class="dim">press <span class="kbd">~</span> to open command log</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="note" style="margin-top:10px">
+        Best future path: construction mode is already wired (the <span class="hand">+ build</span> rail button). Harder to build first — needs a real selection system.
+      </p>
+    </article>
+
+  </div>
+
+  <div class="sketch" style="margin-top:26px; padding:14px 18px;">
+    <span class="sketch-label">recommendation</span>
+    <p style="margin:4px 0 0; font-size:15px; line-height:1.5;">
+      Ship <strong>A</strong> for Sprint 11 — it's closest to what <span class="mono">main.gd</span> already renders and answers every panel requirement without new interaction patterns.
+      Plan to morph into <strong>B</strong> around Sprint 12 so the map earns its real estate when construction lands.
+      Keep <strong>C</strong> as a north star for "what does this look like when construction + inspection are everyday actions" — revisit once schedules and dispatch feel boring.
+    </p>
+  </div>
+
+</section>
+
+<!-- ============================================================== -->
+<!--                        PANELS                                   -->
+<!-- ============================================================== -->
+<section class="pane" id="panels">
+
+  <div class="panels-grid">
+
+    <!-- 1 MAP -->
+    <article class="sketch panel-card col-8">
+      <div class="pc-title"><h3>Main map view</h3><span class="num">1</span></div>
+      <p class="pc-desc">Worlds as discs, internal nodes as small marks around the rim, links drawn between nodes. Rail vs gate is a visual distinction we never break.</p>
+      <div class="pc-mock">
+        <div class="map-inner" style="height:220px; border-radius:6px; overflow:hidden;">
+          <svg class="link-svg" viewBox="0 0 800 220" preserveAspectRatio="none">
+            <line x1="180" y1="110" x2="260" y2="110" stroke="#1a1a1a" stroke-width="3" stroke-dasharray="6 5"/>
+            <line x1="290" y1="110" x2="540" y2="110" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+            <line x1="290" y1="110" x2="540" y2="110" stroke="#d94a24" stroke-width="7" opacity=".18"/>
+            <line x1="570" y1="110" x2="720" y2="110" stroke="#d94a24" stroke-width="3" stroke-dasharray="3 5"/>
+          </svg>
+          <div class="world" style="left:20%;top:50%;">
+            <div class="disc tier4"><div class="tier">T4</div>
+              <div class="node depot" style="left:16px;top:24px"></div>
+              <div class="node gate" style="right:10px; top:34px"></div>
+            </div>
+            <span class="nm">Vesta Core</span>
+          </div>
+          <div class="world" style="left:55%;top:50%;">
+            <div class="disc"><div class="tier">T0</div>
+              <div class="node gate" style="left:6px; top:32px"></div>
+              <div class="node settle" style="right:12px; top:22px"></div>
+            </div>
+            <span class="nm">Brink Frontier</span>
+          </div>
+          <div class="world" style="left:85%;top:50%;">
+            <div class="disc"><div class="tier">T0</div>
+              <div class="node gate" style="left:10px; top:30px"></div>
+            </div>
+            <span class="nm">Ashfall</span>
+          </div>
+          <div class="disruption" style="left:70%;top:38%;">! congestion</div>
+        </div>
+      </div>
+      <div class="pc-notes">
+        <strong>state cues</strong>
+        <ul>
+          <li>rail = solid dark dashed, gate = orange dashed (higher frequency)</li>
+          <li>disrupted link → orange halo + pill; congestion → slot fraction over link</li>
+          <li>powered gate: dot-on. unpowered gate: dashed + ghosted color</li>
+          <li>trains draw at their <span class="mono">node_id</span> today; in-transit visibility is Sprint 12 (interpolate along link by travel_ticks progress)</li>
+          <li>hover world → show tier, spec, stab, pop; hover node → inventory/demand; hover link → mode, slots, travel_ticks</li>
+        </ul>
+        <strong style="display:block;margin-top:6px">asset ideas (placeholder filenames)</strong>
+        <ul>
+          <li><span class="mono">icon/world-tier-0..4.svg</span> · concentric rings per tier</li>
+          <li><span class="mono">icon/node-gate.svg · node-depot.svg · node-settlement.svg · node-industry.svg</span></li>
+          <li><span class="mono">icon/train-marker.svg</span> + directional arrow variant</li>
+          <li><span class="mono">fx/link-disrupted.svg</span> · <span class="mono">fx/link-congested.svg</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 2 HUD -->
+    <article class="sketch panel-card col-4">
+      <div class="pc-title"><h3>Top HUD</h3><span class="num">2</span></div>
+      <p class="pc-desc">Always-on status bar. Single row, mono values so numbers are scannable at a glance.</p>
+      <div class="pc-mock">
+        <div class="hudbar" style="flex-wrap:wrap; gap:10px 14px;">
+          <div class="grp"><span class="lbl">tick</span><span class="val">0482</span></div>
+          <div class="grp"><span class="lbl">cash</span><span class="val">$28,410</span></div>
+          <div class="grp"><span class="lbl">net/t</span><span class="val accent">−62</span></div>
+          <div class="grp"><span class="lbl">rep</span><span class="val">+14</span></div>
+          <div class="grp"><span class="lbl">bridge</span><span class="pill ok"><span class="dot ok"></span>live</span></div>
+          <div class="controls">
+            <div class="ctrl">❙❙</div><div class="ctrl active">▶</div><div class="ctrl">▷|</div><div class="ctrl">2×</div>
+          </div>
+        </div>
+        <div class="mono dim" style="margin-top:6px">bridge state cycles: live · fixture · disconnected · starting</div>
+      </div>
+      <div class="pc-notes">
+        <ul>
+          <li>pause = send no ticks; play = auto <span class="mono">{"ticks":1}</span> on a cadence; step = single; 2× = two ticks/frame</li>
+          <li>net/t colored by sign (accent when negative) — same rule everywhere money moves</li>
+          <li>icons: <span class="mono">hud/play · pause · step · 2x.svg</span> + <span class="mono">hud/bridge-{live,fixture,off}.svg</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3 Ops left -->
+    <article class="sketch panel-card col-6">
+      <div class="pc-title"><h3>Left operations panel — Schedules</h3><span class="num">3</span></div>
+      <p class="pc-desc">Rows are schedules from the snapshot. Toggle sends <span class="mono">SetScheduleEnabled</span>. Optimistic UI: flip immediately, reconcile when the next snapshot confirms.</p>
+      <div class="pc-mock">
+        <div class="row-list">
+          <div class="sched-row active"><span class="badge on">ON</span>
+            <div class="main">
+              <div>sched_ore_run</div>
+              <div class="route">frontier_mine → core_yard · 8 ore</div>
+              <div class="hint">train T-02 · next departure t+6</div>
+            </div>
+            <button class="btn sm">disable</button>
+          </div>
+          <div class="sched-row"><span class="badge off">OFF</span>
+            <div class="main">
+              <div>sched_med_surge</div>
+              <div class="route">core_yard → outer_camp · 2 medical_supplies</div>
+              <div class="hint">train T-03 · paused</div>
+            </div>
+            <button class="btn sm">enable</button>
+          </div>
+        </div>
+      </div>
+      <div class="pc-notes">
+        <ul>
+          <li>header filters: all · active · inactive · by-train · by-cargo</li>
+          <li>row click → highlights train + route on map</li>
+          <li>icons: <span class="mono">sched/toggle-on.svg · toggle-off.svg · train-sm.svg · cargo-sm.svg</span></li>
+          <li>fail state: row shows error pill with last command message if toggle was rejected</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 4 Right objective -->
+    <article class="sketch panel-card col-6">
+      <div class="pc-title"><h3>Right objective panel — Contracts</h3><span class="num">4</span></div>
+      <p class="pc-desc">Goal tracker. Cargo contracts show units; gate-recovery shows streaks; frontier-support shows ticks-supported. Same card shape, different bar meaning.</p>
+      <div class="pc-mock">
+        <div class="row-list">
+          <div class="ct-row active">
+            <div class="name">ct_relief_03 · cargo</div>
+            <span class="pill accent">due t+18</span>
+            <div class="bar"><div class="fill" style="width:62%"></div></div>
+            <div class="foot"><span>15 / 24 food → Brink Landing</span><span>+$4,200 / −$800</span></div>
+          </div>
+          <div class="ct-row active">
+            <div class="name">ct_gate_stream · gate-recovery</div>
+            <span class="pill">due t+42</span>
+            <div class="bar"><div class="fill" style="width:30%"></div></div>
+            <div class="foot"><span>12 / 40 consecutive ticks</span><span>+$6,000</span></div>
+          </div>
+          <div class="ct-row ok">
+            <div class="name">ct_bootstrap · frontier-support</div>
+            <span class="pill ok">fulfilled</span>
+            <div class="bar"><div class="fill" style="width:100%"></div></div>
+            <div class="foot"><span>improving-trend ticks met</span><span>rep +5</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="pc-notes">
+        <ul>
+          <li>status pill: active · fulfilled · failed</li>
+          <li>clicking a card → focus the relevant world / link / train on map</li>
+          <li>icons: <span class="mono">contract/type-{cargo,gate,frontier}.svg · status-{ok,fail,active}.svg</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5 Dispatch -->
+    <article class="sketch panel-card col-7">
+      <div class="pc-title"><h3>Dispatch panel</h3><span class="num">5</span></div>
+      <p class="pc-desc">One-shot orders. Form is the thin wrapper around <span class="mono">DispatchOrder</span>. Validation lives client-side as a friendly first pass; backend is source of truth.</p>
+      <div class="pc-mock">
+        <div class="dispatch-grid">
+          <div class="field wide"><label>train</label><div class="select">T-03 (idle · core_yard)</div></div>
+          <div class="field"><label>origin</label><div class="select">core_yard</div></div>
+          <div class="field"><label>destination</label><div class="select">outer_camp</div></div>
+          <div class="field"><label>cargo</label><div class="select">medical_supplies</div></div>
+          <div class="field"><label>units</label><div class="input"><span>4</span></div></div>
+          <div class="field"><label>priority</label><div class="input"><span>100</span></div></div>
+          <div class="field wide"><label>order id (optional)</label><div class="input"><span class="placeholder">blank = auto · manual_order_{tick}_{n}</span></div></div>
+          <div class="field"><label>tick offset</label><div class="input"><span>0</span></div></div>
+        </div>
+        <div class="dispatch-actions">
+          <span class="note">validation: origin ≠ destination · units ≥ 1 · train free</span>
+          <div style="display:flex; gap:8px;">
+            <button class="btn ghost">clear</button>
+            <button class="btn primary">Queue DispatchOrder</button>
+          </div>
+        </div>
+      </div>
+      <div class="pc-notes">
+        <ul>
+          <li>train, origin, destination, cargo options built from the same snapshot (<span class="mono">_train_ids · _node_ids · _cargo_ids</span>)</li>
+          <li>after queue: flash the new order row in panel 6, add "✓ queued" chip to alerts strip</li>
+          <li>icons: <span class="mono">form/caret.svg · form/reset.svg · action/queue.svg</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 6 Pending orders -->
+    <article class="sketch panel-card col-5">
+      <div class="pc-title"><h3>Pending orders panel</h3><span class="num">6</span></div>
+      <p class="pc-desc">Mirror of active one-shot orders with <span class="mono">CancelOrder</span> on each row. Stays short — pending orders clear as the sim delivers.</p>
+      <div class="pc-mock">
+        <div class="ord-row">
+          <div>
+            <div>manual_order_0482_1</div>
+            <div class="id">T-03 · 4 / 4 medical_supplies · core_yard → outer_camp</div>
+          </div>
+          <button class="btn sm accent">cancel</button>
+        </div>
+        <div class="ord-row">
+          <div>
+            <div>manual_order_0477_2</div>
+            <div class="id">T-05 · 2 / 6 parts · core_yard → frontier_gate</div>
+          </div>
+          <button class="btn sm accent">cancel</button>
+        </div>
+        <div class="ord-row">
+          <div>
+            <div>manual_order_0472_1</div>
+            <div class="id">T-01 · 0 / 8 ore · frontier_mine → core_yard</div>
+          </div>
+          <button class="btn sm accent">cancel</button>
+        </div>
+      </div>
+      <div class="pc-notes">
+        <ul>
+          <li>sort: newest first; drag-reorder is a later nice-to-have (priority edits need a new command)</li>
+          <li>on cancel: row goes ghosted until the next snapshot removes it</li>
+          <li>icons: <span class="mono">action/cancel.svg · status/in-transit.svg</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 7 Alerts -->
+    <article class="sketch panel-card col-12">
+      <div class="pc-title"><h3>Alert / status strip</h3><span class="num">7</span></div>
+      <p class="pc-desc">One line along the bottom. Three message kinds, color-coded. Keeps a short tail (last ~6). Click chip → opens command log modal.</p>
+      <div class="pc-mock">
+        <div class="stripbar">
+          <span class="chip ok">✓ SetScheduleEnabled sched_ore_run = true</span>
+          <span class="chip err">! bridge: command rejected — unknown_train 'T-99'</span>
+          <span class="chip err">! congestion link_core_frontier_rail slots 3/2 (t+481)</span>
+          <span class="chip">bridge: stepped 1 tick · 48 ms</span>
+          <span class="chip ok">✓ CancelOrder manual_order_0477_2</span>
+          <span style="margin-left:auto" class="dim">press <span class="kbd">~</span> for full log · <span class="kbd">C</span> to clear</span>
+        </div>
+      </div>
+      <div class="pc-notes">
+        <ul>
+          <li>three sources: last <span class="mono">command_results</span> · bridge errors · snapshot <span class="mono">disruption_reasons</span></li>
+          <li>disruption/congestion chips also clickable → pan map to that link</li>
+          <li>icons: <span class="mono">alert/ok.svg · alert/warn.svg · alert/err.svg</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- Future construction hook -->
+    <article class="sketch panel-card col-12" style="border-style:dashed;">
+      <div class="pc-title"><h3>Later: construction mode (Sprint 12-13, notes only)</h3><span class="num">+</span></div>
+      <p class="pc-desc">Not designing this yet. Hooks reserved so we don't paint ourselves into a corner.</p>
+      <div class="pc-notes" style="font-size:16px;">
+        <ul>
+          <li>add a <span class="hand">+ build</span> toggle (rail icon in layout C, modal in A/B) that switches the map cursor</li>
+          <li>three build tools: <span class="hand">station/node</span>, <span class="hand">rail link</span>, <span class="hand">gate link/hub</span> — each validated against cash, power, connectivity server-side</li>
+          <li>right panel becomes a "build details" drawer — cost, power cost, ETA, errors</li>
+          <li>separate <span class="hand">fleet</span> subpanel for train purchase + schedule creation (Sprint 13)</li>
+          <li>snapshot additions expected: <span class="mono">construction_in_progress[]</span>, per-node <span class="mono">build_ready_tick</span></li>
+        </ul>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<!--                        PLAN                                     -->
+<!-- ============================================================== -->
+<section class="pane" id="plan">
+
+  <div class="plan-grid">
+    <div>
+      <article class="sketch slice" style="margin-bottom:18px;">
+        <h3>Slice 1 — HUD + map + schedule toggles <span class="chip">first</span></h3>
+        <ul>
+          <li>Top HUD: tick / cash / net-this-tick / reputation / bridge pill / play-pause-step controls</li>
+          <li>Map: worlds, links (rail vs gate distinction), nodes around each world, train markers at <span class="mono">node_id</span></li>
+          <li>Left panel: schedule rows with ON/OFF pill + toggle button → <span class="mono">SetScheduleEnabled</span></li>
+          <li>Alert strip: last command result + any bridge error</li>
+        </ul>
+        <p class="meta">Exit: you can watch the sim tick, toggle a schedule, see the effect on the map. This is a thin skin over Sprint 10 and finishes Sprint 11's HUD-and-schedules half.</p>
+      </article>
+
+      <article class="sketch slice" style="margin-bottom:18px;">
+        <h3>Slice 2 — Dispatch + pending orders + contracts <span class="chip">second</span></h3>
+        <ul>
+          <li>Dispatch form with live-populated train/origin/dest/cargo selects from the snapshot</li>
+          <li>Pending orders panel with per-row cancel → <span class="mono">CancelOrder</span></li>
+          <li>Right panel: contracts list with progress bars, due tick, reward/penalty, status pill</li>
+          <li>Alert strip gains disruption chips (pulled from <span class="mono">links[].disrupted / disruption_reasons</span>)</li>
+        </ul>
+        <p class="meta">Exit: the Sprint 8/9 scenario is fully playable from the client — no terminal. Finishes Sprint 11.</p>
+      </article>
+
+      <article class="sketch slice" style="margin-bottom:18px;">
+        <h3>Slice 3 — Selection + inspection polish <span class="chip">third</span></h3>
+        <ul>
+          <li>Click world / node / link / train → inspector (starts as a floating card; later becomes drawer)</li>
+          <li>Contract click → focuses map on the relevant route</li>
+          <li>In-transit train visibility: interpolate position along link by <span class="mono">travel_ticks</span> progress</li>
+          <li>Congestion / power overlays as toggleable map layers</li>
+        </ul>
+        <p class="meta">Exit: the client is readable at a glance during a 20-minute playtest. No new backend commands required.</p>
+      </article>
+
+      <article class="sketch slice" style="margin-bottom:18px;">
+        <h3>Slice 4 — Construction slice 1 hooks <span class="chip accent">later</span></h3>
+        <ul>
+          <li>Build-mode toggle on the map cursor; station + rail tools</li>
+          <li>New commands wired through the bridge (names TBD, validated server-side)</li>
+          <li>Build details drawer: cost / power / errors</li>
+        </ul>
+        <p class="meta">Aligns with Phase 2 Sprint 12. Do not start until slices 1-3 are playtested.</p>
+      </article>
+
+      <article class="sketch slice">
+        <h3>Slice 5 — Construction slice 2 · gates, trains, schedules <span class="chip future">future</span></h3>
+        <ul>
+          <li>Gate hub + gate link placement with power feedback</li>
+          <li>Train purchase + schedule creation UI</li>
+          <li>Fleet subpanel</li>
+        </ul>
+        <p class="meta">Phase 2 Sprint 13.</p>
+      </article>
+    </div>
+
+    <aside>
+      <article class="sketch aside-card" style="margin-bottom:16px;">
+        <h4>Responsive / window notes</h4>
+        <p>Desktop target: <strong>1440×900</strong> comfortable, <strong>1280×720</strong> minimum. No real mobile — but the <strong>Layout B</strong> bottom console collapses well to a tall narrow window (<strong>≥ 960 px wide</strong>) for side-by-side work with the terminal. Under that, panels stack in order: HUD → map → alerts → contracts → schedules → dispatch → orders. Always keep HUD and alerts pinned.</p>
+      </article>
+
+      <article class="sketch aside-card" style="margin-bottom:16px;">
+        <h4>Placeholder icon suggestions</h4>
+        <table class="asset-tbl">
+          <thead><tr><th>where</th><th>filename</th></tr></thead>
+          <tbody>
+            <tr><td>HUD · play/pause/step/2×</td><td class="mono">hud/play.svg · pause.svg · step.svg · 2x.svg</td></tr>
+            <tr><td>HUD · bridge state</td><td class="mono">hud/bridge-live · bridge-fixture · bridge-off.svg</td></tr>
+            <tr><td>Map · node kinds</td><td class="mono">node/gate · depot · settlement · industry.svg</td></tr>
+            <tr><td>Map · world tiers</td><td class="mono">world/tier-0 … tier-4.svg</td></tr>
+            <tr><td>Map · train + direction</td><td class="mono">train/marker.svg · train/arrow.svg</td></tr>
+            <tr><td>Link fx</td><td class="mono">fx/link-disrupted · link-congested · link-unpowered.svg</td></tr>
+            <tr><td>Schedule · toggle</td><td class="mono">sched/toggle-on · toggle-off.svg</td></tr>
+            <tr><td>Contracts · type</td><td class="mono">contract/cargo · gate · frontier.svg</td></tr>
+            <tr><td>Contracts · status</td><td class="mono">status/active · fulfilled · failed.svg</td></tr>
+            <tr><td>Alerts</td><td class="mono">alert/ok · warn · err.svg</td></tr>
+            <tr><td>Actions</td><td class="mono">action/queue · cancel · enable · disable.svg</td></tr>
+            <tr><td>Build (future)</td><td class="mono">build/station · rail · gate-link · gate-hub · train.svg</td></tr>
+          </tbody>
+        </table>
+        <p class="note" style="margin-top:6px">Treat names as shape hints for whoever draws the pack — not a promise the client uses these exact files.</p>
+      </article>
+
+      <article class="sketch aside-card" style="margin-bottom:16px;">
+        <h4>Snapshot → UI map</h4>
+        <p class="mono" style="font-size:11px; line-height:1.6;">
+          tick           → HUD<br>
+          finance.*      → HUD · alerts (on big Δ)<br>
+          reputation     → HUD<br>
+          worlds[]       → map discs + tooltip<br>
+          nodes[]        → map marks + inspector<br>
+          links[]        → map lines + disruption overlay<br>
+          trains[]       → map markers + inspector<br>
+          schedules[]    → left panel rows<br>
+          orders[]       → pending orders panel<br>
+          contracts[]    → right panel cards<br>
+          bridge.*       → HUD pill + alert strip
+        </p>
+      </article>
+
+      <article class="sketch aside-card">
+        <h4>Out of scope (intentional)</h4>
+        <ul>
+          <li>new-world creation</li>
+          <li>rival operators / factions</li>
+          <li>tech tree UI</li>
+          <li>block-signal / train-physics views</li>
+          <li>passenger sim beyond abstract demand</li>
+          <li>full construction (only hooks here)</li>
+        </ul>
+      </article>
+    </aside>
+  </div>
+
+</section>
+
+<footer class="doc">
+  <span>GateRail Stage 2 · Godot client wireframe · sketch v0.1</span>
+  <span>backend stays authoritative · four commands today · more after Sprint 11</span>
+</footer>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const panes = document.querySelectorAll('.pane');
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.toggle('active', x === t));
+    const target = t.dataset.pane;
+    panes.forEach(p => p.classList.toggle('active', p.id === target));
+    // persist
+    try { localStorage.setItem('gr_tab', target); } catch(e){}
+  }));
+  // restore
+  try {
+    const saved = localStorage.getItem('gr_tab');
+    if (saved) {
+      const t = document.querySelector(`.tab[data-pane="${saved}"]`);
+      if (t) t.click();
+    }
+  } catch(e){}
+</script>
+
+</body>
+</html>

@@ -23,6 +23,7 @@ class NodeKind(StrEnum):
 
     SETTLEMENT = "settlement"
     DEPOT = "depot"
+    WAREHOUSE = "warehouse"
     EXTRACTOR = "extractor"
     INDUSTRY = "industry"
     GATE_HUB = "gate_hub"
@@ -160,6 +161,14 @@ class WorldState:
         return self.power_available - self.power_used
 
 
+@dataclass(frozen=True, slots=True)
+class NodeRecipe:
+    """One per-node transformation: consume inputs, produce outputs each tick."""
+
+    inputs: dict[CargoType, int] = field(default_factory=dict)
+    outputs: dict[CargoType, int] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class NetworkNode:
     """A logistics point on a world."""
@@ -173,6 +182,9 @@ class NetworkNode:
     demand: dict[CargoType, int] = field(default_factory=dict)
     storage_capacity: int = 1_000
     transfer_limit_per_tick: int = 24
+    layout_x: float | None = None
+    layout_y: float | None = None
+    recipe: NodeRecipe | None = None
 
     def total_inventory(self) -> int:
         """Return all stored cargo units."""
@@ -225,6 +237,8 @@ class NetworkLink:
     power_source_world_id: str | None = None
     active: bool = True
     bidirectional: bool = True
+    build_cost: float = 0.0
+    build_time: int = 0
 
     def connects(self, node_id: str) -> bool:
         """Return whether this link touches ``node_id``."""
@@ -382,6 +396,9 @@ class GatePowerStatus:
     active: bool
     slot_capacity: int
     slots_used: int = 0
+    charge_pct: float = 1.0
+    next_activation_tick: int | None = None
+    slot_cargo: dict[CargoType, int] = field(default_factory=dict)
 
     @property
     def slots_remaining(self) -> int:
@@ -403,6 +420,10 @@ class GameState:
     schedules: dict[str, FreightSchedule] = field(default_factory=dict)
     disruptions: dict[str, NetworkDisruption] = field(default_factory=dict)
     shortages: dict[str, dict[CargoType, int]] = field(default_factory=dict)
+    buffer_distribution: dict[str, dict[str, dict[CargoType, int]]] = field(default_factory=dict)
+    recipe_blocked: dict[str, dict[CargoType, int]] = field(default_factory=dict)
+    transfer_used_this_tick: dict[str, int] = field(default_factory=dict)
+    transfer_saturation_streak: dict[str, int] = field(default_factory=dict)
     gate_statuses: dict[str, GatePowerStatus] = field(default_factory=dict)
     link_usage_this_tick: dict[str, int] = field(default_factory=dict)
     finance: FinanceState = field(default_factory=FinanceState)

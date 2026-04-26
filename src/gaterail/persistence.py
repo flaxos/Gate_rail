@@ -110,6 +110,8 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "demand": _cargo_map_to_dict(node.demand),
         "storage_capacity": node.storage_capacity,
         "transfer_limit_per_tick": node.transfer_limit_per_tick,
+        "layout_x": node.layout_x,
+        "layout_y": node.layout_y,
     }
 
 
@@ -126,6 +128,8 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         demand=_cargo_map_from_dict(data.get("demand", {})),
         storage_capacity=int(data.get("storage_capacity", 1_000)),
         transfer_limit_per_tick=int(data.get("transfer_limit_per_tick", 24)),
+        layout_x=None if data.get("layout_x") is None else float(data["layout_x"]),
+        layout_y=None if data.get("layout_y") is None else float(data["layout_y"]),
     )
 
 
@@ -143,6 +147,8 @@ def _link_to_dict(link: NetworkLink) -> dict[str, object]:
         "power_source_world_id": link.power_source_world_id,
         "active": link.active,
         "bidirectional": link.bidirectional,
+        "build_cost": link.build_cost,
+        "build_time": link.build_time,
     }
 
 
@@ -160,6 +166,8 @@ def _link_from_dict(data: dict[str, Any]) -> NetworkLink:
         power_source_world_id=data.get("power_source_world_id"),
         active=bool(data.get("active", True)),
         bidirectional=bool(data.get("bidirectional", True)),
+        build_cost=float(data.get("build_cost", 0.0)),
+        build_time=int(data.get("build_time", 0)),
     )
 
 
@@ -324,6 +332,9 @@ def _gate_status_to_dict(status: GatePowerStatus) -> dict[str, object]:
         "active": status.active,
         "slot_capacity": status.slot_capacity,
         "slots_used": status.slots_used,
+        "charge_pct": status.charge_pct,
+        "next_activation_tick": status.next_activation_tick,
+        "slot_cargo": _cargo_map_to_dict(status.slot_cargo),
     }
 
 
@@ -341,6 +352,11 @@ def _gate_status_from_dict(data: dict[str, Any]) -> GatePowerStatus:
         active=bool(data["active"]),
         slot_capacity=int(data["slot_capacity"]),
         slots_used=int(data.get("slots_used", 0)),
+        charge_pct=float(data.get("charge_pct", 1.0)),
+        next_activation_tick=(
+            None if data.get("next_activation_tick") is None else int(data["next_activation_tick"])
+        ),
+        slot_cargo=_cargo_map_from_dict(data.get("slot_cargo", {})),
     )
 
 

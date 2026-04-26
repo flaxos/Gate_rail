@@ -49,8 +49,11 @@ This means:
 - Sprint 9 slice 1 turns the sim into a goal-driven playtest via cargo-delivery contracts with due ticks, cash rewards, cash penalties, and a single integer reputation score; reputation is intentionally a single number now so it can split into per-faction standings once rival operators and other corps land in later slices.
 - Sprint 9 slices 2-4 extend the objectives layer with frontier-support contracts (progress accumulates on ticks where the target world's trend is improving or promoted), gate-recovery contracts (consecutive operational-tick streak on a target gate link, with the streak resetting when the link loses power or capacity), and three scenario presets so each contract kind has a dedicated playtest harness; contract resolution now runs after world progression so the frontier-support check reads a freshly updated trend.
 - Post-Sprint-9 cleanup: the legacy daily-colony simulation path (`Simulation`, `colony.py`, `world.py`, `train.py`, `schedule.py`, `finance.py`) has been removed so the fixed-tick backend is the single source of truth heading into the Stage 2 Godot 2D port.
-- Stage 2 integration will use a Python subprocess with newline-delimited JSON over stdio. The Python backend owns deterministic galaxy-scale world coordinates in `render_snapshot()`, while Godot will own intra-world station placement and visual metadata.
+- Stage 2 integration will use a Python subprocess with newline-delimited JSON over stdio. The Python backend owns deterministic galaxy-scale world coordinates in `render_snapshot()` and persists local node layout metadata; Godot proposes intra-world placement and owns camera/presentation metadata.
 - Full construction remains the Stage 2 player-agency target, but it should be sliced after the bridge lands: first expand an existing galaxy through schedules/orders and existing infrastructure controls, then add build commands for stations, rails, gates, trains, and finally new worlds.
+- Local Region Construction view follows the Claude Design handoff archived at `docs/design_handoff/local_region_construction/`. Galaxy Map (`scenes/main.tscn`) and Local Region (`scenes/local_region.tscn`) are separate Godot scenes sharing the `GateRailBridge` autoload, with a `SceneNav` autoload carrying the selected `world_id` across the scene change.
+- Local construction rules are now pinned in `docs/construction_rules.md`; clients should preview node, rail, train, and route-schedule actions through Python before committing.
+- The Local Region right HUD now treats construction as a preview-driven build planner rather than a timed queue; delayed build jobs remain deferred.
 
 ## Simulation layers
 
@@ -131,4 +134,4 @@ The following are valid future systems but should not block the first playable p
 - advanced policy systems,
 - orbital and space-lane logistics,
 - richer scenario authoring and comparative analytics,
-- graphical client work.
+- graphical polish beyond the thin Godot client.

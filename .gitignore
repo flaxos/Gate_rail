@@ -7,3 +7,9 @@ build/
 dist/
 godot/.godot/
 godot/imported/
+*.import
+*.uid
+.codex
+.codex/
+gate-rail/
+patch_commands.py

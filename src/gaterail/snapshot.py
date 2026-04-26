@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gaterail.economy import BUFFER_NODE_KINDS
 from gaterail.gate import preview_gate_power
 from gaterail.models import Contract, ContractKind, GameState, LinkMode
 from gaterail.traffic import effective_link_capacity
@@ -29,6 +30,16 @@ def _world_position(index: int) -> dict[str, int]:
     """Return deterministic galaxy-scale coordinates owned by the Python sim."""
 
     return {"x": 360 * index, "y": 0}
+
+
+def _node_layout(node: object) -> dict[str, float] | None:
+    """Return node-local layout metadata when the backend owns it."""
+
+    layout_x = getattr(node, "layout_x", None)
+    layout_y = getattr(node, "layout_y", None)
+    if layout_x is None or layout_y is None:
+        return None
+    return {"x": round(float(layout_x), 3), "y": round(float(layout_y), 3)}
 
 
 def _contract_progress(contract: Contract) -> tuple[str, str, int]:
@@ -80,27 +91,80 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             }
         )
 
-    nodes = [
-        {
-            "id": node.id,
-            "name": node.name,
-            "world_id": node.world_id,
-            "kind": node.kind.value,
-            "inventory": _cargo_map(node.inventory),
-            "demand": _cargo_map(node.demand),
-            "production": _cargo_map(node.production),
-            "storage": {
-                "used": node.total_inventory(),
-                "capacity": node.storage_capacity,
-            },
-        }
-        for node in sorted(state.nodes.values(), key=lambda item: item.id)
-    ]
+    nodes = []
+    # Count trains per link for utilisation
+    trains_per_link: dict[str, int] = {}
+    for train in state.trains.values():
+        for link_id in train.route_link_ids:
+            trains_per_link[link_id] = trains_per_link.get(link_id, 0) + 1
+
+    for node in sorted(state.nodes.values(), key=lambda item: item.id):
+        node_shortages = state.shortages.get(node.id, {})
+        used = node.total_inventory()
+        capacity = max(1, node.storage_capacity)
+        transfer_used = int(state.transfer_used_this_tick.get(node.id, 0))
+        transfer_limit = int(node.transfer_limit_per_tick)
+        transfer_pressure = (
+            round(transfer_used / transfer_limit, 3) if transfer_limit > 0 else 0.0
+        )
+        saturation_streak = int(state.transfer_saturation_streak.get(node.id, 0))
+        if node.recipe is None:
+            recipe_payload: dict[str, dict[str, int]] | None = None
+        else:
+            recipe_payload = {
+                "inputs": _cargo_map(node.recipe.inputs),
+                "outputs": _cargo_map(node.recipe.outputs),
+            }
+        recipe_blocked_payload = _cargo_map(state.recipe_blocked.get(node.id, {}))
+        is_buffer = node.kind in BUFFER_NODE_KINDS
+        if is_buffer:
+            buffer_fill_pct: float | None = round(used / capacity, 3)
+            served_source = state.buffer_distribution.get(node.id, {})
+            served_last_tick: dict[str, dict[str, int]] = {
+                target_id: {
+                    cargo.value: int(units)
+                    for cargo, units in sorted(cargo_map.items(), key=lambda item: item[0].value)
+                    if int(units) > 0
+                }
+                for target_id, cargo_map in sorted(served_source.items())
+                if cargo_map
+            }
+        else:
+            buffer_fill_pct = None
+            served_last_tick = {}
+        nodes.append(
+            {
+                "id": node.id,
+                "name": node.name,
+                "world_id": node.world_id,
+                "kind": node.kind.value,
+                "inventory": _cargo_map(node.inventory),
+                "demand": _cargo_map(node.demand),
+                "production": _cargo_map(node.production),
+                "storage": {
+                    "used": used,
+                    "capacity": node.storage_capacity,
+                },
+                "pressure": round(used / capacity, 3),
+                "shortages": _cargo_map(node_shortages),
+                "transfer_limit": node.transfer_limit_per_tick,
+                "transfer_used": transfer_used,
+                "transfer_pressure": transfer_pressure,
+                "saturation_streak": saturation_streak,
+                "buffer_fill_pct": buffer_fill_pct,
+                "served_last_tick": served_last_tick,
+                "recipe": recipe_payload,
+                "recipe_blocked": recipe_blocked_payload,
+                "layout": _node_layout(node),
+            }
+        )
 
     links = []
     for link in sorted(state.links.values(), key=lambda item: item.id):
         capacity, disruptions = effective_link_capacity(state, link)
         gate_status = gate_statuses.get(link.id)
+        trains_on_link = trains_per_link.get(link.id, 0)
+        utilisation = round(trains_on_link / max(1, link.capacity_per_tick), 3)
         links.append(
             {
                 "id": link.id,
@@ -115,8 +179,15 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "power_required": link.power_required,
                 "powered": None if link.mode != LinkMode.GATE or gate_status is None else gate_status.powered,
                 "slots_used": 0 if gate_status is None else gate_status.slots_used,
+                "charge_pct": 1.0 if gate_status is None else gate_status.charge_pct,
+                "next_activation_tick": None if gate_status is None else gate_status.next_activation_tick,
+                "slot_cargo": {} if gate_status is None else _cargo_map(gate_status.slot_cargo),
+                "build_cost": round(link.build_cost, 2),
+                "build_time": link.build_time,
                 "disrupted": bool(disruptions),
                 "disruption_reasons": [disruption.reason for disruption in disruptions],
+                "utilisation": utilisation,
+                "trains_on_link": trains_on_link,
             }
         )
 

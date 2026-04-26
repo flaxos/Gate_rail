@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from gaterail.cargo import CargoType, metadata_for
+from gaterail.economy import record_transfer
 from gaterail.models import FreightOrder, FreightSchedule, FreightTrain, GameState, TrainStatus
 from gaterail.traffic import reserve_route_capacity
 from gaterail.transport import shortest_route
@@ -68,6 +69,7 @@ def _attempt_unload(state: GameState, events: FreightReport, train: FreightTrain
         _block_train(events, train, f"storage full at {destination.id}")
         return
 
+    record_transfer(state, destination.id, accepted)
     train.cargo_units -= accepted
     order_id = train.order_id
     schedule_id = _schedule_id_from_order_id(order_id)
@@ -211,6 +213,7 @@ def _dispatch_trip(
         return False
 
     loaded = origin.remove_inventory(cargo_type, planned_units)
+    record_transfer(state, origin.id, loaded)
 
     train.status = TrainStatus.IN_TRANSIT
     train.cargo_type = cargo_type

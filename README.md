@@ -73,6 +73,7 @@ That is the current MVP target.
 - [PHASE2_PLAN.md](PHASE2_PLAN.md): Godot client and Stage 2 sprint plan
 - [PHASE2_UI_WIREFRAME.md](PHASE2_UI_WIREFRAME.md): implementation summary from the Claude Design handoff
 - [SPRINTS.md](SPRINTS.md): sprint-by-sprint development plan
+- [docs/construction_rules.md](docs/construction_rules.md): authoritative local construction, train, and route-creation rules
 
 ## Setup
 
@@ -146,7 +147,10 @@ Open the Godot 4 client scaffold:
 godot --path godot
 ```
 
-The Godot scene draws a fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. It currently exposes bridge status, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
+The Godot scaffold has two scenes that share the `GateRailBridge` autoload:
+
+- `scenes/main.tscn` (Galaxy Map) — draws the fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. Exposes bridge status, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, auto-run, map entity inspection, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
+- `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, gate-hub, same-world rail, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; the right HUD Build Planner shows preview context and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The **Galaxy Map** button returns to `main.tscn`.
 
 Run the test suite:
 

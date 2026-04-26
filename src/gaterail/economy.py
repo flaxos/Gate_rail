@@ -6,7 +6,39 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from gaterail.cargo import CargoType
-from gaterail.models import GameState, NetworkNode, NodeKind
+from gaterail.models import GameState, LinkMode, NetworkNode, NodeKind, NodeRecipe
+
+
+BUFFER_NODE_KINDS: frozenset[NodeKind] = frozenset({NodeKind.DEPOT, NodeKind.WAREHOUSE})
+
+SATURATION_THRESHOLD: float = 0.95
+
+
+def record_transfer(state: GameState, node_id: str, units: int) -> None:
+    """Bump ``state.transfer_used_this_tick`` for one cargo movement at a node."""
+
+    if units <= 0:
+        return
+    state.transfer_used_this_tick[node_id] = (
+        state.transfer_used_this_tick.get(node_id, 0) + units
+    )
+
+
+def update_transfer_saturation_streaks(state: GameState) -> None:
+    """Tick ``transfer_saturation_streak`` based on this tick's usage vs limit."""
+
+    streaks = state.transfer_saturation_streak
+    used = state.transfer_used_this_tick
+    for node_id, node in state.nodes.items():
+        limit = max(0, node.transfer_limit_per_tick)
+        if limit <= 0:
+            streaks.pop(node_id, None)
+            continue
+        ratio = used.get(node_id, 0) / limit
+        if ratio >= SATURATION_THRESHOLD:
+            streaks[node_id] = streaks.get(node_id, 0) + 1
+        else:
+            streaks.pop(node_id, None)
 
 
 class ResourceCategory(StrEnum):
@@ -326,6 +358,58 @@ def apply_node_production(state: GameState) -> dict[str, dict[CargoType, int]]:
     return produced
 
 
+def apply_node_recipes(state: GameState) -> dict[str, object]:
+    """Run per-node recipes; consume inputs from the node's inventory, add outputs.
+
+    Skips nodes without a recipe. When a node lacks the required inputs, records
+    the shortfall under ``blocked`` instead of consuming a partial batch.
+    """
+
+    consumed_by_node: dict[str, dict[CargoType, int]] = {}
+    produced_by_node: dict[str, dict[CargoType, int]] = {}
+    blocked: list[dict[str, object]] = []
+    blocked_by_node: dict[str, dict[CargoType, int]] = {}
+
+    for node_id, node in sorted(state.nodes.items()):
+        recipe = node.recipe
+        if recipe is None:
+            continue
+        if not all(node.stock(cargo) >= units for cargo, units in recipe.inputs.items()):
+            missing = {
+                cargo: units - node.stock(cargo)
+                for cargo, units in recipe.inputs.items()
+                if node.stock(cargo) < units
+            }
+            blocked.append(
+                {
+                    "node": node_id,
+                    "reason": "missing inputs",
+                    "missing": _plain_cargo_map(missing),
+                }
+            )
+            blocked_by_node[node_id] = dict(missing)
+            continue
+        for cargo_type, units in recipe.inputs.items():
+            removed = node.remove_inventory(cargo_type, units)
+            _add_cargo(consumed_by_node.setdefault(node_id, {}), cargo_type, removed)
+        for cargo_type, units in recipe.outputs.items():
+            accepted = node.add_inventory(cargo_type, units)
+            _add_cargo(produced_by_node.setdefault(node_id, {}), cargo_type, accepted)
+
+    state.recipe_blocked = blocked_by_node
+    return {
+        "consumed": {
+            node_id: _plain_cargo_map(cargo_map)
+            for node_id, cargo_map in sorted(consumed_by_node.items())
+        },
+        "produced": {
+            node_id: _plain_cargo_map(cargo_map)
+            for node_id, cargo_map in sorted(produced_by_node.items())
+        },
+        "blocked": blocked,
+    }
+
+
 def apply_node_demand(state: GameState) -> DemandResult:
     """Apply one tick of node demand and store shortages on state."""
 
@@ -343,3 +427,83 @@ def apply_node_demand(state: GameState) -> DemandResult:
                 shortages.setdefault(node_id, {})[cargo_type] = deficit
     state.shortages = shortages
     return DemandResult(consumed=consumed, shortages=shortages)
+
+
+def _buffer_neighbours(state: GameState, node: NetworkNode) -> list[NetworkNode]:
+    """Return same-world rail neighbours reachable from a buffer node."""
+
+    neighbours: dict[str, NetworkNode] = {}
+    for link in state.links_from(node.id, mode=LinkMode.RAIL):
+        other_id = link.other_end(node.id)
+        if other_id is None or other_id == node.id:
+            continue
+        other = state.nodes.get(other_id)
+        if other is None or other.world_id != node.world_id:
+            continue
+        neighbours[other.id] = other
+    return [neighbours[nid] for nid in sorted(neighbours)]
+
+
+def _effective_pull_demand(node: NetworkNode) -> dict[CargoType, int]:
+    """Combine declared demand with recipe inputs to define a node's pull-rate."""
+
+    combined: dict[CargoType, int] = dict(node.demand)
+    if node.recipe is not None:
+        for cargo_type, units in node.recipe.inputs.items():
+            combined[cargo_type] = combined.get(cargo_type, 0) + units
+    return combined
+
+
+def apply_buffer_distribution(state: GameState) -> dict[str, dict[str, dict[CargoType, int]]]:
+    """Push buffered cargo from depots and warehouses to neighbouring demand.
+
+    Runs after production and before demand consumption. Each buffer node is bounded
+    by its ``transfer_limit_per_tick`` across all outflows this tick, and only fills
+    the declared demand deficit (plus recipe inputs) on each neighbour. Restricted to
+    same-world rail neighbours so cargo never auto-jumps a gate.
+    """
+
+    distribution: dict[str, dict[str, dict[CargoType, int]]] = {}
+    for node_id, node in sorted(state.nodes.items()):
+        if node.kind not in BUFFER_NODE_KINDS:
+            continue
+        if node.transfer_limit_per_tick <= 0:
+            continue
+        budget = node.transfer_limit_per_tick
+        if budget <= 0 or node.total_inventory() <= 0:
+            continue
+        for neighbour in _buffer_neighbours(state, node):
+            if budget <= 0:
+                break
+            effective_demand = _effective_pull_demand(neighbour)
+            for cargo_type, required in sorted(effective_demand.items(), key=lambda item: item[0].value):
+                if budget <= 0:
+                    break
+                if required <= 0:
+                    continue
+                deficit = required - neighbour.stock(cargo_type)
+                if deficit <= 0:
+                    continue
+                available = node.stock(cargo_type)
+                if available <= 0:
+                    continue
+                push = min(deficit, available, budget)
+                if push <= 0:
+                    continue
+                removed = node.remove_inventory(cargo_type, push)
+                if removed <= 0:
+                    continue
+                accepted = neighbour.add_inventory(cargo_type, removed)
+                if accepted < removed:
+                    # Neighbour storage was full; return the unaccepted units.
+                    node.add_inventory(cargo_type, removed - accepted)
+                if accepted <= 0:
+                    continue
+                budget -= accepted
+                record_transfer(state, node.id, accepted)
+                record_transfer(state, neighbour.id, accepted)
+                per_node = distribution.setdefault(node_id, {})
+                per_neighbour = per_node.setdefault(neighbour.id, {})
+                per_neighbour[cargo_type] = per_neighbour.get(cargo_type, 0) + accepted
+    state.buffer_distribution = distribution
+    return distribution
