@@ -12,17 +12,24 @@ from gaterail.models import (
     ContractKind,
     ContractStatus,
     DevelopmentTier,
+    Facility,
+    FacilityComponent,
+    FacilityComponentKind,
+    FacilityPort,
     FinanceState,
     FreightOrder,
     FreightSchedule,
     FreightTrain,
     GameState,
     GatePowerStatus,
+    InternalConnection,
     LinkMode,
     NetworkDisruption,
     NetworkLink,
     NetworkNode,
     NodeKind,
+    NodeRecipe,
+    PortDirection,
     ProgressionTrend,
     TrainStatus,
     WorldState,
@@ -97,6 +104,144 @@ def _world_from_dict(data: dict[str, Any]) -> WorldState:
     )
 
 
+def _recipe_to_dict(recipe: NodeRecipe | None) -> dict[str, object] | None:
+    """Serialize an optional NodeRecipe."""
+
+    if recipe is None:
+        return None
+    return {
+        "inputs": _cargo_map_to_dict(recipe.inputs),
+        "outputs": _cargo_map_to_dict(recipe.outputs),
+    }
+
+
+def _recipe_from_dict(data: object) -> NodeRecipe | None:
+    """Deserialize an optional NodeRecipe."""
+
+    if not isinstance(data, dict):
+        return None
+    return NodeRecipe(
+        inputs=_cargo_map_from_dict(data.get("inputs", {})),
+        outputs=_cargo_map_from_dict(data.get("outputs", {})),
+    )
+
+
+def _port_to_dict(port: FacilityPort) -> dict[str, object]:
+    """Serialize a facility port."""
+
+    return {
+        "id": port.id,
+        "direction": port.direction.value,
+        "cargo_type": None if port.cargo_type is None else port.cargo_type.value,
+        "rate": int(port.rate),
+        "capacity": int(port.capacity),
+    }
+
+
+def _port_from_dict(data: dict[str, Any]) -> FacilityPort:
+    """Deserialize a facility port."""
+
+    cargo_type = data.get("cargo_type")
+    return FacilityPort(
+        id=str(data["id"]),
+        direction=PortDirection(str(data["direction"])),
+        cargo_type=None if cargo_type is None else CargoType(str(cargo_type)),
+        rate=int(data.get("rate", 0)),
+        capacity=int(data.get("capacity", 0)),
+    )
+
+
+def _component_to_dict(component: FacilityComponent) -> dict[str, object]:
+    """Serialize a facility component."""
+
+    return {
+        "id": component.id,
+        "kind": component.kind.value,
+        "ports": [_port_to_dict(port) for port in sorted(component.ports.values(), key=lambda item: item.id)],
+        "capacity": int(component.capacity),
+        "rate": int(component.rate),
+        "power_required": int(component.power_required),
+        "inputs": _cargo_map_to_dict(component.inputs),
+        "outputs": _cargo_map_to_dict(component.outputs),
+    }
+
+
+def _component_from_dict(data: dict[str, Any]) -> FacilityComponent:
+    """Deserialize a facility component."""
+
+    ports: dict[str, FacilityPort] = {}
+    for port_data in data.get("ports", []):
+        port = _port_from_dict(port_data)
+        ports[port.id] = port
+    return FacilityComponent(
+        id=str(data["id"]),
+        kind=FacilityComponentKind(str(data["kind"])),
+        ports=ports,
+        capacity=int(data.get("capacity", 0)),
+        rate=int(data.get("rate", 0)),
+        power_required=int(data.get("power_required", 0)),
+        inputs=_cargo_map_from_dict(data.get("inputs", {})),
+        outputs=_cargo_map_from_dict(data.get("outputs", {})),
+    )
+
+
+def _connection_to_dict(connection: InternalConnection) -> dict[str, object]:
+    """Serialize an internal facility connection."""
+
+    return {
+        "id": connection.id,
+        "source_component_id": connection.source_component_id,
+        "source_port_id": connection.source_port_id,
+        "destination_component_id": connection.destination_component_id,
+        "destination_port_id": connection.destination_port_id,
+    }
+
+
+def _connection_from_dict(data: dict[str, Any]) -> InternalConnection:
+    """Deserialize an internal facility connection."""
+
+    return InternalConnection(
+        id=str(data["id"]),
+        source_component_id=str(data["source_component_id"]),
+        source_port_id=str(data["source_port_id"]),
+        destination_component_id=str(data["destination_component_id"]),
+        destination_port_id=str(data["destination_port_id"]),
+    )
+
+
+def _facility_to_dict(facility: Facility | None) -> dict[str, object] | None:
+    """Serialize a facility, or return None if absent."""
+
+    if facility is None:
+        return None
+    return {
+        "components": [
+            _component_to_dict(component)
+            for component in sorted(facility.components.values(), key=lambda item: item.id)
+        ],
+        "connections": [
+            _connection_to_dict(connection)
+            for connection in sorted(facility.connections.values(), key=lambda item: item.id)
+        ],
+    }
+
+
+def _facility_from_dict(data: object) -> Facility | None:
+    """Deserialize a facility, or return None if absent."""
+
+    if not isinstance(data, dict):
+        return None
+    components: dict[str, FacilityComponent] = {}
+    for component_data in data.get("components", []):
+        component = _component_from_dict(component_data)
+        components[component.id] = component
+    connections: dict[str, InternalConnection] = {}
+    for connection_data in data.get("connections", []):
+        connection = _connection_from_dict(connection_data)
+        connections[connection.id] = connection
+    return Facility(components=components, connections=connections)
+
+
 def _node_to_dict(node: NetworkNode) -> dict[str, object]:
     """Serialize a network node."""
 
@@ -110,6 +255,10 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "demand": _cargo_map_to_dict(node.demand),
         "storage_capacity": node.storage_capacity,
         "transfer_limit_per_tick": node.transfer_limit_per_tick,
+        "layout_x": node.layout_x,
+        "layout_y": node.layout_y,
+        "recipe": _recipe_to_dict(node.recipe),
+        "facility": _facility_to_dict(node.facility),
     }
 
 
@@ -126,6 +275,10 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         demand=_cargo_map_from_dict(data.get("demand", {})),
         storage_capacity=int(data.get("storage_capacity", 1_000)),
         transfer_limit_per_tick=int(data.get("transfer_limit_per_tick", 24)),
+        layout_x=None if data.get("layout_x") is None else float(data["layout_x"]),
+        layout_y=None if data.get("layout_y") is None else float(data["layout_y"]),
+        recipe=_recipe_from_dict(data.get("recipe")),
+        facility=_facility_from_dict(data.get("facility")),
     )
 
 
@@ -143,6 +296,8 @@ def _link_to_dict(link: NetworkLink) -> dict[str, object]:
         "power_source_world_id": link.power_source_world_id,
         "active": link.active,
         "bidirectional": link.bidirectional,
+        "build_cost": link.build_cost,
+        "build_time": link.build_time,
     }
 
 
@@ -160,6 +315,8 @@ def _link_from_dict(data: dict[str, Any]) -> NetworkLink:
         power_source_world_id=data.get("power_source_world_id"),
         active=bool(data.get("active", True)),
         bidirectional=bool(data.get("bidirectional", True)),
+        build_cost=float(data.get("build_cost", 0.0)),
+        build_time=int(data.get("build_time", 0)),
     )
 
 
@@ -324,6 +481,9 @@ def _gate_status_to_dict(status: GatePowerStatus) -> dict[str, object]:
         "active": status.active,
         "slot_capacity": status.slot_capacity,
         "slots_used": status.slots_used,
+        "charge_pct": status.charge_pct,
+        "next_activation_tick": status.next_activation_tick,
+        "slot_cargo": _cargo_map_to_dict(status.slot_cargo),
     }
 
 
@@ -341,6 +501,11 @@ def _gate_status_from_dict(data: dict[str, Any]) -> GatePowerStatus:
         active=bool(data["active"]),
         slot_capacity=int(data["slot_capacity"]),
         slots_used=int(data.get("slots_used", 0)),
+        charge_pct=float(data.get("charge_pct", 1.0)),
+        next_activation_tick=(
+            None if data.get("next_activation_tick") is None else int(data["next_activation_tick"])
+        ),
+        slot_cargo=_cargo_map_from_dict(data.get("slot_cargo", {})),
     )
 
 

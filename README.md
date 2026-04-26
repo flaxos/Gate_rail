@@ -34,7 +34,7 @@ Stage 1 is the current Python simulation: no graphics, with cargo demand, train 
 
 Stage 2 is the Godot 2D prototype: tile-based rail presentation, simple moving trains, cargo counters, wormhole gates, route UI, gate schedule UI, and staged construction controls.
 
-Stage 3 is the proper game expansion: more worlds, contracts, corporate finance, rival operators, tech tree, modular stations, and advanced rail types.
+Stage 3 is the proper game expansion: more worlds, contracts, corporate finance, rival operators, tech tree, facility/station automation, 3D facility presentation, and advanced rail types.
 
 ## Core gameplay loop
 
@@ -55,6 +55,7 @@ The backend should evolve through four explicit layers:
 - `economic`: resources, recipes, storage, deficits, surpluses
 - `transport`: tracks, stations, trains, routing, congestion
 - `gate`: wormhole links, activation, throughput, power cost
+- `facility`: station/depot/hub internals such as platforms, loaders, unloaders, buffers, factory blocks, and internal cargo ports
 
 The live game feel can be real-time, but the backend should run on fixed ticks so behavior stays deterministic and easy to test.
 
@@ -73,6 +74,8 @@ That is the current MVP target.
 - [PHASE2_PLAN.md](PHASE2_PLAN.md): Godot client and Stage 2 sprint plan
 - [PHASE2_UI_WIREFRAME.md](PHASE2_UI_WIREFRAME.md): implementation summary from the Claude Design handoff
 - [SPRINTS.md](SPRINTS.md): sprint-by-sprint development plan
+- [docs/construction_rules.md](docs/construction_rules.md): authoritative local construction, train, and route-creation rules
+- [docs/facility_layer_plan.md](docs/facility_layer_plan.md): planned station/depot/hub automation layer before any 3D facility view
 
 ## Setup
 
@@ -146,7 +149,10 @@ Open the Godot 4 client scaffold:
 godot --path godot
 ```
 
-The Godot scene draws a fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. It currently exposes bridge status, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
+The Godot scaffold has two scenes that share the `GateRailBridge` autoload:
+
+- `scenes/main.tscn` (Galaxy Map) — draws the fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. Exposes bridge status, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, auto-run, map entity inspection, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
+- `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, gate-hub, same-world rail, interworld gate-link, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; route creation lets the player tune cargo, units per departure, and interval before preview. The right HUD Build Planner shows preview context, gate handoff route warnings, and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The `LAYERS` toggle renders backend-owned supply, demand, inventory, shortage, recipe-blocked, and transfer-pressure overlays. The **Galaxy Map** button returns to `main.tscn`.
 
 Run the test suite:
 

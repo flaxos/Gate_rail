@@ -23,6 +23,7 @@ def shortest_route(
     origin: str,
     destination: str,
     allowed_modes: set[LinkMode] | None = None,
+    require_operational: bool = True,
 ) -> Route | None:
     """Find the lowest-travel-time route between two nodes."""
 
@@ -46,7 +47,18 @@ def shortest_route(
                 gate_power_required=gate_power,
             )
 
-        for link in state.links_from(node_id):
+        if require_operational:
+            links = state.links_from(node_id)
+        else:
+            links = sorted(
+                [
+                    link
+                    for link in state.links.values()
+                    if link.active and link.connects(node_id)
+                ],
+                key=lambda item: item.id,
+            )
+        for link in links:
             if allowed_modes is not None and link.mode not in allowed_modes:
                 continue
             next_node = link.other_end(node_id)

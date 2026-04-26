@@ -17,6 +17,12 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 8 is complete: the CLI now supports scenario discovery, scenario inspection, report filters, JSON save/load, schedule status tables, and a balanced benchmark scenario.
 - Sprint 9 is complete: cargo-delivery, frontier-support, and gate-recovery contract kinds all resolve against tick state; reputation tracking, reward and penalty resolution, monthly contract reporting, stable render snapshots, player commands, and the JSON-over-stdio bridge are in place.
 - Phase 2 is approved for this repository: Godot client work is allowed under `godot/`, while the Python backend remains authoritative and CLI/stdio-first.
+- Sprint 10 is complete: the Godot bridge/client scaffold renders live snapshots, controls schedules/orders, displays finance/contracts, wires placeholder assets, and surfaces alerts.
+- Sprint 11 is complete: the Godot client can auto-run the backend, inspect map entities, highlight selected objects, and show clearer link/train operational state.
+- Sprint 12 hardening is complete: backend construction commands are immediate, validated, and test-covered for same-world rail/node expansion; delayed construction queues are deferred until build-time simulation is worth modeling.
+- Sprint 13 is underway in the Local Region scene only. Slices 13A through 13D are complete: backend-owned previews drive node, rail, train, and route creation, with persisted local-world layout metadata, visible HUD preview context, ESC/tool-switch cancellation, an explicit cargo picker on route creation, and a Select-tool inspector for nodes and links. The galaxy map stays focused on run/inspect/dispatch/navigation.
+- Sprint 14 is in progress. Slices 14A (buffer distribution), 14B (transfer-limit pressure visibility), and 14C (per-node recipes) are complete: depots/warehouses auto-feed neighbouring demand within their per-tick transfer budget, node snapshots expose transfer bottlenecks, and individual industry/extractor nodes can transform inputs into outputs through `NodeRecipe`.
+- Facility layer planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, components, ports, and internal cargo flow exist. Sprints 16-18 now cover facility simulation, 2D facility UI, and a 3D facility-view spike.
 
 ## Long-term stages
 
@@ -39,7 +45,8 @@ Stage 3: Proper game expansion
 - corporate finance
 - rival operators
 - tech tree
-- modular stations
+- facility/station automation
+- 3D facility presentation
 - advanced rail types
 
 ## Working rules
@@ -353,46 +360,218 @@ Slice 5 completed state:
 ## Sprint 11: Playable Operations UI
 
 Goal:
-- make the current Sprint 8/Sprint 9 scenarios playable from Godot without construction
+- make the current Sprint 8/Sprint 9 scenarios playable from Godot without construction, so the bridge/client loop is solid before track laying begins
 
 Deliverables:
-- schedule panel with enable/disable controls
-- one-shot dispatch form backed by `DispatchOrder`
-- cancel pending order control backed by `CancelOrder`
-- contract progress, finance, and reputation HUD
 - pause, step, and run controls backed by stdio bridge messages
+- click selection for worlds, nodes, links, and trains
+- inspector panel showing selected entity state
+- clearer rail/gate links, capacity labels, disrupted/degraded links, and in-transit train positions
 
 Exit criteria:
-- a player can change scenario outcomes from the Godot UI without terminal commands
+- a player can run, inspect, and change scenario outcomes from the Godot UI without terminal commands
 
-## Sprint 12: Construction Slice 1
+Completed state:
+- `Main` has Play/Pause auto-run controls that advance the live backend through `ticks:1` bridge messages
+- map clicks select worlds, nodes, links, and trains without adding backend rules to Godot
+- the inspector reports operational state for the selected entity, including cargo, storage, power, route, capacity, and disruption details
+- in-transit trains are drawn along their active route, selected entities are highlighted, and links show rail/gate mode plus effective/base capacity labels
+- the client layout is responsive: side panels anchor to the viewport edges, the alert strip spans the bottom, and the network map is computed into the available center area at windowed and fullscreen sizes
+
+## Sprint 12: Track Construction Rules and Backend Commands
 
 Goal:
-- start full construction by expanding existing worlds and routes
+- define the core track-laying game rules before building the Godot construction UI
 
 Deliverables:
+- construction rules for buildable node roles: extractor, industry, depot, warehouse, settlement connector, and gate hub
 - backend command for building logistics nodes on existing worlds
 - backend command for building rail links between valid nodes
-- cash costs, validation errors, and JSON bridge error frames
-- Godot build mode for placing a node and drawing a rail link
-- snapshot support for newly built entities
+- validation for duplicate links, world boundaries, invalid endpoints, cash costs, and storage/transfer defaults
+- JSON bridge error frames for invalid construction
+- snapshot support for newly built entities and construction-relevant metadata
 
 Exit criteria:
-- the player can add rail infrastructure to the benchmark scenario and see it affect logistics
+- backend tests prove that constructed nodes and rail links can alter routing and logistics outcomes
 
-## Sprint 13: Construction Slice 2
+Completed state:
+- Models now support per-link build cost/time metadata and the `warehouse` node role.
+- `link_build_cost`, `node_build_cost`, `node_upgrade_cost`, and `train_purchase_cost` rules are centralized.
+- Backend handles `BuildNode`, `BuildLink`, `DemolishLink`, `PurchaseTrain`, and `UpgradeNode` commands with cash checks and validation.
+- `BuildLink` is intentionally rail-only for Sprint 12 and rejects self-links, cross-world rail, duplicate endpoint pairs, invalid endpoints, and invalid capacity/travel values.
+- Snapshot and persistence round-trip newly built entities plus construction-relevant link metadata.
+- Construction queues are deferred; Sprint 12 construction completes immediately.
+- Tests cover validation errors, cash deduction, warehouse defaults, duplicate checks, persistence, and route changes from a constructed rail link.
+
+## Sprint 13: Godot Track Construction Mode
 
 Goal:
-- add high-impact expansion infrastructure and train/schedule creation
+- turn backend construction rules into the first hands-on track-laying UI
 
 Deliverables:
-- backend commands for gate hubs, gate links, train purchase, and schedule creation
-- Godot UI for gate construction, train creation, and schedule creation
-- visible cost, power, and capacity feedback
-- tests for all new backend commands and bridge frames
+- build-mode toggle in Godot
+- click-to-place logistics nodes on existing worlds
+- click-to-connect rail links between valid nodes
+- cost preview, valid/invalid placement feedback, and bridge error chips
+- immediate redraw from returned snapshots
 
 Exit criteria:
-- the player can expand an existing network with stations, rail, gates, trains, and schedules from Godot
+- the player can add rail infrastructure to the benchmark scenario from Godot and see it affect routing
+
+Slice 13A completed state:
+- `PreviewBuildNode` and `PreviewBuildLink` validate placement, cost, build-time metadata, defaults, affordability, and normalized build commands without mutating state.
+- `BuildNode` can persist local layout coordinates, and snapshots/save-load round-trip that metadata.
+- `BuildLink` can derive rail travel time from persisted local node layout when the client omits `travel_ticks`.
+- The Local Region scene requests backend previews before committing node, gate-hub, or rail construction, then sends the normalized backend-owned build command on the second click.
+- Godot no longer duplicates node or rail construction costs; invalid previews return as command results instead of bridge errors.
+- Tests cover preview parsing, non-mutating previews, invalid preview results, persisted layout metadata, bridge preview behavior, and layout-derived rail travel ticks.
+
+Slice 13B completed state:
+- `docs/construction_rules.md` is the canonical local construction rules reference for node roles, rail constraints, layout travel-time derivation, train purchase, route schedules, and deferred queue/expansion work.
+- `PreviewPurchaseTrain` and `PreviewCreateSchedule` extend the backend-owned preview contract to train and route creation.
+- `CreateSchedule` creates recurring freight schedules from existing infrastructure after validating train location, idle state, cargo units, interval, route existence, and next departure.
+- The Local Region Train tool now supports a first route loop: click an empty node to preview/buy a train, or click a node with an idle train to select an origin and click a destination to preview/create a route schedule.
+- Godot no longer hardcodes train purchase cost; route validity and route travel metadata come from the backend preview.
+- Tests cover train purchase previews, schedule creation, schedule previews, bridge-contained invalid preview results, and snapshot visibility of created schedules.
+
+Slice 13C completed state:
+- The right HUD's placeholder construction queue is now a `Build Planner` panel.
+- The planner shows active tool guidance, selected route train/origin context, backend preview status, target id, costs, build time, travel time, capacity, storage/transfer, route details, cargo, units, and interval where available.
+- Valid previews expose HUD `Confirm` and `Cancel` actions, so the player no longer has to rely only on the bottom status strip or a second map click.
+- The planner remains immediate-mode; delayed construction queues are still deferred until build-time simulation is implemented.
+
+Slice 13D completed state:
+- ESC and tool-switch now uniformly cancel any in-flight preview, route-builder selection, rail-origin pick, cargo popup, and inspection. The status strip explains the cancellation.
+- Route creation no longer auto-commits to a suggested cargo; clicking a destination opens a cargo popup populated from the origin inventory/production and the destination demand, with the auto-suggestion marked. Backend `PreviewCreateSchedule` and `CreateSchedule` already accept any cargo, so no contract change was needed.
+- The Select tool now populates the Build Planner with an inspector for the clicked node or link (kind, world, storage, transfer, inventory/demand/production, shortages, trains here, touching links, mode, travel ticks, capacity, in-transit trains, disruption reasons, powered state, build cost).
+- Tests cover cargo override round-tripping through preview and create, parametrized cargo persistence on the schedule, and the cancellation contract that invalid previews leave state clean and a follow-up valid preview still works.
+
+## Sprint 14: Industry, Depot, and Warehouse Logistics
+
+Goal:
+- make local-world rail construction matter as the main game loop
+
+Deliverables:
+- warehouse/depot buffering rules and visible storage pressure
+- clearer extractor to industry to depot flows
+- node transfer constraints that make local track layout meaningful
+- UI overlays for supply, demand, inventory, and shortages
+
+Exit criteria:
+- the player can improve a local world's supply chain by connecting production, storage, demand, and depot nodes
+
+Slice 14A completed state:
+- New tick phase `buffer_distribution` runs after node production and before node demand. Depots and warehouses push buffered inventory across same-world rail links to neighbouring nodes whose declared demand is still unmet, bounded by the buffer node's `transfer_limit_per_tick` across all outflows. Cargo never auto-jumps gate links.
+- Per-tick reports include a `buffer_distribution` rollup keyed by source then target then cargo.
+- Node snapshots expose `buffer_fill_pct` (only on depot/warehouse, null elsewhere) and `served_last_tick` (only on depot/warehouse, empty elsewhere), so the Godot inspector can show buffering state.
+- Tests cover deficit-only filling, transfer-limit budgeting across neighbours, warehouse-kind parity, non-buffer kinds opting out, gate-link isolation, multi-tick supply without trains, and the snapshot contract.
+
+Slice 14B completed state:
+- `GameState` tracks `transfer_used_this_tick` and `transfer_saturation_streak` per node. Reset at the start of each tick; bumped by the buffer phase (both source and target by accepted units), train loads at the origin, and train unloads at the destination.
+- After freight movement, `update_transfer_saturation_streaks` increments a node's streak when used/limit ≥ 0.95, and resets it otherwise.
+- Node snapshots expose `transfer_used`, `transfer_pressure` (used/limit, 3dp), and `saturation_streak` for every node, alongside the existing `transfer_limit`.
+- The Godot Local Region inspector now renders transfer as `used / limit (pct%)` with a steel/green/amber/red color depending on pressure, and shows a "SATURATED" or "Approaching limit" note when the saturation streak fires.
+- Tests cover buffer-side bumping on both ends, train load/unload bumping, multi-tick streak growth, streak reset when idle, the inclusive 95% threshold, and the snapshot contract.
+
+Slice 14C completed state:
+- `NodeRecipe` models per-node transformations with explicit cargo inputs and outputs.
+- `apply_node_recipes` runs as a fixed tick phase after buffer distribution and before demand consumption.
+- Recipes consume a full input batch or block cleanly without partial consumption when inputs are missing.
+- Recipe outputs respect node storage capacity through existing inventory acceptance rules.
+- Buffer distribution includes recipe input needs in a neighbour's effective pull demand, so depots and warehouses can feed industries even before declared consumer demand fires.
+- Node snapshots expose recipe inputs/outputs plus per-node recipe-blocked shortfalls.
+- Tests cover recipe success, missing inputs, nodes without recipes, buffer-fed recipe inputs, extractor-to-industry round trips, storage clamping, snapshot recipe fields, simulation phase ordering, and declared demand plus recipe input pull.
+
+Slice 14D completed state:
+- The Local Region `LAYERS` toggle now draws logistics overlays from backend snapshot fields: supply, demand, inventory/storage fill, node shortages, recipe-blocked inputs, and transfer pressure.
+- Nodes render compact overlay badges: `S` supply, `D` demand, `I` inventory, `!` shortage, `R` recipe blocked, and `T` hot transfer.
+- Transfer pressure renders as a colored ring using the same green/amber/red thresholds as the inspector; storage pressure renders as a bar under each node.
+- The right HUD now includes a `Local Overlays` summary/legend with counts for supply, demand, stocked nodes, shortages, recipe stalls, and hot transfer nodes.
+- No new backend schema was required; 14D consumes the snapshot contract created by 14A-14C.
+
+## Sprint 15: Gate Expansion, Trains, and Schedule Creation
+
+Goal:
+- connect local track networks to interworld wormhole logistics
+
+Deliverables:
+- backend commands for gate hubs and gate links
+- train purchase/build command
+- schedule creation command
+- Godot UI for gate construction, train purchase, and schedule creation
+- clear cost, power, capacity, and route feedback
+
+Exit criteria:
+- the player can expand an existing network with rail, warehouses/depots, gates, trains, and schedules from Godot
+
+Slice 15A completed state:
+- `BuildLink` and `PreviewBuildLink` now support `mode="gate"` for explicit interworld gate links between `gate_hub` endpoints on different worlds.
+- Gate-link validation rejects self-links, non-gate endpoints, same-world gate links, duplicate gate endpoint pairs, invalid capacity/travel values, invalid power sources, and insufficient cash.
+- JSON command parsing supplies gate defaults when omitted: 1 travel tick, 4 slots/tick, and 80 MW.
+- Gate previews return normalized build commands plus route context for UI: endpoint world names, power source, required power, available power, shortfall, and whether the link would be powered if built.
+- The Local Region Gate Hub tool keeps empty-click gate-hub construction, and adds existing-gate-hub click to preview a backend gate link to an available external gate hub.
+- The Gate Throughput HUD distinguishes "no gate hub", "unlinked gate hub", and linked gate states with planned slots and power draw context.
+- Tests cover command defaults, preview normalization, build mutation, snapshot-powered context, invalid endpoints, same-world rejection, and power-shortfall previews.
+
+Slice 15B completed state:
+- `PreviewCreateSchedule` and `CreateSchedule` now return route gate-handoff context: `gate_link_ids`, `gate_handoffs`, and `route_warnings`.
+- Gate handoffs expose endpoint world names, gate power state, power shortfall, effective slot capacity, used slots, pressure, disruption reasons, and per-gate warnings.
+- Schedule previews warn when a planned route depends on saturated, hot, degraded, blocked, or unpowered gates.
+- If no operational route exists because a gate is unpowered, an invalid schedule preview can still return structural gate-handoff context so the UI can explain the blocker rather than only saying "no route".
+- The Local Region Build Planner renders route gate links, world handoff labels, slot pressure, power shortfalls, and warning notes for route previews.
+- Tests cover normal gate handoff context, saturated gate warnings, disruption/degraded warnings, unpowered-gate invalid preview context, and create-result parity with preview context.
+
+Slice 15C completed state:
+- Local Region route creation now opens a route-tuning popup after cargo selection instead of sending fixed `units_per_departure=8` and `interval_ticks=4`.
+- The popup shows train id, origin, destination, cargo, and train capacity, and lets the player set units per departure and interval ticks before backend preview.
+- Schedule previews now use the tuned values and still return through the existing backend-owned `PreviewCreateSchedule` validation path.
+- The Build Planner shows route tuning state while the popup is active, then shows the normalized backend command with tuned units and interval after preview.
+- Backend tests lock that tuned units and interval survive preview normalization, are persisted by `CreateSchedule`, and reject non-positive or over-capacity values without mutation.
+- Sprint 15's planned deliverables are now satisfied: gate-link construction, train purchase, route schedule creation, and route/gate feedback all run through backend-owned previews.
+
+## Sprint 16: Facility Simulation Foundation
+
+Goal:
+- create the backend-owned facility layer before any station/depot/hub 3D presentation work
+
+Deliverables:
+- `Facility` model attached to `NetworkNode`
+- `FacilityComponent` model for platforms, loaders, unloaders, storage bays, factory blocks, power modules, and gate interfaces
+- typed `FacilityPort` inputs/outputs with cargo type, direction, rate, and capacity
+- `InternalConnection` between ports
+- save/load and snapshot support for facility state
+- backend preview/build commands for facility components
+- tests for loader rate, storage capacity, internal flow, and blocked components
+
+Exit criteria:
+- a depot or industry bottleneck can be caused and fixed by changing facility components rather than changing only local rail
+
+## Sprint 17: Facility UI Prototype
+
+Goal:
+- expose facility internals in 2D before attempting 3D
+
+Deliverables:
+- local node drill-in to a facility detail panel or scene
+- component boxes, ports, and internal cargo-flow arrows
+- backend-preview UI for loader, unloader, buffer, and factory components
+- blocked-flow and throughput-pressure readouts
+
+Exit criteria:
+- the player can diagnose and improve a depot/industry bottleneck by modifying facility components
+
+## Sprint 18: 3D Facility View Spike
+
+Goal:
+- prove Godot can render facility snapshots in 3D without owning simulation rules
+
+Deliverables:
+- one 3D depot scene rendered from backend facility snapshot data
+- rail platform, train placeholder, loader crane, and storage bay
+- read-only first pass unless the 2D facility UI contract is stable
+
+Exit criteria:
+- the 3D scene visually matches the same backend facility state as the 2D facility view
 
 ## Interactive cadence
 
@@ -404,6 +583,22 @@ For collaborative development:
 4. Run tests and inspect terminal output.
 5. Decide whether the result is fun, clear, and extensible before expanding scope.
 
+Slice 16A completed state:
+- `Facility`, `FacilityComponent`, `FacilityPort`, `InternalConnection`, `FacilityComponentKind`, and `PortDirection` are first-class backend models attached to `NetworkNode` via the new `facility` field.
+- `NetworkNode` exposes `effective_storage_capacity()`, `effective_outbound_rate()`, `effective_inbound_rate()`, and `effective_combined_rate()` that derive caps from facility components when present and fall back to the raw `storage_capacity` / `transfer_limit_per_tick` fields otherwise; `add_inventory` now respects the effective storage cap.
+- A new `apply_facility_components` phase runs each tick between `node_recipes` and `node_demand`, executing FACTORY_BLOCK input→output flow with all-or-nothing input consumption. Blocked components are recorded on `state.facility_blocked` and surfaced in the per-tick report under `facilities`.
+- `economy.apply_buffer_distribution` and `economy.update_transfer_saturation_streaks` now consult the effective rates, and `freight._dispatch_trip` / `_attempt_unload` cap train load and unload by the origin's outbound and the destination's inbound rates respectively.
+- Snapshots expose `facility`, `facility_blocked`, `effective_inbound_rate`, `effective_outbound_rate`, `transfer_limit` (effective), `base_transfer_limit`, and `storage.{used, capacity, base_capacity}` so the Stage-2 client can render facility-derived caps without recomputing them.
+- `state_to_dict` / `state_from_dict` now persist `recipe` and `facility` for every node, with helpers for ports, components, and internal connections.
+- New `BuildFacilityComponent` and `PreviewBuildFacilityComponent` commands install or preview a component on a node, validate kind-specific invariants (storage_bay capacity, loader/unloader rate, factory_block inputs/outputs), reject duplicate component ids, charge `facility_component_build_cost(kind)`, and round-trip through `command_from_dict` (including ports + connections).
+- 25 new tests in `tests/test_sprint16a_facility_foundation.py` cover loader-rate caps on freight load, unloader-rate caps on freight unload, storage-bay capacity overrides, fall-through to raw fields when no relevant components exist, factory-block consume/produce/blocked behavior, output clamping by effective storage cap, full simulation phase ordering, snapshot exposure, persistence round-trip, all build/preview validation rules, command JSON parsing, and the Sprint 16 exit-criterion scenario (a slow loader caps throughput; swapping it for a fast one removes the bottleneck without touching any rail link).
+- Full pytest suite passes 179 tests; stdio bridge round-trip emits the new facility/effective-rate fields without regressions.
+
 ## Current next step
 
-Sprint 9 is complete. The next concrete slice is Sprint 10: create the Godot sibling project and render the first `--stdio` snapshots without adding new simulation rules.
+Slice 16A landed (backend foundation only — no UI). Next recommended slice is 16B: extend the build/preview surface to the destructive and unwiring operations the player will need before the Sprint 17 UI lands. Suggested scope:
+- `DemolishFacilityComponent` and `PreviewDemolishFacilityComponent` (reject if removing the only loader/unloader would drop a node's effective rate below an active schedule's `units_per_departure`, or if removal would orphan an `InternalConnection`).
+- `BuildInternalConnection` / `RemoveInternalConnection` (and previews) so the player can rewire ports without rebuilding the whole component.
+- Tests covering: demolishing a loader strands an idle train order on the next tick, demolishing a storage bay re-clamps `add_inventory` to remaining bay capacity, and removing a connection drops a factory block to "blocked" if it depended on internal feed rather than node inventory.
+
+After 16B the next step is Sprint 17 (the 2D facility detail UI in Godot, drilling into one node to render its facility components and internal flow).

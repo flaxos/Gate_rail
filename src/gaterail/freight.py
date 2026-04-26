@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from gaterail.cargo import CargoType, metadata_for
+from gaterail.economy import record_transfer
 from gaterail.models import FreightOrder, FreightSchedule, FreightTrain, GameState, TrainStatus
 from gaterail.traffic import reserve_route_capacity
 from gaterail.transport import shortest_route
@@ -61,13 +62,14 @@ def _attempt_unload(state: GameState, events: FreightReport, train: FreightTrain
         return
 
     destination = state.nodes[train.node_id]
-    transfer_limit = max(0, destination.transfer_limit_per_tick)
+    transfer_limit = max(0, destination.effective_inbound_rate())
     attempted = min(train.cargo_units, transfer_limit)
     accepted = destination.add_inventory(train.cargo_type, attempted)
     if accepted <= 0:
         _block_train(events, train, f"storage full at {destination.id}")
         return
 
+    record_transfer(state, destination.id, accepted)
     train.cargo_units -= accepted
     order_id = train.order_id
     schedule_id = _schedule_id_from_order_id(order_id)
@@ -177,7 +179,7 @@ def _dispatch_trip(
         return False
 
     origin = state.nodes[origin_id]
-    load_limit = max(0, origin.transfer_limit_per_tick)
+    load_limit = max(0, origin.effective_outbound_rate())
     planned_units = min(train.capacity, requested_units, load_limit, origin.stock(cargo_type))
     if planned_units <= 0:
         events["blocked"].append(
@@ -211,6 +213,7 @@ def _dispatch_trip(
         return False
 
     loaded = origin.remove_inventory(cargo_type, planned_units)
+    record_transfer(state, origin.id, loaded)
 
     train.status = TrainStatus.IN_TRANSIT
     train.cargo_type = cargo_type

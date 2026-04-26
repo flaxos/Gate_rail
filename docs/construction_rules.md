@@ -1,0 +1,79 @@
+# GateRail Construction Rules
+
+This document is the canonical rules reference for player-built local and gate infrastructure. The Python backend owns validation, pricing, pathfinding, power context, and mutation. Godot may propose positions and commands, but it should preview through the backend before committing a build.
+
+## Build Flow
+
+1. The client sends a preview command such as `PreviewBuildNode`, `PreviewBuildLink`, `PreviewPurchaseTrain`, or `PreviewCreateSchedule`.
+2. The backend returns `ok`, a human-readable `message`, relevant cost/route metadata, and a `normalized_command` when valid.
+3. The client commits by sending the returned normalized command.
+4. Invalid previews return `ok: false` inside `bridge.command_results`; they should not become bridge-level errors.
+
+## Node Roles
+
+- `settlement`: demand endpoint for people and local consumption.
+- `depot`: train-facing logistics yard with stronger transfer than a basic node.
+- `warehouse`: high-capacity buffer for smoothing supply flow and future bottleneck gameplay.
+- `extractor`: local production source such as mines, farms, or wells.
+- `industry`: processing and manufacturing node.
+- `gate_hub`: local interface to interworld gate logistics.
+
+Default node costs and capacities are centralized in `src/gaterail/construction.py`. Current costs are settlement 800, depot 1200, warehouse 1600, extractor 1500, industry 2000, and gate hub 8000.
+
+## Local Layout
+
+- Built nodes may include `layout: {"x": float, "y": float}`.
+- The backend persists layout as `layout_x` and `layout_y`.
+- Snapshots expose node layout as `node.layout`.
+- Missing layout is allowed for legacy/scenario nodes; Godot falls back to deterministic visual placement.
+
+## Rail Links
+
+- Rail endpoints must be different nodes on the same world.
+- Duplicate rail links between the same endpoint pair are rejected.
+- Capacity and travel ticks must be positive.
+- If `travel_ticks` is omitted, the backend derives it from persisted local layout distance using 50 layout units per travel tick, minimum 1.
+- Rail cost is `150 * travel_ticks`.
+- Link build-time metadata is `travel_ticks * 2`, but Sprint 13 construction still completes immediately.
+
+## Gate Links
+
+- Gate links use `PreviewBuildLink` / `BuildLink` with `mode: "gate"`.
+- Gate endpoints must be different `gate_hub` nodes on different worlds.
+- Duplicate gate links between the same endpoint pair are rejected.
+- If `travel_ticks` is omitted by a JSON client, the backend defaults gate travel to 1 tick.
+- If `capacity_per_tick` or `power_required` are omitted by a JSON client, the backend defaults them to 4 slots/tick and 80 MW.
+- If `power_source_world_id` is omitted, the backend uses the origin node's world.
+- Gate power source must be one of the endpoint worlds.
+- Gate preview/build results include origin/destination world labels, power source, power required, current available power, power shortfall, and `powered_if_built`.
+- Gate links may be built even if they would be unpowered; route usage still depends on the normal gate power evaluation.
+- Current gate-link cost is 10000 and build-time metadata is `travel_ticks * 2`; construction still completes immediately.
+
+## Trains
+
+- `PreviewPurchaseTrain` and `PurchaseTrain` use backend-owned pricing.
+- Train ids must be unique, target nodes must exist, names cannot be blank, and capacity must be positive.
+- Current train cost is `500 + capacity * 20`.
+- A purchased train starts idle at its target node.
+
+## Route Schedules
+
+- `PreviewCreateSchedule` and `CreateSchedule` create recurring freight routes from existing infrastructure.
+- The train must exist, be idle, and be located at the schedule origin.
+- Origin and destination nodes must exist and be different.
+- A backend route must exist between origin and destination.
+- Units per departure and interval ticks must be positive.
+- Units per departure cannot exceed train capacity.
+- Clients should let players tune units per departure and interval ticks before sending `PreviewCreateSchedule`; these values are not client constants.
+- If `next_departure_tick` is omitted, the backend normalizes it to `state.tick + 1`.
+- Preview returns route travel ticks, route node ids, route link ids, and a normalized `CreateSchedule` command.
+- Preview and create results also return `gate_link_ids`, `gate_handoffs`, and `route_warnings`.
+- Gate handoff context includes endpoint worlds, power state, power shortfall, effective slots, used slots, pressure, disruption reasons, and per-gate warnings.
+- If no operational route exists because a gate is unpowered, preview remains invalid but may still return structural gate handoff context so the client can explain the blocker.
+
+## Deferred
+
+- Delayed construction jobs and queue simulation.
+- New-world discovery and arbitrary interworld expansion beyond linking existing gate hubs.
+- Per-tile collision, zoning, terrain costs, and bridge/tunnel rules.
+- Rich route UI for multi-stop services and editing existing schedules.

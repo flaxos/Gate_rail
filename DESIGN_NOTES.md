@@ -49,8 +49,16 @@ This means:
 - Sprint 9 slice 1 turns the sim into a goal-driven playtest via cargo-delivery contracts with due ticks, cash rewards, cash penalties, and a single integer reputation score; reputation is intentionally a single number now so it can split into per-faction standings once rival operators and other corps land in later slices.
 - Sprint 9 slices 2-4 extend the objectives layer with frontier-support contracts (progress accumulates on ticks where the target world's trend is improving or promoted), gate-recovery contracts (consecutive operational-tick streak on a target gate link, with the streak resetting when the link loses power or capacity), and three scenario presets so each contract kind has a dedicated playtest harness; contract resolution now runs after world progression so the frontier-support check reads a freshly updated trend.
 - Post-Sprint-9 cleanup: the legacy daily-colony simulation path (`Simulation`, `colony.py`, `world.py`, `train.py`, `schedule.py`, `finance.py`) has been removed so the fixed-tick backend is the single source of truth heading into the Stage 2 Godot 2D port.
-- Stage 2 integration will use a Python subprocess with newline-delimited JSON over stdio. The Python backend owns deterministic galaxy-scale world coordinates in `render_snapshot()`, while Godot will own intra-world station placement and visual metadata.
+- Stage 2 integration will use a Python subprocess with newline-delimited JSON over stdio. The Python backend owns deterministic galaxy-scale world coordinates in `render_snapshot()` and persists local node layout metadata; Godot proposes intra-world placement and owns camera/presentation metadata.
 - Full construction remains the Stage 2 player-agency target, but it should be sliced after the bridge lands: first expand an existing galaxy through schedules/orders and existing infrastructure controls, then add build commands for stations, rails, gates, trains, and finally new worlds.
+- Local Region Construction view follows the Claude Design handoff archived at `docs/design_handoff/local_region_construction/`. Galaxy Map (`scenes/main.tscn`) and Local Region (`scenes/local_region.tscn`) are separate Godot scenes sharing the `GateRailBridge` autoload, with a `SceneNav` autoload carrying the selected `world_id` across the scene change.
+- Local construction rules are now pinned in `docs/construction_rules.md`; clients should preview node, rail, train, and route-schedule actions through Python before committing.
+- The Local Region right HUD now treats construction as a preview-driven build planner rather than a timed queue; delayed build jobs remain deferred.
+- Local Region layer overlays are presentation-only and consume backend snapshot fields for supply, demand, storage fill, shortages, recipe-blocked inputs, and transfer pressure. Godot should not infer logistics rules beyond choosing glyphs, colors, and counts.
+- Interworld gate-link construction is now backend-owned through `BuildLink(mode="gate")`; clients can propose existing gate-hub endpoints, but Python owns endpoint validation, default capacity/power, cost, power-shortfall context, and whether a newly built gate is usable.
+- Route and schedule previews now expose backend-owned gate handoff context. Clients should render the returned gate ids, endpoint worlds, power/slot/disruption state, and warnings rather than rechecking gate rules locally.
+- Local Region route creation lets the player choose cargo, units per departure, and interval before preview; Python remains authoritative for validating those values and returning normalized schedule commands.
+- The next major presentation layer should not be scoped as "3D first." It should be scoped as a backend-owned facility layer first: stations, depots, warehouses, industries, extractors, and gate hubs gain internal components, ports, loaders, unloaders, buffers, platforms, and factory blocks. A later 3D view should render that facility state rather than invent simulation rules in Godot.
 
 ## Simulation layers
 
@@ -81,6 +89,18 @@ Responsible for:
 - routes,
 - congestion and throughput constraints.
 
+### Facility layer
+
+Responsible for:
+- station, depot, warehouse, industry, extractor, and gate-hub internals,
+- platforms,
+- cargo loaders and unloaders,
+- storage bays and buffers,
+- factory blocks,
+- typed input/output ports,
+- internal component connections,
+- facility-level throughput and blocked-flow diagnostics.
+
 ### Gate layer
 
 Responsible for:
@@ -104,6 +124,10 @@ For the MVP:
 - links need travel time and simple capacity constraints.
 
 Detailed block signaling, train assembly, or fine-grained rail physics should wait until the game proves they materially improve play.
+
+### Facilities
+
+Facilities should become the bridge between abstract local nodes and the eventual 3D station/depot/hub view. The backend should own facility components and ports before any 3D scene is built. Godot can render the facility layer in 2D first, then render the same snapshot in 3D later.
 
 ### Worlds
 
@@ -131,4 +155,4 @@ The following are valid future systems but should not block the first playable p
 - advanced policy systems,
 - orbital and space-lane logistics,
 - richer scenario authoring and comparative analytics,
-- graphical client work.
+- graphical polish beyond the thin Godot client.
