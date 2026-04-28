@@ -18,6 +18,8 @@ Phase 2 proves that GateRail can become a playable 2D prototype without rewritin
 - Add backend commands only when the Godot UI needs them and tests can lock the contract.
 - Keep Godot files text-serializable and contained under `godot/`.
 - Treat station/depot/hub 3D as presentation over a backend-owned facility layer. Do not begin a 3D facility scene until facilities, components, ports, and internal flow exist in Python snapshots.
+- Treat the deeper industry game as higher priority than 3D. Do not begin a 3D facility scene until elemental resources, refining/manufacturing chains, power/gate energy inputs, space extraction, outpost logistics, and 2D diagnostics are proven.
+- Treat curved rails, branches, signals, vacuum tubes, train consists, and cargo wagons as backend-owned systems that should mature alongside industry. Godot may edit and render track plans, but Python owns validation, routing, signaling, and wagon compatibility.
 
 ## Sprint 10: Godot Bridge Prototype
 
@@ -198,40 +200,124 @@ Deliverables:
 Exit criteria:
 - a depot or industry can have internal components whose throughput constraints affect loading, unloading, buffering, or recipe output.
 
-## Sprint 17: Facility UI Prototype
+## Sprint 17: Elemental Resource Backbone
 
 Goal:
-- expose facility internals in 2D before attempting 3D.
+- turn the compact cargo model into a backend-owned resource catalog and deposit model before building more presentation.
+
+Deliverables:
+- resource definitions with stable ids, categories, and metadata for raw sources, refined elements, industrial materials, manufactured goods, advanced systems, and exotics.
+- a first playable subset for raw ore, refined materials, electronics, semiconductors, reactor inputs, and gate components.
+- world deposit metadata with grade/yield and deterministic save/load.
+- CLI inspection and snapshot fields for deposits and available resources.
+- rail sidecar: optional link alignment waypoints/control points persisted and exposed in snapshots so local track is no longer only straight A-to-B.
+- tests for catalog parsing, deposit persistence, and snapshot/report stability.
+
+Exit criteria:
+- a scenario can explain why a location matters because of specific deposits and resource-chain potential, not only generic cargo, and the local map can render backend-owned non-straight rail geometry.
+
+Implemented slice 17A:
+- added the resource catalog and deposit model, with save/load, snapshots, and CLI inspection.
+- seeded built-in scenarios with deposits and local rail alignment metadata.
+- added rail alignment parsing to build/preview link commands and deterministic tests for the new contracts.
+
+Implemented slice 17B:
+- added node-owned resource inventories, resource recipes, deposit-backed extraction, local resource distribution, and blocked resource recipe reporting.
+- seeded the default playtest with a narrow ore/carbon -> iron -> gate components chain.
+- persisted and snapshotted resource recipes, inventories, deposit ids, and blockers.
+
+## Sprint 18: Refining and Manufacturing Chains
+
+Goal:
+- add the first deep industry loops from raw sources to refined materials, parts, electronics, semiconductors, and advanced components.
+
+Deliverables:
+- smelting/refining recipes.
+- alloying, chemistry, and semiconductor preparation recipes.
+- manufacturing recipes for parts, electronics, construction modules, reactor parts, and gate components.
+- facility component or typed factory-block support for smelters, refineries, fabricators, electronics assemblers, and semiconductor lines.
+- reports and snapshots that identify missing inputs and blocked processing stages.
+- rail sidecar: branch/junction metadata and station-throat warnings for dense industry districts.
+
+Exit criteria:
+- the player can improve a local world's industrial output by connecting extraction, refining, and manufacturing rather than only hauling generic cargo.
+
+Implemented slice 18:
+- added typed resource recipe kinds for smelting, refining, electronics assembly, semiconductor work, and fabrication.
+- expanded the default playtest from ore/carbon -> iron -> gate components into silica/copper/silicon/electronics/semiconductors feeding gate components.
+- added resource branch-pressure warnings to reports and snapshots for dense industry rail clusters.
+
+## Sprint 19: Power and Gate Energy Economy
+
+Goal:
+- make power generation and gate operation depend on resource chains.
+
+Deliverables:
+- power plant models or facility components.
+- fuel, reactor fuel, coolant, capacitor, and gate-efficiency inputs.
+- gate charge or operating-energy state.
+- reports and snapshot fields explaining power blockers and gate energy burden.
+- rail sidecar: stop signals, path signals, protected blocks, and signal/block blocker reports.
+
+Exit criteria:
+- gate availability can be improved through upstream mining, refining, manufacturing, and power construction.
+
+Implemented slice 19:
+- added resource-backed gate support that reduces effective gate power draw when a support node has required resource-chain output.
+- added a `sprint19` scenario where `gate_frontier_outer` stays underpowered until gate components are fabricated.
+- persisted and snapshotted support requirements, support shortages, base/effective power draw, and resource bonuses.
+
+## Sprint 20: Space Extraction and Outpost Logistics
+
+Goal:
+- use wormholes and orbital infrastructure to access remote raw resources while keeping Python authoritative.
+
+Deliverables:
+- remote extraction sites such as belts, moons, debris fields, gas pockets, and anomalies.
+- fixed-tick mining missions with travel time, yield, return node, and fuel/power requirements.
+- orbital yards and collection stations that connect returned cargo to rail/gate logistics.
+- outpost construction projects requiring delivered cargo.
+- rail sidecar: train consists or typed capacity maps for bulk ore, liquids, protected goods, heavy modules, reactor materials, and exotic cargo.
+
+Exit criteria:
+- a player can build access to a remote resource, run mining missions, and feed the result into the industrial chain.
+
+## Sprint 21: 2D Facility and Industry Diagnostics
+
+Goal:
+- expose facilities, resource-chain blockers, and outpost projects in 2D before any 3D view.
 
 Deliverables:
 - local node drill-in to a facility detail panel or scene.
-- component boxes, ports, and internal cargo-flow arrows.
-- build-preview UI for loader, unloader, buffer, and factory components.
-- blocked-flow and throughput-pressure readouts.
+- component boxes, ports, internal cargo-flow arrows, and blocked-flow readouts.
+- build-preview UI for loaders, unloaders, buffers, smelters, refineries, fabricators, semiconductor lines, power modules, and gate interfaces.
+- overlays or inspectors for resource availability, processing blockers, power blockers, and outpost construction needs.
+- local rail planning UI for curved alignments, waypoint edits, branches, signals, protected blocks, vacuum-tube portals, and consist/cargo compatibility.
 
 Exit criteria:
-- the player can diagnose and improve a depot/industry bottleneck by changing facility components rather than only changing local rail.
+- the player can diagnose and improve an industrial, rail, power, or outpost bottleneck from the 2D client.
 
-## Sprint 18: 3D Facility View Spike
+## Deferred: 3D Facility View Spike
 
 Goal:
-- prove Godot can render a facility snapshot in 3D without owning simulation rules.
+- prove Godot can render a facility snapshot in 3D without owning simulation rules after the core industry loop is stable.
 
 Deliverables:
-- one 3D depot scene rendered from backend facility snapshot data.
-- rail platform, train placeholder, loader crane, and storage bay.
+- one 3D depot or factory scene rendered from backend facility snapshot data.
+- rail platform, train placeholder, loader crane, storage bay, and one processing line.
 - read-only first pass unless the 2D facility UI contract is already stable.
 
 Exit criteria:
 - the 3D scene visually matches the same backend facility state as the 2D facility view.
 
-## Deferred Until After Sprint 18
+## Deferred Until After Core Industry
 
 - new world creation.
 - re-specialization of worlds.
 - rival operators.
 - tech tree.
 - detailed signal/block simulation.
+- 3D facility presentation.
 
 ## Interactive Cadence
 

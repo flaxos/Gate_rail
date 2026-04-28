@@ -14,13 +14,18 @@ from gaterail.models import (
     FreightSchedule,
     FreightTrain,
     GameState,
+    GatePowerSupport,
     LinkMode,
     NetworkDisruption,
     NetworkLink,
     NetworkNode,
     NodeKind,
+    ResourceRecipe,
+    ResourceRecipeKind,
+    TrackPoint,
     WorldState,
 )
+from gaterail.resources import ResourceDeposit
 
 
 DEFAULT_SCENARIO = "sprint8"
@@ -79,6 +84,8 @@ def build_sprint1_scenario() -> GameState:
             },
             production={CargoType.FOOD: 5, CargoType.MACHINERY: 1},
             storage_capacity=500,
+            layout_x=0.0,
+            layout_y=0.0,
         )
     )
     state.add_node(
@@ -88,6 +95,8 @@ def build_sprint1_scenario() -> GameState:
             world_id="core",
             kind=NodeKind.GATE_HUB,
             storage_capacity=300,
+            layout_x=130.0,
+            layout_y=26.0,
         )
     )
     state.add_node(
@@ -97,6 +106,8 @@ def build_sprint1_scenario() -> GameState:
             world_id="frontier",
             kind=NodeKind.GATE_HUB,
             storage_capacity=240,
+            layout_x=0.0,
+            layout_y=0.0,
         )
     )
     state.add_node(
@@ -108,6 +119,8 @@ def build_sprint1_scenario() -> GameState:
             inventory={CargoType.FOOD: 6, CargoType.CONSTRUCTION_MATERIALS: 3},
             demand={CargoType.FOOD: 2, CargoType.CONSTRUCTION_MATERIALS: 1},
             storage_capacity=160,
+            layout_x=118.0,
+            layout_y=72.0,
         )
     )
     state.add_node(
@@ -119,6 +132,64 @@ def build_sprint1_scenario() -> GameState:
             inventory={CargoType.ORE: 10},
             production={CargoType.ORE: 4},
             storage_capacity=180,
+            layout_x=-82.0,
+            layout_y=148.0,
+        )
+    )
+
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="frontier_north_ridge_iron",
+            world_id="frontier",
+            resource_id="iron_rich_ore",
+            name="North Ridge Iron Shelf",
+            grade=0.74,
+            yield_per_tick=6,
+            remaining_estimate=18_000,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="frontier_silica_flats",
+            world_id="frontier",
+            resource_id="silica_sand",
+            name="Glass Flats Silica Field",
+            grade=0.58,
+            yield_per_tick=3,
+            remaining_estimate=9_500,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="frontier_copper_trace",
+            world_id="frontier",
+            resource_id="copper_sulfide_ore",
+            name="Red Wash Copper Trace",
+            grade=0.52,
+            yield_per_tick=4,
+            remaining_estimate=8_400,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="frontier_carbon_basin",
+            world_id="frontier",
+            resource_id="carbon_feedstock",
+            name="Low Basin Carbon Seam",
+            grade=0.46,
+            yield_per_tick=2,
+            remaining_estimate=6_000,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="core_reclaimed_metal",
+            world_id="core",
+            resource_id="mixed_ore",
+            name="Reclaimed Metal Reserve",
+            grade=0.38,
+            yield_per_tick=1,
+            remaining_estimate=4_000,
         )
     )
 
@@ -130,6 +201,7 @@ def build_sprint1_scenario() -> GameState:
             mode=LinkMode.RAIL,
             travel_ticks=3,
             capacity_per_tick=24,
+            alignment=(TrackPoint(45.0, -18.0), TrackPoint(96.0, 18.0)),
         )
     )
     state.add_link(
@@ -151,6 +223,7 @@ def build_sprint1_scenario() -> GameState:
             mode=LinkMode.RAIL,
             travel_ticks=2,
             capacity_per_tick=14,
+            alignment=(TrackPoint(36.0, 12.0), TrackPoint(82.0, 78.0)),
         )
     )
     state.add_link(
@@ -161,9 +234,315 @@ def build_sprint1_scenario() -> GameState:
             mode=LinkMode.RAIL,
             travel_ticks=4,
             capacity_per_tick=18,
+            alignment=(
+                TrackPoint(-78.0, 192.0),
+                TrackPoint(-14.0, 154.0),
+                TrackPoint(62.0, 106.0),
+            ),
         )
     )
     return state
+
+
+def _add_resource_chain_demo(state: GameState) -> None:
+    """Add the Sprint 17B local resource-chain demo to a mature playtest state."""
+
+    state.add_node(
+        NetworkNode(
+            id="frontier_ore_pit",
+            name="North Ridge Ore Pit",
+            world_id="frontier",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=320,
+            transfer_limit_per_tick=18,
+            layout_x=-150.0,
+            layout_y=168.0,
+            resource_deposit_id="frontier_north_ridge_iron",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_carbon_rig",
+            name="Low Basin Carbon Rig",
+            world_id="frontier",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=240,
+            transfer_limit_per_tick=12,
+            layout_x=-138.0,
+            layout_y=28.0,
+            resource_deposit_id="frontier_carbon_basin",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_silica_quarry",
+            name="Glass Flats Silica Quarry",
+            world_id="frontier",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=240,
+            transfer_limit_per_tick=12,
+            layout_x=-52.0,
+            layout_y=202.0,
+            resource_deposit_id="frontier_silica_flats",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_copper_pit",
+            name="Red Wash Copper Pit",
+            world_id="frontier",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=260,
+            transfer_limit_per_tick=12,
+            layout_x=-186.0,
+            layout_y=76.0,
+            resource_deposit_id="frontier_copper_trace",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_copper_refinery",
+            name="Red Wash Copper Refinery",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=320,
+            transfer_limit_per_tick=12,
+            layout_x=-102.0,
+            layout_y=58.0,
+            resource_recipe=ResourceRecipe(
+                id="copper_refining",
+                kind=ResourceRecipeKind.REFINING,
+                inputs={"copper_sulfide_ore": 4},
+                outputs={"copper": 2},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_smelter",
+            name="Brink Ore Smelter",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=500,
+            transfer_limit_per_tick=18,
+            layout_x=-34.0,
+            layout_y=98.0,
+            resource_recipe=ResourceRecipe(
+                id="iron_smelting",
+                kind=ResourceRecipeKind.SMELTING,
+                inputs={
+                    "carbon_feedstock": 1,
+                    "iron_rich_ore": 6,
+                },
+                outputs={"iron": 4},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_silicon_refiner",
+            name="Glass Flats Silicon Refiner",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=360,
+            transfer_limit_per_tick=14,
+            layout_x=-18.0,
+            layout_y=178.0,
+            resource_recipe=ResourceRecipe(
+                id="silicon_refining",
+                kind=ResourceRecipeKind.REFINING,
+                inputs={
+                    "carbon_feedstock": 1,
+                    "silica_sand": 3,
+                },
+                outputs={"silicon": 3},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_electronics_assembler",
+            name="Brink Electronics Assembler",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=360,
+            transfer_limit_per_tick=12,
+            layout_x=40.0,
+            layout_y=166.0,
+            resource_recipe=ResourceRecipe(
+                id="electronics_assembly",
+                kind=ResourceRecipeKind.ELECTRONICS_ASSEMBLY,
+                inputs={
+                    "copper": 1,
+                    "silicon": 2,
+                },
+                outputs={"electronics": 2},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_semiconductor_line",
+            name="Brink Semiconductor Line",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=320,
+            transfer_limit_per_tick=10,
+            layout_x=74.0,
+            layout_y=142.0,
+            resource_recipe=ResourceRecipe(
+                id="semiconductor_lithography",
+                kind=ResourceRecipeKind.SEMICONDUCTOR,
+                inputs={
+                    "electronics": 1,
+                    "silicon": 1,
+                },
+                outputs={"semiconductors": 1},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_gate_fabricator",
+            name="Brink Gate Fabricator",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=420,
+            transfer_limit_per_tick=12,
+            layout_x=48.0,
+            layout_y=112.0,
+            resource_recipe=ResourceRecipe(
+                id="gate_frame_fabrication",
+                kind=ResourceRecipeKind.FABRICATION,
+                inputs={
+                    "iron": 4,
+                    "semiconductors": 1,
+                },
+                outputs={"gate_components": 1},
+            ),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_ore_pit_smelter",
+            origin="frontier_ore_pit",
+            destination="frontier_smelter",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=12,
+            alignment=(TrackPoint(-116.0, 164.0), TrackPoint(-72.0, 126.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_silica_silicon",
+            origin="frontier_silica_quarry",
+            destination="frontier_silicon_refiner",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(-42.0, 206.0), TrackPoint(-28.0, 190.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_carbon_smelter",
+            origin="frontier_carbon_rig",
+            destination="frontier_smelter",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(-112.0, 52.0), TrackPoint(-72.0, 86.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_carbon_silicon",
+            origin="frontier_carbon_rig",
+            destination="frontier_silicon_refiner",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(-102.0, 70.0), TrackPoint(-48.0, 134.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_copper_refinery",
+            origin="frontier_copper_pit",
+            destination="frontier_copper_refinery",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(-154.0, 70.0), TrackPoint(-124.0, 62.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_copper_electronics",
+            origin="frontier_copper_refinery",
+            destination="frontier_electronics_assembler",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(-54.0, 88.0), TrackPoint(10.0, 136.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_silicon_electronics",
+            origin="frontier_silicon_refiner",
+            destination="frontier_electronics_assembler",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(6.0, 182.0), TrackPoint(30.0, 172.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_silicon_semiconductor",
+            origin="frontier_silicon_refiner",
+            destination="frontier_semiconductor_line",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=6,
+            alignment=(TrackPoint(20.0, 172.0), TrackPoint(54.0, 154.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_electronics_semiconductor",
+            origin="frontier_electronics_assembler",
+            destination="frontier_semiconductor_line",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=6,
+            alignment=(TrackPoint(54.0, 158.0),),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_semiconductor_fabricator",
+            origin="frontier_semiconductor_line",
+            destination="frontier_gate_fabricator",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=6,
+            alignment=(TrackPoint(66.0, 128.0),),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_smelter_fabricator",
+            origin="frontier_smelter",
+            destination="frontier_gate_fabricator",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=10,
+            alignment=(TrackPoint(-6.0, 128.0), TrackPoint(28.0, 116.0)),
+        )
+    )
 
 
 def build_sprint2_scenario() -> GameState:
@@ -259,6 +638,8 @@ def build_sprint4_scenario() -> GameState:
             world_id="outer",
             kind=NodeKind.GATE_HUB,
             storage_capacity=120,
+            layout_x=0.0,
+            layout_y=0.0,
         )
     )
     state.add_node(
@@ -269,6 +650,30 @@ def build_sprint4_scenario() -> GameState:
             kind=NodeKind.SETTLEMENT,
             demand={CargoType.FOOD: 1, CargoType.MEDICAL_SUPPLIES: 1},
             storage_capacity=80,
+            layout_x=108.0,
+            layout_y=-44.0,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="ashfall_fissile_trace",
+            world_id="outer",
+            resource_id="fissile_ore",
+            name="Ashfall Fissile Trace",
+            grade=0.31,
+            yield_per_tick=1,
+            remaining_estimate=2_600,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="ashfall_shadow_ice",
+            world_id="outer",
+            resource_id="water_ice",
+            name="Shadowline Ice Pocket",
+            grade=0.67,
+            yield_per_tick=2,
+            remaining_estimate=7_200,
         )
     )
     state.nodes["frontier_settlement"].add_inventory(CargoType.MEDICAL_SUPPLIES, 8)
@@ -292,6 +697,7 @@ def build_sprint4_scenario() -> GameState:
             mode=LinkMode.RAIL,
             travel_ticks=2,
             capacity_per_tick=10,
+            alignment=(TrackPoint(38.0, -6.0), TrackPoint(82.0, -52.0)),
         )
     )
     state.add_train(
@@ -459,6 +865,7 @@ def build_sprint8_scenario() -> GameState:
         capacity_multiplier=0.5,
         reason="gate alignment throttling",
     )
+    _add_resource_chain_demo(state)
     state.add_contract(
         Contract(
             id="brink_food_relief",
@@ -585,6 +992,23 @@ def build_sprint9_recovery_scenario() -> GameState:
     return state
 
 
+def build_sprint19_scenario() -> GameState:
+    """Build the resource-supported gate power scenario."""
+
+    state = build_sprint8_scenario()
+    state.worlds["frontier"].power_available = 120
+    state.add_gate_support(
+        GatePowerSupport(
+            id="frontier_gate_component_support",
+            link_id="gate_frontier_outer",
+            node_id="frontier_gate_fabricator",
+            inputs={"gate_components": 1},
+            power_bonus=40,
+        )
+    )
+    return state
+
+
 def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
     """Return all built-in scenarios in roadmap order."""
 
@@ -665,6 +1089,13 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
             title="Gate Recovery",
             description="Sprint 8 with a full gate outage and a GATE_RECOVERY contract to restore it.",
             builder=build_sprint9_recovery_scenario,
+        ),
+        ScenarioDefinition(
+            key="sprint19",
+            aliases=("power", "gate_power", "resource_power"),
+            title="Resource-backed Gate Power",
+            description="A frontier gate recovers when upstream industry fabricates gate components.",
+            builder=build_sprint19_scenario,
         ),
     )
 

@@ -59,6 +59,9 @@ This means:
 - Route and schedule previews now expose backend-owned gate handoff context. Clients should render the returned gate ids, endpoint worlds, power/slot/disruption state, and warnings rather than rechecking gate rules locally.
 - Local Region route creation lets the player choose cargo, units per departure, and interval before preview; Python remains authoritative for validating those values and returning normalized schedule commands.
 - The next major presentation layer should not be scoped as "3D first." It should be scoped as a backend-owned facility layer first: stations, depots, warehouses, industries, extractors, and gate hubs gain internal components, ports, loaders, unloaders, buffers, platforms, and factory blocks. A later 3D view should render that facility state rather than invent simulation rules in Godot.
+- Before any 3D facility presentation, the core industrial fantasy needs deeper backend rules: elemental resources, ore grades, smelting/refining, manufacturing tiers, semiconductors, advanced components, power-plant inputs, gate-energy inputs, space extraction, and outpost construction.
+- The resource catalog should be data-driven and able to grow toward periodic-table scale, but implementation should start with a playable subset and add elements only when they create distinct logistics decisions.
+- Local rail should not remain endpoint-only. Future backend work should add track alignment geometry, underground vacuum-tube constraints, branches, junctions, stop/path signals, train consists, and cargo wagon compatibility. Godot should render and edit these plans through backend previews, not own routing or signaling rules.
 
 ## Simulation layers
 
@@ -74,8 +77,10 @@ Responsible for:
 ### Economic layer
 
 Responsible for:
-- resources,
+- resources and the resource catalog,
+- raw deposits, ore grades, and refining yields,
 - production and consumption,
+- smelting, refining, alloying, chemistry, semiconductor, and assembly recipes,
 - storage,
 - shortages and surpluses,
 - promotion requirements.
@@ -84,10 +89,15 @@ Responsible for:
 
 Responsible for:
 - tracks and links,
+- track alignment geometry and waypoints,
+- surface rail versus underground vacuum-tube constraints,
+- branches, junctions, station throats, and portals,
+- stop signals, path signals, blocks, and route reservations,
 - stations and depots,
-- trains and capacity,
+- trains, consists, cargo wagons, and typed capacity,
 - routes,
-- congestion and throughput constraints.
+- congestion and throughput constraints,
+- fixed-tick mining missions as logistics actors when space extraction lands.
 
 ### Facility layer
 
@@ -96,7 +106,7 @@ Responsible for:
 - platforms,
 - cargo loaders and unloaders,
 - storage bays and buffers,
-- factory blocks,
+- crushers, sorters, smelters, refineries, chemical processors, fabricators, electronics assemblers, semiconductor lines, and factory blocks,
 - typed input/output ports,
 - internal component connections,
 - facility-level throughput and blocked-flow diagnostics.
@@ -108,7 +118,17 @@ Responsible for:
 - gate links,
 - activation logic,
 - throughput,
-- power draw and operating burden.
+- power draw and operating burden,
+- gate charge, gate-efficiency upgrades, and rare/exotic inputs once the power economy is expanded.
+
+### Space extraction layer
+
+Responsible for:
+- remote sites such as belts, moons, debris fields, gas pockets, and anomalies,
+- mining ships as fixed-tick logistics actors,
+- orbital yards and collection stations,
+- outpost construction requirements,
+- cargo returns into the rail and gate network.
 
 ## Modeling guidance
 
@@ -123,11 +143,40 @@ For the MVP:
 - stations need queue and transfer behavior,
 - links need travel time and simple capacity constraints.
 
-Detailed block signaling, train assembly, or fine-grained rail physics should wait until the game proves they materially improve play.
+As industry deepens, train capacity should evolve into typed consists and cargo wagons. Bulk ore, liquids, electronics, construction modules, reactor materials, and exotics should eventually need different wagon compatibility. This should start as typed capacity maps before any detailed wagon physics.
+
+Detailed braking physics should wait. Simple stop signals, path signals, and block reservations should arrive earlier because dense industry yards need understandable waiting and conflict reports.
+
+### Track Planning
+
+Rail construction should evolve from A-to-B links into backend-owned track alignments. A track plan can start as endpoint nodes plus waypoint/control-point geometry. The backend should persist that geometry, price it, derive travel time from it, and expose it in snapshots. Godot should draw curved rails from the snapshot and send preview requests when the player edits control points.
+
+Underground vacuum tubes are allowed to be more direct than surface rail, but they should still have portals, curve limits, power or maintenance burdens, and signal/slot constraints.
 
 ### Facilities
 
 Facilities should become the bridge between abstract local nodes and the eventual 3D station/depot/hub view. The backend should own facility components and ports before any 3D scene is built. Godot can render the facility layer in 2D first, then render the same snapshot in 3D later.
+
+Factory blocks should evolve into typed processing components. A smelter, refinery, electronics assembler, semiconductor line, and gate-component assembly bay should have distinct inputs, outputs, power draw, rates, and blocked-flow reasons.
+
+### Resources
+
+Treat resources as a data catalog with stable ids, display names, categories, and optional metadata such as element symbol, isotope, grade, rarity, discovery state, and unlock requirements. Do not hardcode UI behavior around one small enum once the industry layer expands.
+
+The first playable chain should prove one end-to-end path:
+- raw ore or regolith,
+- sorting or concentration,
+- smelting/refining into an element or bulk material,
+- manufacturing into parts/electronics/semiconductors,
+- advanced assembly into power or gate components.
+
+### Space extraction
+
+Space extraction should extend the logistics game, not become a piloting game. Mining ships can be modeled as dispatchable fixed-tick missions with cargo yield, travel time, fuel/power needs, and return nodes. Trains remain essential because they build and supply the orbital yards, outposts, and collection stations that make those missions useful.
+
+### Power economy
+
+Power should move from a mostly static world stat toward an industrial system. Power plants should consume fuel, reactor materials, coolant, parts, or exotic inputs. Gate hubs should reserve power and eventually consume charge for high-throughput operation. This creates a direct reason to mine rare elements and manufacture advanced components.
 
 ### Worlds
 
@@ -153,6 +202,6 @@ The following are valid future systems but should not block the first playable p
 - disruption and maintenance systems,
 - contracts and market pricing,
 - advanced policy systems,
-- orbital and space-lane logistics,
 - richer scenario authoring and comparative analytics,
-- graphical polish beyond the thin Godot client.
+- graphical polish beyond the thin Godot client,
+- 3D facility presentation before resource, power, and space-extraction rules are proven.

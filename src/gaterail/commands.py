@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Literal, TypeAlias
 
 from gaterail.cargo import CargoType
@@ -35,6 +36,7 @@ from gaterail.models import (
     NetworkNode,
     NodeKind,
     PortDirection,
+    TrackPoint,
 )
 from gaterail.traffic import effective_link_capacity
 from gaterail.transport import shortest_route
@@ -114,6 +116,7 @@ class BuildLink:
     power_required: int = 0
     power_source_world_id: str | None = None
     bidirectional: bool = True
+    alignment: tuple[TrackPoint, ...] = ()
     type: Literal["BuildLink"] = "BuildLink"
 
 
@@ -130,6 +133,7 @@ class PreviewBuildLink:
     power_required: int = 0
     power_source_world_id: str | None = None
     bidirectional: bool = True
+    alignment: tuple[TrackPoint, ...] = ()
     type: Literal["PreviewBuildLink"] = "PreviewBuildLink"
 
 
@@ -243,6 +247,68 @@ class PreviewBuildFacilityComponent:
     type: Literal["PreviewBuildFacilityComponent"] = "PreviewBuildFacilityComponent"
 
 
+@dataclass(frozen=True, slots=True)
+class DemolishFacilityComponent:
+    """Remove an existing facility component from a node."""
+
+    node_id: str
+    component_id: str
+    type: Literal["DemolishFacilityComponent"] = "DemolishFacilityComponent"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewDemolishFacilityComponent:
+    """Preview facility-component demolition without mutating state."""
+
+    node_id: str
+    component_id: str
+    type: Literal["PreviewDemolishFacilityComponent"] = "PreviewDemolishFacilityComponent"
+
+
+@dataclass(frozen=True, slots=True)
+class BuildInternalConnection:
+    """Create a connection between two ports inside one facility."""
+
+    node_id: str
+    connection_id: str
+    source_component_id: str
+    source_port_id: str
+    destination_component_id: str
+    destination_port_id: str
+    type: Literal["BuildInternalConnection"] = "BuildInternalConnection"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewBuildInternalConnection:
+    """Preview an internal facility connection without mutating state."""
+
+    node_id: str
+    connection_id: str
+    source_component_id: str
+    source_port_id: str
+    destination_component_id: str
+    destination_port_id: str
+    type: Literal["PreviewBuildInternalConnection"] = "PreviewBuildInternalConnection"
+
+
+@dataclass(frozen=True, slots=True)
+class RemoveInternalConnection:
+    """Remove an existing internal facility connection."""
+
+    node_id: str
+    connection_id: str
+    type: Literal["RemoveInternalConnection"] = "RemoveInternalConnection"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewRemoveInternalConnection:
+    """Preview removing an internal facility connection."""
+
+    node_id: str
+    connection_id: str
+    type: Literal["PreviewRemoveInternalConnection"] = "PreviewRemoveInternalConnection"
+
+
 PlayerCommand: TypeAlias = (
     SetScheduleEnabled
     | DispatchOrder
@@ -259,6 +325,12 @@ PlayerCommand: TypeAlias = (
     | UpgradeNode
     | BuildFacilityComponent
     | PreviewBuildFacilityComponent
+    | DemolishFacilityComponent
+    | PreviewDemolishFacilityComponent
+    | BuildInternalConnection
+    | PreviewBuildInternalConnection
+    | RemoveInternalConnection
+    | PreviewRemoveInternalConnection
 )
 
 
@@ -290,6 +362,33 @@ def _layout_fields(data: dict[str, Any]) -> tuple[float | None, float | None]:
     if isinstance(layout, dict):
         return _optional_float(layout.get("x")), _optional_float(layout.get("y"))
     return _optional_float(data.get("layout_x")), _optional_float(data.get("layout_y"))
+
+
+def _track_point_from_payload(data: object) -> TrackPoint:
+    """Parse one local rail-alignment point from a command payload."""
+
+    if isinstance(data, dict):
+        return TrackPoint(x=float(data["x"]), y=float(data["y"]))
+    if isinstance(data, (list, tuple)) and len(data) >= 2:
+        return TrackPoint(x=float(data[0]), y=float(data[1]))
+    raise ValueError("alignment points must be objects with x/y or two-item arrays")
+
+
+def _alignment_fields(data: dict[str, Any]) -> tuple[TrackPoint, ...]:
+    """Read optional local rail alignment metadata from a command object."""
+
+    raw_alignment = data.get("alignment")
+    if raw_alignment is None:
+        raw_alignment = data.get("waypoints")
+    if raw_alignment is None:
+        raw_alignment = data.get("control_points")
+    if raw_alignment is None:
+        return ()
+    if isinstance(raw_alignment, dict):
+        raw_alignment = raw_alignment.get("points", [])
+    if not isinstance(raw_alignment, (list, tuple)):
+        raise ValueError("alignment must be a list of points")
+    return tuple(_track_point_from_payload(point) for point in raw_alignment)
 
 
 def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
@@ -348,6 +447,7 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             power_required=int(data.get("power_required", default_power)),
             power_source_world_id=None if power_world is None else str(power_world),
             bidirectional=bool(data.get("bidirectional", True)),
+            alignment=_alignment_fields(data),
         )
     if command_type == "DemolishLink":
         return DemolishLink(link_id=str(data["link_id"]))
@@ -404,6 +504,40 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             outputs=None if outputs_data is None else _facility_cargo_map_from_dict(outputs_data),
             ports=ports,
             connections=connections,
+        )
+    if command_type in {"DemolishFacilityComponent", "PreviewDemolishFacilityComponent"}:
+        component_command = (
+            DemolishFacilityComponent
+            if command_type == "DemolishFacilityComponent"
+            else PreviewDemolishFacilityComponent
+        )
+        return component_command(
+            node_id=str(data["node_id"]),
+            component_id=str(data["component_id"]),
+        )
+    if command_type in {"BuildInternalConnection", "PreviewBuildInternalConnection"}:
+        connection_command = (
+            BuildInternalConnection
+            if command_type == "BuildInternalConnection"
+            else PreviewBuildInternalConnection
+        )
+        return connection_command(
+            node_id=str(data["node_id"]),
+            connection_id=str(data["connection_id"]),
+            source_component_id=str(data["source_component_id"]),
+            source_port_id=str(data["source_port_id"]),
+            destination_component_id=str(data["destination_component_id"]),
+            destination_port_id=str(data["destination_port_id"]),
+        )
+    if command_type in {"RemoveInternalConnection", "PreviewRemoveInternalConnection"}:
+        connection_command = (
+            RemoveInternalConnection
+            if command_type == "RemoveInternalConnection"
+            else PreviewRemoveInternalConnection
+        )
+        return connection_command(
+            node_id=str(data["node_id"]),
+            connection_id=str(data["connection_id"]),
         )
     raise ValueError(f"unknown command type: {command_type}")
 
@@ -541,6 +675,52 @@ def _layout_travel_ticks_for_nodes(state: object, origin: str, destination: str)
     return travel_ticks_from_layout_distance((dx * dx + dy * dy) ** 0.5)
 
 
+def _alignment_travel_ticks_for_nodes(
+    state: object,
+    origin: str,
+    destination: str,
+    alignment: tuple[TrackPoint, ...],
+) -> int | None:
+    """Estimate travel ticks from endpoint layout plus authored rail alignment."""
+
+    if not alignment:
+        return None
+    origin_node = state.nodes[origin]
+    destination_node = state.nodes[destination]
+    if (
+        origin_node.layout_x is None
+        or origin_node.layout_y is None
+        or destination_node.layout_x is None
+        or destination_node.layout_y is None
+    ):
+        return None
+    points = (
+        TrackPoint(origin_node.layout_x, origin_node.layout_y),
+        *alignment,
+        TrackPoint(destination_node.layout_x, destination_node.layout_y),
+    )
+    distance = 0.0
+    for start, end in zip(points, points[1:]):
+        dx = end.x - start.x
+        dy = end.y - start.y
+        distance += (dx * dx + dy * dy) ** 0.5
+    return travel_ticks_from_layout_distance(distance)
+
+
+def _validate_track_alignment(alignment: tuple[TrackPoint, ...]) -> None:
+    """Validate local rail-alignment metadata."""
+
+    for point in alignment:
+        if not isfinite(point.x) or not isfinite(point.y):
+            raise ValueError("alignment points must be finite numbers")
+
+
+def _track_alignment_payload(alignment: tuple[TrackPoint, ...]) -> list[dict[str, float]]:
+    """Return a normalized alignment payload for command previews."""
+
+    return [{"x": round(point.x, 3), "y": round(point.y, 3)} for point in alignment]
+
+
 def _validate_build_link(
     state: object,
     command: BuildLink | PreviewBuildLink,
@@ -559,6 +739,7 @@ def _validate_build_link(
         raise ValueError("link capacity_per_tick must be positive")
     if command.power_required < 0:
         raise ValueError("link power_required cannot be negative")
+    _validate_track_alignment(command.alignment)
 
     origin_world_id = state.nodes[command.origin].world_id
     destination_world_id = state.nodes[command.destination].world_id
@@ -568,10 +749,21 @@ def _validate_build_link(
             raise ValueError("rail links must stay within one world")
         travel_ticks = command.travel_ticks
         if travel_ticks is None:
-            travel_ticks = _layout_travel_ticks_for_nodes(state, command.origin, command.destination) or 4
+            travel_ticks = (
+                _alignment_travel_ticks_for_nodes(
+                    state,
+                    command.origin,
+                    command.destination,
+                    command.alignment,
+                )
+                or _layout_travel_ticks_for_nodes(state, command.origin, command.destination)
+                or 4
+            )
         power_required = 0
         power_source_world_id = None
     elif command.mode == LinkMode.GATE:
+        if command.alignment:
+            raise ValueError("track alignment is only supported on rail links")
         if origin_world_id == destination_world_id:
             raise ValueError("gate links must connect different worlds")
         origin_kind = state.nodes[command.origin].kind
@@ -631,6 +823,8 @@ def _link_build_payload(
         payload["power_required"] = power_required
     if power_source_world_id is not None:
         payload["power_source_world_id"] = power_source_world_id
+    if command.alignment:
+        payload["alignment"] = _track_alignment_payload(command.alignment)
     return payload
 
 
@@ -949,6 +1143,8 @@ def _validate_facility_component(
         raise ValueError("component power_required cannot be negative")
     inputs = dict(command.inputs or {})
     outputs = dict(command.outputs or {})
+    _validate_facility_cargo_quantities(inputs, "input")
+    _validate_facility_cargo_quantities(outputs, "output")
     if command.kind == FacilityComponentKind.STORAGE_BAY and command.capacity <= 0:
         raise ValueError("storage_bay capacity must be positive")
     if command.kind == FacilityComponentKind.LOADER and command.rate <= 0:
@@ -959,11 +1155,60 @@ def _validate_facility_component(
         raise ValueError("factory_block requires at least one input or output")
     seen_port_ids: set[str] = set()
     for port in command.ports:
+        if not port.id.strip():
+            raise ValueError("port id cannot be empty")
         if port.id in seen_port_ids:
             raise ValueError(f"duplicate port id on component: {port.id}")
         seen_port_ids.add(port.id)
+        if port.rate < 0:
+            raise ValueError(f"port {port.id} rate cannot be negative")
+        if port.capacity < 0:
+            raise ValueError(f"port {port.id} capacity cannot be negative")
+    component = FacilityComponent(
+        id=command.component_id,
+        kind=command.kind,
+        ports={port.id: port for port in command.ports},
+        capacity=int(command.capacity),
+        rate=int(command.rate),
+        power_required=int(command.power_required),
+        inputs=dict(inputs),
+        outputs=dict(outputs),
+    )
+    _validate_inline_facility_connections(node, component, command.connections)
     cost = facility_component_build_cost(command.kind)
     return cost, inputs, outputs, command.ports, command.connections
+
+
+def _validate_facility_cargo_quantities(mapping: dict[CargoType, int], label: str) -> None:
+    """Validate that component cargo flow quantities are positive."""
+
+    for cargo_type, units in mapping.items():
+        if units <= 0:
+            raise ValueError(f"{label} units for {cargo_type.value} must be positive")
+
+
+def _validate_inline_facility_connections(
+    node: NetworkNode,
+    component: FacilityComponent,
+    connections: tuple[InternalConnection, ...],
+) -> None:
+    """Validate connections bundled into a component build against a prospective facility."""
+
+    if not connections:
+        return
+    facility = Facility(
+        components={} if node.facility is None else dict(node.facility.components),
+        connections={} if node.facility is None else dict(node.facility.connections),
+    )
+    facility.components[component.id] = component
+    for connection in connections:
+        if (
+            connection.source_component_id != component.id
+            and connection.destination_component_id != component.id
+        ):
+            raise ValueError("inline connection must reference the component being built")
+        _validate_internal_connection(facility, connection)
+        facility.connections[connection.id] = connection
 
 
 def _facility_component_payload(
@@ -1007,6 +1252,223 @@ def _facility_component_payload(
             for connection in connections
         ],
     }
+
+
+def _require_facility(state: object, node_id: str) -> tuple[NetworkNode, Facility]:
+    """Return a node's facility, raising a command-facing validation error."""
+
+    if node_id not in state.nodes:
+        raise ValueError(f"unknown node: {node_id}")
+    node = state.nodes[node_id]
+    if node.facility is None:
+        raise ValueError(f"node {node_id} has no facility")
+    return node, node.facility
+
+
+def _require_facility_component(
+    state: object,
+    node_id: str,
+    component_id: str,
+) -> tuple[NetworkNode, Facility, FacilityComponent]:
+    """Return a facility component, raising validation errors for missing pieces."""
+
+    node, facility = _require_facility(state, node_id)
+    if component_id not in facility.components:
+        raise ValueError(f"unknown facility component: {component_id}")
+    return node, facility, facility.components[component_id]
+
+
+def _connections_referencing_component(facility: Facility, component_id: str) -> list[str]:
+    """Return internal connection ids that would be orphaned by removing a component."""
+
+    return sorted(
+        connection.id
+        for connection in facility.connections.values()
+        if connection.source_component_id == component_id
+        or connection.destination_component_id == component_id
+    )
+
+
+def _rate_after_component_removal(
+    node: NetworkNode,
+    facility: Facility,
+    component: FacilityComponent,
+) -> int | None:
+    """Return the relevant effective node rate after removing one component."""
+
+    remaining = [
+        item
+        for item in facility.components.values()
+        if item.id != component.id and item.kind == component.kind
+    ]
+    if component.kind == FacilityComponentKind.LOADER:
+        if remaining:
+            return sum(max(0, item.rate) for item in remaining)
+        return int(node.transfer_limit_per_tick)
+    if component.kind == FacilityComponentKind.UNLOADER:
+        if remaining:
+            return sum(max(0, item.rate) for item in remaining)
+        return int(node.transfer_limit_per_tick)
+    return None
+
+
+def _schedule_conflicts_after_component_removal(
+    state: object,
+    node: NetworkNode,
+    component: FacilityComponent,
+    future_rate: int | None,
+) -> list[str]:
+    """Return active schedule ids whose required rate would exceed a future cap."""
+
+    if future_rate is None:
+        return []
+    if component.kind == FacilityComponentKind.LOADER:
+        current_rate = int(node.effective_outbound_rate())
+        relevant = lambda schedule: schedule.origin == node.id
+    elif component.kind == FacilityComponentKind.UNLOADER:
+        current_rate = int(node.effective_inbound_rate())
+        relevant = lambda schedule: schedule.destination == node.id
+    else:
+        return []
+    if future_rate >= current_rate:
+        return []
+    return sorted(
+        schedule.id
+        for schedule in state.schedules.values()
+        if schedule.active
+        and relevant(schedule)
+        and schedule.units_per_departure > future_rate
+    )
+
+
+def _validate_demolish_facility_component(
+    state: object,
+    command: DemolishFacilityComponent | PreviewDemolishFacilityComponent,
+) -> tuple[NetworkNode, Facility, FacilityComponent, int | None]:
+    """Validate component demolition and return the component plus future rate."""
+
+    node, facility, component = _require_facility_component(
+        state,
+        command.node_id,
+        command.component_id,
+    )
+    referencing = _connections_referencing_component(facility, command.component_id)
+    if referencing:
+        raise ValueError(
+            f"cannot demolish component {command.component_id}; remove internal connections first: "
+            + ", ".join(referencing)
+        )
+    future_rate = _rate_after_component_removal(node, facility, component)
+    conflicts = _schedule_conflicts_after_component_removal(state, node, component, future_rate)
+    if conflicts:
+        raise ValueError(
+            f"cannot demolish {component.kind.value} {component.id}; active schedules exceed future rate "
+            f"{future_rate}: "
+            + ", ".join(conflicts)
+        )
+    return node, facility, component, future_rate
+
+
+def _demolish_facility_component_payload(
+    command: DemolishFacilityComponent | PreviewDemolishFacilityComponent,
+) -> dict[str, object]:
+    """Return a normalized component-demolition command payload."""
+
+    return {
+        "type": "DemolishFacilityComponent",
+        "node_id": command.node_id,
+        "component_id": command.component_id,
+    }
+
+
+def _connection_from_command(
+    command: BuildInternalConnection | PreviewBuildInternalConnection,
+) -> InternalConnection:
+    """Build an InternalConnection value from a build-connection command."""
+
+    return InternalConnection(
+        id=command.connection_id,
+        source_component_id=command.source_component_id,
+        source_port_id=command.source_port_id,
+        destination_component_id=command.destination_component_id,
+        destination_port_id=command.destination_port_id,
+    )
+
+
+def _connection_payload(connection: InternalConnection, command_type: str = "BuildInternalConnection") -> dict[str, object]:
+    """Return a normalized internal-connection command payload."""
+
+    return {
+        "type": command_type,
+        "connection_id": connection.id,
+        "source_component_id": connection.source_component_id,
+        "source_port_id": connection.source_port_id,
+        "destination_component_id": connection.destination_component_id,
+        "destination_port_id": connection.destination_port_id,
+    }
+
+
+def _validate_build_internal_connection(
+    state: object,
+    command: BuildInternalConnection | PreviewBuildInternalConnection,
+) -> tuple[NetworkNode, Facility, InternalConnection]:
+    """Validate one internal facility connection."""
+
+    node, facility = _require_facility(state, command.node_id)
+    connection = _connection_from_command(command)
+    _validate_internal_connection(facility, connection)
+    return node, facility, connection
+
+
+def _validate_internal_connection(facility: Facility, connection: InternalConnection) -> None:
+    """Validate one internal connection against a facility layout."""
+
+    if not connection.id.strip():
+        raise ValueError("connection id cannot be empty")
+    if connection.id in facility.connections:
+        raise ValueError(f"duplicate connection id: {connection.id}")
+    if connection.source_component_id == connection.destination_component_id:
+        raise ValueError("internal connection source and destination components must differ")
+    if connection.source_component_id not in facility.components:
+        raise ValueError(f"unknown source component: {connection.source_component_id}")
+    if connection.destination_component_id not in facility.components:
+        raise ValueError(f"unknown destination component: {connection.destination_component_id}")
+
+    source_component = facility.components[connection.source_component_id]
+    destination_component = facility.components[connection.destination_component_id]
+    source_port = source_component.ports.get(connection.source_port_id)
+    if source_port is None:
+        raise ValueError(f"unknown source port: {connection.source_port_id}")
+    destination_port = destination_component.ports.get(connection.destination_port_id)
+    if destination_port is None:
+        raise ValueError(f"unknown destination port: {connection.destination_port_id}")
+    if source_port.direction != PortDirection.OUTPUT:
+        raise ValueError("internal connection source port must be an output")
+    if destination_port.direction != PortDirection.INPUT:
+        raise ValueError("internal connection destination port must be an input")
+    if (
+        source_port.cargo_type is not None
+        and destination_port.cargo_type is not None
+        and source_port.cargo_type != destination_port.cargo_type
+    ):
+        raise ValueError("internal connection cargo types must match")
+
+    destination_endpoint = (connection.destination_component_id, connection.destination_port_id)
+    for existing in facility.connections.values():
+        if (existing.destination_component_id, existing.destination_port_id) == destination_endpoint:
+            raise ValueError(f"destination port already connected: {connection.destination_port_id}")
+
+
+def _validate_remove_internal_connection(
+    state: object,
+    command: RemoveInternalConnection | PreviewRemoveInternalConnection,
+) -> tuple[NetworkNode, Facility, InternalConnection]:
+    """Validate internal facility connection removal."""
+
+    node, facility = _require_facility(state, command.node_id)
+    if command.connection_id not in facility.connections:
+        raise ValueError(f"unknown internal connection: {command.connection_id}")
+    return node, facility, facility.connections[command.connection_id]
 
 
 def apply_player_command(state: object, command: PlayerCommand) -> dict[str, object]:
@@ -1205,6 +1667,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             bidirectional=command.bidirectional,
             build_cost=cost,
             build_time=build_time,
+            alignment=command.alignment,
         )
         state.add_link(link)
         gate_context = _gate_preview_payload(
@@ -1408,6 +1871,91 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             cost=cost,
             node_id=command.node_id,
             kind=command.kind.value,
+        )
+
+    if isinstance(command, PreviewDemolishFacilityComponent):
+        try:
+            _, _, component, future_rate = _validate_demolish_facility_component(state, command)
+        except ValueError as exc:
+            return _preview_error(command.type, command.component_id, exc)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.component_id,
+            message=f"valid demolition preview for {component.kind.value} {component.id}",
+            node_id=command.node_id,
+            kind=component.kind.value,
+            future_rate=future_rate,
+            normalized_command=_demolish_facility_component_payload(command),
+        )
+
+    if isinstance(command, DemolishFacilityComponent):
+        _, facility, component, future_rate = _validate_demolish_facility_component(state, command)
+        del facility.components[command.component_id]
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.component_id,
+            message=f"demolished {component.kind.value} component {component.id}",
+            node_id=command.node_id,
+            kind=component.kind.value,
+            future_rate=future_rate,
+        )
+
+    if isinstance(command, PreviewBuildInternalConnection):
+        try:
+            _, _, connection = _validate_build_internal_connection(state, command)
+        except ValueError as exc:
+            return _preview_error(command.type, command.connection_id, exc)
+        normalized_command = _connection_payload(connection)
+        normalized_command["node_id"] = command.node_id
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.connection_id,
+            message=f"valid internal connection preview for {connection.id}",
+            node_id=command.node_id,
+            normalized_command=normalized_command,
+        )
+
+    if isinstance(command, BuildInternalConnection):
+        _, facility, connection = _validate_build_internal_connection(state, command)
+        facility.connections[connection.id] = connection
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.connection_id,
+            message=f"built internal connection {connection.id}",
+            node_id=command.node_id,
+            **_connection_payload(connection),
+        )
+
+    if isinstance(command, PreviewRemoveInternalConnection):
+        try:
+            _, _, connection = _validate_remove_internal_connection(state, command)
+        except ValueError as exc:
+            return _preview_error(command.type, command.connection_id, exc)
+        normalized_command = _connection_payload(connection, command_type="RemoveInternalConnection")
+        normalized_command["node_id"] = command.node_id
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.connection_id,
+            message=f"valid internal connection removal preview for {connection.id}",
+            node_id=command.node_id,
+            normalized_command=normalized_command,
+        )
+
+    if isinstance(command, RemoveInternalConnection):
+        _, facility, connection = _validate_remove_internal_connection(state, command)
+        del facility.connections[command.connection_id]
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.connection_id,
+            message=f"removed internal connection {connection.id}",
+            node_id=command.node_id,
+            **_connection_payload(connection, command_type="RemoveInternalConnection"),
         )
 
     if isinstance(command, UpgradeNode):

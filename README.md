@@ -15,7 +15,8 @@ GateRail is built around these assumptions:
 - trains are the dominant logistics layer for bulk cargo and mass transit,
 - wormholes are powerful but energy-hungry infrastructure,
 - worlds progress through development tiers,
-- expansion depends on building stable interdependent supply chains,
+- expansion depends on building stable interdependent supply chains from raw extraction through advanced manufacturing,
+- power plants and gates eventually depend on mined, refined, and manufactured inputs,
 - the backend product surface stays CLI/stdio-first,
 - the Godot client talks to the backend through the documented JSON bridge.
 
@@ -34,7 +35,7 @@ Stage 1 is the current Python simulation: no graphics, with cargo demand, train 
 
 Stage 2 is the Godot 2D prototype: tile-based rail presentation, simple moving trains, cargo counters, wormhole gates, route UI, gate schedule UI, and staged construction controls.
 
-Stage 3 is the proper game expansion: more worlds, contracts, corporate finance, rival operators, tech tree, facility/station automation, 3D facility presentation, and advanced rail types.
+Stage 3 is the proper game expansion: elemental resource chains, space extraction, outpost construction, power-plant and gate-energy economies, more worlds, contracts, corporate finance, rival operators, tech tree, facility/station automation, advanced rail types, and eventually 3D facility presentation after the core systems are proven.
 
 ## Core gameplay loop
 
@@ -43,10 +44,11 @@ The intended loop is:
 1. Establish or unlock a world.
 2. Build enough power, freight, and storage capacity to stabilize it.
 3. Lay rail and station infrastructure between extraction, processing, population, and gate hubs.
-4. Deliver the goods required to promote the world to a higher development tier.
-5. Specialize the world into useful exports such as mining, food, refining, manufacturing, recycling, or research.
-6. Connect it to the wider network with rail, space lanes, and eventually wormhole gates.
-7. Use the stronger network to bootstrap the next world.
+4. Prospect local or remote deposits and move raw resources into sorting, smelting, refining, and manufacturing chains.
+5. Deliver the goods required to promote the world to a higher development tier.
+6. Specialize the world into useful exports such as mining, food, refining, manufacturing, recycling, power, gate components, or research.
+7. Connect it to the wider network with rail, collection stations, mining missions, space lanes, and eventually wormhole gates.
+8. Use the stronger network to bootstrap the next world.
 
 ## Recommended simulation model
 
@@ -56,6 +58,7 @@ The backend should evolve through four explicit layers:
 - `transport`: tracks, stations, trains, routing, congestion
 - `gate`: wormhole links, activation, throughput, power cost
 - `facility`: station/depot/hub internals such as platforms, loaders, unloaders, buffers, factory blocks, and internal cargo ports
+- `space_extraction`: remote sites, mining missions, orbital yards, collection stations, and outpost construction
 
 The live game feel can be real-time, but the backend should run on fixed ticks so behavior stays deterministic and easy to test.
 
@@ -63,7 +66,7 @@ The live game feel can be real-time, but the backend should run on fixed ticks s
 
 The first true prototype should answer one question:
 
-**Can the player bootstrap a frontier world into a self-sustaining industrial colony by building rail, assigning trains, and using one costly wormhole hub intelligently?**
+**Can the player bootstrap a frontier world into a self-sustaining industrial colony by building rail, extracting and refining raw resources, manufacturing key parts, powering local industry and gates, and using one costly wormhole hub intelligently?**
 
 That is the current MVP target.
 
@@ -76,6 +79,8 @@ That is the current MVP target.
 - [SPRINTS.md](SPRINTS.md): sprint-by-sprint development plan
 - [docs/construction_rules.md](docs/construction_rules.md): authoritative local construction, train, and route-creation rules
 - [docs/facility_layer_plan.md](docs/facility_layer_plan.md): planned station/depot/hub automation layer before any 3D facility view
+- [docs/resource_industry_plan.md](docs/resource_industry_plan.md): elemental resource, refining, manufacturing, power, space extraction, and outpost roadmap
+- [docs/rail_network_plan.md](docs/rail_network_plan.md): planned curved alignments, branches, signals, vacuum tubes, consists, and cargo wagons
 
 ## Setup
 

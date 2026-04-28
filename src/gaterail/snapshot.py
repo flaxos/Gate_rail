@@ -6,6 +6,8 @@ from gaterail.economy import BUFFER_NODE_KINDS
 from gaterail.facilities import facility_summary
 from gaterail.gate import preview_gate_power
 from gaterail.models import Contract, ContractKind, GameState, LinkMode
+from gaterail.resource_chains import resource_branch_pressure
+from gaterail.resources import resource_catalog_payload, resource_deposit_to_dict
 from gaterail.traffic import effective_link_capacity
 
 
@@ -27,6 +29,18 @@ def _cargo_map(mapping: object) -> dict[str, int]:
     }
 
 
+def _resource_map(mapping: object) -> dict[str, int]:
+    """Convert resource-id inventory maps to JSON-safe dictionaries."""
+
+    if not isinstance(mapping, dict):
+        return {}
+    return {
+        str(resource_id): int(units)
+        for resource_id, units in sorted(mapping.items())
+        if int(units) > 0
+    }
+
+
 def _world_position(index: int) -> dict[str, int]:
     """Return deterministic galaxy-scale coordinates owned by the Python sim."""
 
@@ -41,6 +55,15 @@ def _node_layout(node: object) -> dict[str, float] | None:
     if layout_x is None or layout_y is None:
         return None
     return {"x": round(float(layout_x), 3), "y": round(float(layout_y), 3)}
+
+
+def _track_alignment(link: object) -> list[dict[str, float]]:
+    """Return JSON-safe rail-alignment metadata for a link."""
+
+    return [
+        {"x": round(float(point.x), 3), "y": round(float(point.y), 3)}
+        for point in getattr(link, "alignment", ())
+    ]
 
 
 def _contract_progress(contract: Contract) -> tuple[str, str, int]:
@@ -67,6 +90,11 @@ def render_snapshot(state: GameState) -> dict[str, object]:
     worlds = []
     for world_id in world_ids:
         world = state.worlds[world_id]
+        deposit_ids = [
+            deposit.id
+            for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id)
+            if deposit.world_id == world_id
+        ]
         worlds.append(
             {
                 "id": world.id,
@@ -89,6 +117,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                     "trend": world.last_trend.value,
                 },
                 "position": _world_position(world_index[world_id]),
+                "deposits": deposit_ids,
             }
         )
 
@@ -117,7 +146,17 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "inputs": _cargo_map(node.recipe.inputs),
                 "outputs": _cargo_map(node.recipe.outputs),
             }
+        if node.resource_recipe is None:
+            resource_recipe_payload: dict[str, object] | None = None
+        else:
+            resource_recipe_payload = {
+                "id": node.resource_recipe.id,
+                "kind": node.resource_recipe.kind.value,
+                "inputs": _resource_map(node.resource_recipe.inputs),
+                "outputs": _resource_map(node.resource_recipe.outputs),
+            }
         recipe_blocked_payload = _cargo_map(state.recipe_blocked.get(node.id, {}))
+        resource_recipe_blocked_payload = _resource_map(state.resource_recipe_blocked.get(node.id, {}))
         if node.facility is None:
             facility_payload: dict[str, object] | None = None
         else:
@@ -146,8 +185,11 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "world_id": node.world_id,
                 "kind": node.kind.value,
                 "inventory": _cargo_map(node.inventory),
+                "resource_inventory": _resource_map(node.resource_inventory),
                 "demand": _cargo_map(node.demand),
                 "production": _cargo_map(node.production),
+                "resource_demand": _resource_map(node.resource_demand),
+                "resource_production": _resource_map(node.resource_production),
                 "storage": {
                     "used": used,
                     "capacity": effective_capacity,
@@ -166,6 +208,9 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "served_last_tick": served_last_tick,
                 "recipe": recipe_payload,
                 "recipe_blocked": recipe_blocked_payload,
+                "resource_recipe": resource_recipe_payload,
+                "resource_recipe_blocked": resource_recipe_blocked_payload,
+                "resource_deposit_id": node.resource_deposit_id,
                 "facility": facility_payload,
                 "facility_blocked": facility_blocked_payload,
                 "layout": _node_layout(node),
@@ -176,6 +221,23 @@ def render_snapshot(state: GameState) -> dict[str, object]:
     for link in sorted(state.links.values(), key=lambda item: item.id):
         capacity, disruptions = effective_link_capacity(state, link)
         gate_status = gate_statuses.get(link.id)
+        if gate_status is None or gate_status.support_id is None:
+            gate_support_payload: dict[str, object] | None = None
+        else:
+            gate_support_payload = {
+                "id": gate_status.support_id,
+                "node_id": gate_status.support_node_id,
+                "inputs": _resource_map(gate_status.support_inputs),
+                "missing": _resource_map(gate_status.support_missing),
+                "power_bonus": gate_status.resource_power_bonus,
+                "base_power_required": (
+                    gate_status.power_required
+                    if gate_status.base_power_required is None
+                    else gate_status.base_power_required
+                ),
+                "effective_power_required": gate_status.power_required,
+                "available": not gate_status.support_missing and gate_status.resource_power_bonus > 0,
+            }
         trains_on_link = trains_per_link.get(link.id, 0)
         utilisation = round(trains_on_link / max(1, link.capacity_per_tick), 3)
         links.append(
@@ -190,6 +252,10 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "active": link.active,
                 "bidirectional": link.bidirectional,
                 "power_required": link.power_required,
+                "effective_power_required": (
+                    link.power_required if gate_status is None else gate_status.power_required
+                ),
+                "gate_support": gate_support_payload,
                 "powered": None if link.mode != LinkMode.GATE or gate_status is None else gate_status.powered,
                 "slots_used": 0 if gate_status is None else gate_status.slots_used,
                 "charge_pct": 1.0 if gate_status is None else gate_status.charge_pct,
@@ -201,6 +267,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "disruption_reasons": [disruption.reason for disruption in disruptions],
                 "utilisation": utilisation,
                 "trains_on_link": trains_on_link,
+                "alignment": _track_alignment(link),
             }
         )
 
@@ -285,6 +352,12 @@ def render_snapshot(state: GameState) -> dict[str, object]:
         "tick": state.tick,
         "finance": state.finance.snapshot(),
         "reputation": state.reputation,
+        "resources": resource_catalog_payload(),
+        "resource_deposits": [
+            resource_deposit_to_dict(deposit, include_resource=True)
+            for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id)
+        ],
+        "resource_branch_pressure": resource_branch_pressure(state),
         "worlds": worlds,
         "nodes": nodes,
         "links": links,

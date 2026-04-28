@@ -18,7 +18,12 @@ def _message_commands(message: dict[str, object]) -> list[dict[str, object]]:
         commands = message["commands"]
         if not isinstance(commands, list):
             raise ValueError("commands must be a list")
-        return [command for command in commands if isinstance(command, dict)]
+        parsed: list[dict[str, object]] = []
+        for index, command in enumerate(commands):
+            if not isinstance(command, dict):
+                raise ValueError(f"commands[{index}] must be an object")
+            parsed.append(command)
+        return parsed
     if "command" in message:
         command = message["command"]
         if not isinstance(command, dict):

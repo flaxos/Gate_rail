@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
+from math import isfinite
 
 from gaterail.cargo import CargoType
+from gaterail.resources import ResourceDeposit, RESOURCE_DEFINITIONS
 
 
 class DevelopmentTier(IntEnum):
@@ -68,6 +70,18 @@ class ContractStatus(StrEnum):
     ACTIVE = "active"
     FULFILLED = "fulfilled"
     FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class GatePowerSupport:
+    """Resource-chain support that reduces one gate link's effective power draw."""
+
+    id: str
+    link_id: str
+    node_id: str
+    inputs: dict[str, int] = field(default_factory=dict)
+    power_bonus: int = 0
+    active: bool = True
 
 
 @dataclass(slots=True)
@@ -167,6 +181,27 @@ class NodeRecipe:
 
     inputs: dict[CargoType, int] = field(default_factory=dict)
     outputs: dict[CargoType, int] = field(default_factory=dict)
+
+
+class ResourceRecipeKind(StrEnum):
+    """Typed industry roles for resource-catalog recipes."""
+
+    GENERIC = "generic"
+    SMELTING = "smelting"
+    REFINING = "refining"
+    ELECTRONICS_ASSEMBLY = "electronics_assembly"
+    SEMICONDUCTOR = "semiconductor"
+    FABRICATION = "fabrication"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceRecipe:
+    """One per-node resource transformation using data-catalog resource ids."""
+
+    id: str
+    kind: ResourceRecipeKind = ResourceRecipeKind.GENERIC
+    inputs: dict[str, int] = field(default_factory=dict)
+    outputs: dict[str, int] = field(default_factory=dict)
 
 
 class FacilityComponentKind(StrEnum):
@@ -277,11 +312,16 @@ class NetworkNode:
     inventory: dict[CargoType, int] = field(default_factory=dict)
     production: dict[CargoType, int] = field(default_factory=dict)
     demand: dict[CargoType, int] = field(default_factory=dict)
+    resource_inventory: dict[str, int] = field(default_factory=dict)
+    resource_production: dict[str, int] = field(default_factory=dict)
+    resource_demand: dict[str, int] = field(default_factory=dict)
     storage_capacity: int = 1_000
     transfer_limit_per_tick: int = 24
     layout_x: float | None = None
     layout_y: float | None = None
     recipe: NodeRecipe | None = None
+    resource_recipe: ResourceRecipe | None = None
+    resource_deposit_id: str | None = None
     facility: Facility | None = None
 
     def effective_storage_capacity(self) -> int:
@@ -323,9 +363,14 @@ class NetworkNode:
         return max(loader or 0, unloader or 0)
 
     def total_inventory(self) -> int:
-        """Return all stored cargo units."""
+        """Return all stored cargo and resource units."""
 
-        return sum(self.inventory.values())
+        return sum(self.inventory.values()) + self.total_resource_inventory()
+
+    def total_resource_inventory(self) -> int:
+        """Return all stored resource-catalog units."""
+
+        return sum(self.resource_inventory.values())
 
     def stock(self, cargo_type: CargoType) -> int:
         """Return stored units for one cargo type."""
@@ -358,6 +403,45 @@ class NetworkNode:
             self.inventory.pop(cargo_type, None)
         return removed
 
+    def resource_stock(self, resource_id: str) -> int:
+        """Return stored units for one resource id."""
+
+        return self.resource_inventory.get(resource_id, 0)
+
+    def add_resource_inventory(self, resource_id: str, units: int) -> int:
+        """Add resource units up to storage capacity and return accepted units."""
+
+        if units <= 0:
+            return 0
+        available_space = max(0, self.effective_storage_capacity() - self.total_inventory())
+        accepted = min(units, available_space)
+        if accepted > 0:
+            self.resource_inventory[resource_id] = self.resource_stock(resource_id) + accepted
+        return accepted
+
+    def remove_resource_inventory(self, resource_id: str, units: int) -> int:
+        """Remove resource units and return actual removed units."""
+
+        if units <= 0:
+            return 0
+        removed = min(units, self.resource_stock(resource_id))
+        if removed <= 0:
+            return 0
+        remaining = self.resource_stock(resource_id) - removed
+        if remaining:
+            self.resource_inventory[resource_id] = remaining
+        else:
+            self.resource_inventory.pop(resource_id, None)
+        return removed
+
+
+@dataclass(frozen=True, slots=True)
+class TrackPoint:
+    """A local-world point owned by the backend for rail alignment metadata."""
+
+    x: float
+    y: float
+
 
 @dataclass(frozen=True, slots=True)
 class NetworkLink:
@@ -375,6 +459,7 @@ class NetworkLink:
     bidirectional: bool = True
     build_cost: float = 0.0
     build_time: int = 0
+    alignment: tuple[TrackPoint, ...] = ()
 
     def connects(self, node_id: str) -> bool:
         """Return whether this link touches ``node_id``."""
@@ -535,6 +620,12 @@ class GatePowerStatus:
     charge_pct: float = 1.0
     next_activation_tick: int | None = None
     slot_cargo: dict[CargoType, int] = field(default_factory=dict)
+    base_power_required: int | None = None
+    resource_power_bonus: int = 0
+    support_id: str | None = None
+    support_node_id: str | None = None
+    support_inputs: dict[str, int] = field(default_factory=dict)
+    support_missing: dict[str, int] = field(default_factory=dict)
 
     @property
     def slots_remaining(self) -> int:
@@ -555,9 +646,12 @@ class GameState:
     orders: dict[str, FreightOrder] = field(default_factory=dict)
     schedules: dict[str, FreightSchedule] = field(default_factory=dict)
     disruptions: dict[str, NetworkDisruption] = field(default_factory=dict)
+    resource_deposits: dict[str, ResourceDeposit] = field(default_factory=dict)
+    gate_supports: dict[str, GatePowerSupport] = field(default_factory=dict)
     shortages: dict[str, dict[CargoType, int]] = field(default_factory=dict)
     buffer_distribution: dict[str, dict[str, dict[CargoType, int]]] = field(default_factory=dict)
     recipe_blocked: dict[str, dict[CargoType, int]] = field(default_factory=dict)
+    resource_recipe_blocked: dict[str, dict[str, int]] = field(default_factory=dict)
     facility_blocked: dict[str, list[str]] = field(default_factory=dict)
     transfer_used_this_tick: dict[str, int] = field(default_factory=dict)
     transfer_saturation_streak: dict[str, int] = field(default_factory=dict)
@@ -583,7 +677,37 @@ class GameState:
             raise ValueError(f"duplicate node id: {node.id}")
         if node.world_id not in self.worlds:
             raise ValueError(f"node {node.id} references unknown world {node.world_id}")
+        if node.resource_deposit_id is not None and node.resource_deposit_id not in self.resource_deposits:
+            raise ValueError(f"node {node.id} references unknown resource deposit {node.resource_deposit_id}")
+        self._validate_resource_map(node.resource_inventory, "resource_inventory")
+        self._validate_resource_map(node.resource_production, "resource_production")
+        self._validate_resource_map(node.resource_demand, "resource_demand")
+        if node.resource_recipe is not None:
+            self._validate_resource_recipe(node.resource_recipe)
         self.nodes[node.id] = node
+
+    def _validate_resource_map(self, mapping: dict[str, int], label: str) -> None:
+        """Validate resource id maps attached to nodes."""
+
+        for resource_id, units in mapping.items():
+            if resource_id not in RESOURCE_DEFINITIONS:
+                raise ValueError(f"unknown resource id in {label}: {resource_id}")
+            if units < 0:
+                raise ValueError(f"{label} units cannot be negative")
+
+    def _validate_resource_recipe(self, recipe: ResourceRecipe) -> None:
+        """Validate one node resource recipe."""
+
+        if not recipe.id.strip():
+            raise ValueError("resource recipe id cannot be empty")
+        if not recipe.inputs and not recipe.outputs:
+            raise ValueError("resource recipe must define inputs or outputs")
+        for label, mapping in (("resource recipe input", recipe.inputs), ("resource recipe output", recipe.outputs)):
+            for resource_id, units in mapping.items():
+                if resource_id not in RESOURCE_DEFINITIONS:
+                    raise ValueError(f"unknown resource id in {label}: {resource_id}")
+                if units <= 0:
+                    raise ValueError(f"{label} units must be positive")
 
     def add_link(self, link: NetworkLink) -> None:
         """Register a transport link."""
@@ -602,7 +726,56 @@ class GameState:
             raise ValueError("link capacity_per_tick must be positive")
         if link.power_required < 0:
             raise ValueError("link power_required cannot be negative")
+        if link.alignment and link.mode != LinkMode.RAIL:
+            raise ValueError("track alignment is only supported on rail links")
+        for point in link.alignment:
+            if not isfinite(point.x) or not isfinite(point.y):
+                raise ValueError("link alignment points must be finite numbers")
         self.links[link.id] = link
+
+    def add_resource_deposit(self, deposit: ResourceDeposit) -> None:
+        """Register a surveyed world resource deposit."""
+
+        if deposit.id in self.resource_deposits:
+            raise ValueError(f"duplicate resource deposit id: {deposit.id}")
+        if deposit.world_id not in self.worlds:
+            raise ValueError(f"deposit {deposit.id} references unknown world {deposit.world_id}")
+        if deposit.resource_id not in RESOURCE_DEFINITIONS:
+            raise ValueError(f"deposit {deposit.id} references unknown resource {deposit.resource_id}")
+        if deposit.grade <= 0:
+            raise ValueError("deposit grade must be positive")
+        if deposit.yield_per_tick < 0:
+            raise ValueError("deposit yield_per_tick cannot be negative")
+        if deposit.remaining_estimate is not None and deposit.remaining_estimate < 0:
+            raise ValueError("deposit remaining_estimate cannot be negative")
+        self.resource_deposits[deposit.id] = deposit
+
+    def add_gate_support(self, support: GatePowerSupport) -> None:
+        """Register resource-chain support for one gate link."""
+
+        if support.id in self.gate_supports:
+            raise ValueError(f"duplicate gate support id: {support.id}")
+        if support.link_id not in self.links:
+            raise ValueError(f"gate support {support.id} references unknown link {support.link_id}")
+        link = self.links[support.link_id]
+        if link.mode != LinkMode.GATE:
+            raise ValueError(f"gate support {support.id} target link is not a gate")
+        for existing in self.gate_supports.values():
+            if existing.link_id == support.link_id:
+                raise ValueError(f"gate support already exists for link {support.link_id}")
+        if support.node_id not in self.nodes:
+            raise ValueError(f"gate support {support.id} references unknown node {support.node_id}")
+        support_world_id = self.nodes[support.node_id].world_id
+        endpoint_worlds = {self.nodes[link.origin].world_id, self.nodes[link.destination].world_id}
+        if support_world_id not in endpoint_worlds:
+            raise ValueError("gate support node must be on one endpoint world")
+        if support.power_bonus <= 0:
+            raise ValueError("gate support power_bonus must be positive")
+        self._validate_resource_map(support.inputs, "gate support input")
+        for units in support.inputs.values():
+            if units <= 0:
+                raise ValueError("gate support input units must be positive")
+        self.gate_supports[support.id] = support
 
     def add_disruption(self, disruption: NetworkDisruption) -> None:
         """Register a timed network disruption."""

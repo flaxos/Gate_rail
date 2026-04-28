@@ -180,3 +180,20 @@ def test_stdio_bridge_reports_command_errors_as_json_frames() -> None:
     assert frame["bridge"]["ok"] is False
     assert "unknown schedule" in frame["bridge"]["error"]
     assert simulation.state.tick == 0
+
+
+def test_stdio_bridge_rejects_non_object_command_list_entries() -> None:
+    simulation = TickSimulation.from_scenario("sprint8")
+    input_stream = StringIO(json.dumps({"commands": [42], "ticks": 1}) + "\n")
+    output_stream = StringIO()
+
+    from gaterail.bridge import run_stdio_bridge
+
+    result = run_stdio_bridge(simulation, input_stream=input_stream, output_stream=output_stream)
+
+    frame = json.loads(output_stream.getvalue())
+    assert result == 0
+    assert frame["snapshot_version"] == 1
+    assert frame["bridge"]["ok"] is False
+    assert "commands[0] must be an object" in frame["bridge"]["error"]
+    assert simulation.state.tick == 0

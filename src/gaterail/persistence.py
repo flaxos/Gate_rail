@@ -22,6 +22,7 @@ from gaterail.models import (
     FreightTrain,
     GameState,
     GatePowerStatus,
+    GatePowerSupport,
     InternalConnection,
     LinkMode,
     NetworkDisruption,
@@ -31,9 +32,13 @@ from gaterail.models import (
     NodeRecipe,
     PortDirection,
     ProgressionTrend,
+    ResourceRecipe,
+    ResourceRecipeKind,
+    TrackPoint,
     TrainStatus,
     WorldState,
 )
+from gaterail.resources import ResourceDeposit
 from gaterail.simulation import TickSimulation
 
 
@@ -62,6 +67,23 @@ def _cargo_map_from_dict(mapping: object) -> dict[CargoType, int]:
     if not isinstance(mapping, dict):
         return {}
     return {CargoType(str(cargo)): int(units) for cargo, units in mapping.items()}
+
+
+def _resource_map_to_dict(mapping: dict[str, int]) -> dict[str, int]:
+    """Convert a resource-id-keyed map to stable JSON data."""
+
+    return {
+        str(resource_id): int(units)
+        for resource_id, units in sorted(mapping.items())
+    }
+
+
+def _resource_map_from_dict(mapping: object) -> dict[str, int]:
+    """Convert JSON resource maps back to resource-id keys."""
+
+    if not isinstance(mapping, dict):
+        return {}
+    return {str(resource_id): int(units) for resource_id, units in mapping.items()}
 
 
 def _world_to_dict(world: WorldState) -> dict[str, object]:
@@ -123,6 +145,32 @@ def _recipe_from_dict(data: object) -> NodeRecipe | None:
     return NodeRecipe(
         inputs=_cargo_map_from_dict(data.get("inputs", {})),
         outputs=_cargo_map_from_dict(data.get("outputs", {})),
+    )
+
+
+def _resource_recipe_to_dict(recipe: ResourceRecipe | None) -> dict[str, object] | None:
+    """Serialize an optional ResourceRecipe."""
+
+    if recipe is None:
+        return None
+    return {
+        "id": recipe.id,
+        "kind": recipe.kind.value,
+        "inputs": _resource_map_to_dict(recipe.inputs),
+        "outputs": _resource_map_to_dict(recipe.outputs),
+    }
+
+
+def _resource_recipe_from_dict(data: object) -> ResourceRecipe | None:
+    """Deserialize an optional ResourceRecipe."""
+
+    if not isinstance(data, dict):
+        return None
+    return ResourceRecipe(
+        id=str(data["id"]),
+        kind=ResourceRecipeKind(str(data.get("kind", ResourceRecipeKind.GENERIC.value))),
+        inputs=_resource_map_from_dict(data.get("inputs", {})),
+        outputs=_resource_map_from_dict(data.get("outputs", {})),
     )
 
 
@@ -253,11 +301,16 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "inventory": _cargo_map_to_dict(node.inventory),
         "production": _cargo_map_to_dict(node.production),
         "demand": _cargo_map_to_dict(node.demand),
+        "resource_inventory": _resource_map_to_dict(node.resource_inventory),
+        "resource_production": _resource_map_to_dict(node.resource_production),
+        "resource_demand": _resource_map_to_dict(node.resource_demand),
         "storage_capacity": node.storage_capacity,
         "transfer_limit_per_tick": node.transfer_limit_per_tick,
         "layout_x": node.layout_x,
         "layout_y": node.layout_y,
         "recipe": _recipe_to_dict(node.recipe),
+        "resource_recipe": _resource_recipe_to_dict(node.resource_recipe),
+        "resource_deposit_id": node.resource_deposit_id,
         "facility": _facility_to_dict(node.facility),
     }
 
@@ -273,19 +326,98 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         inventory=_cargo_map_from_dict(data.get("inventory", {})),
         production=_cargo_map_from_dict(data.get("production", {})),
         demand=_cargo_map_from_dict(data.get("demand", {})),
+        resource_inventory=_resource_map_from_dict(data.get("resource_inventory", {})),
+        resource_production=_resource_map_from_dict(data.get("resource_production", {})),
+        resource_demand=_resource_map_from_dict(data.get("resource_demand", {})),
         storage_capacity=int(data.get("storage_capacity", 1_000)),
         transfer_limit_per_tick=int(data.get("transfer_limit_per_tick", 24)),
         layout_x=None if data.get("layout_x") is None else float(data["layout_x"]),
         layout_y=None if data.get("layout_y") is None else float(data["layout_y"]),
         recipe=_recipe_from_dict(data.get("recipe")),
+        resource_recipe=_resource_recipe_from_dict(data.get("resource_recipe")),
+        resource_deposit_id=(
+            None if data.get("resource_deposit_id") is None else str(data["resource_deposit_id"])
+        ),
         facility=_facility_from_dict(data.get("facility")),
+    )
+
+
+def _track_point_to_dict(point: TrackPoint) -> dict[str, float]:
+    """Serialize a local rail-alignment point."""
+
+    return {"x": float(point.x), "y": float(point.y)}
+
+
+def _track_point_from_dict(data: object) -> TrackPoint:
+    """Deserialize a local rail-alignment point."""
+
+    if not isinstance(data, dict):
+        raise ValueError("track alignment points must be objects")
+    return TrackPoint(x=float(data["x"]), y=float(data["y"]))
+
+
+def _resource_deposit_to_dict(deposit: ResourceDeposit) -> dict[str, object]:
+    """Serialize a resource deposit."""
+
+    return {
+        "id": deposit.id,
+        "world_id": deposit.world_id,
+        "resource_id": deposit.resource_id,
+        "name": deposit.name,
+        "grade": float(deposit.grade),
+        "yield_per_tick": int(deposit.yield_per_tick),
+        "discovered": deposit.discovered,
+        "remaining_estimate": deposit.remaining_estimate,
+    }
+
+
+def _resource_deposit_from_dict(data: dict[str, Any]) -> ResourceDeposit:
+    """Deserialize a resource deposit."""
+
+    return ResourceDeposit(
+        id=str(data["id"]),
+        world_id=str(data["world_id"]),
+        resource_id=str(data["resource_id"]),
+        name=str(data["name"]),
+        grade=float(data.get("grade", 1.0)),
+        yield_per_tick=int(data.get("yield_per_tick", 0)),
+        discovered=bool(data.get("discovered", True)),
+        remaining_estimate=(
+            None if data.get("remaining_estimate") is None else int(data["remaining_estimate"])
+        ),
+    )
+
+
+def _gate_support_to_dict(support: GatePowerSupport) -> dict[str, object]:
+    """Serialize a gate power support rule."""
+
+    return {
+        "id": support.id,
+        "link_id": support.link_id,
+        "node_id": support.node_id,
+        "inputs": _resource_map_to_dict(support.inputs),
+        "power_bonus": int(support.power_bonus),
+        "active": support.active,
+    }
+
+
+def _gate_support_from_dict(data: dict[str, Any]) -> GatePowerSupport:
+    """Deserialize a gate power support rule."""
+
+    return GatePowerSupport(
+        id=str(data["id"]),
+        link_id=str(data["link_id"]),
+        node_id=str(data["node_id"]),
+        inputs=_resource_map_from_dict(data.get("inputs", {})),
+        power_bonus=int(data.get("power_bonus", 0)),
+        active=bool(data.get("active", True)),
     )
 
 
 def _link_to_dict(link: NetworkLink) -> dict[str, object]:
     """Serialize a network link."""
 
-    return {
+    payload: dict[str, object] = {
         "id": link.id,
         "origin": link.origin,
         "destination": link.destination,
@@ -299,6 +431,9 @@ def _link_to_dict(link: NetworkLink) -> dict[str, object]:
         "build_cost": link.build_cost,
         "build_time": link.build_time,
     }
+    if link.alignment:
+        payload["alignment"] = [_track_point_to_dict(point) for point in link.alignment]
+    return payload
 
 
 def _link_from_dict(data: dict[str, Any]) -> NetworkLink:
@@ -317,6 +452,7 @@ def _link_from_dict(data: dict[str, Any]) -> NetworkLink:
         bidirectional=bool(data.get("bidirectional", True)),
         build_cost=float(data.get("build_cost", 0.0)),
         build_time=int(data.get("build_time", 0)),
+        alignment=tuple(_track_point_from_dict(point) for point in data.get("alignment", [])),
     )
 
 
@@ -484,6 +620,14 @@ def _gate_status_to_dict(status: GatePowerStatus) -> dict[str, object]:
         "charge_pct": status.charge_pct,
         "next_activation_tick": status.next_activation_tick,
         "slot_cargo": _cargo_map_to_dict(status.slot_cargo),
+        "base_power_required": (
+            status.power_required if status.base_power_required is None else status.base_power_required
+        ),
+        "resource_power_bonus": status.resource_power_bonus,
+        "support_id": status.support_id,
+        "support_node_id": status.support_node_id,
+        "support_inputs": _resource_map_to_dict(status.support_inputs),
+        "support_missing": _resource_map_to_dict(status.support_missing),
     }
 
 
@@ -506,6 +650,14 @@ def _gate_status_from_dict(data: dict[str, Any]) -> GatePowerStatus:
             None if data.get("next_activation_tick") is None else int(data["next_activation_tick"])
         ),
         slot_cargo=_cargo_map_from_dict(data.get("slot_cargo", {})),
+        base_power_required=(
+            None if data.get("base_power_required") is None else int(data["base_power_required"])
+        ),
+        resource_power_bonus=int(data.get("resource_power_bonus", 0)),
+        support_id=None if data.get("support_id") is None else str(data["support_id"]),
+        support_node_id=None if data.get("support_node_id") is None else str(data["support_node_id"]),
+        support_inputs=_resource_map_from_dict(data.get("support_inputs", {})),
+        support_missing=_resource_map_from_dict(data.get("support_missing", {})),
     )
 
 
@@ -600,6 +752,14 @@ def state_to_dict(state: GameState) -> dict[str, object]:
     return {
         "tick": state.tick,
         "worlds": [_world_to_dict(world) for world in sorted(state.worlds.values(), key=lambda item: item.id)],
+        "resource_deposits": [
+            _resource_deposit_to_dict(deposit)
+            for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id)
+        ],
+        "gate_supports": [
+            _gate_support_to_dict(support)
+            for support in sorted(state.gate_supports.values(), key=lambda item: item.id)
+        ],
         "nodes": [_node_to_dict(node) for node in sorted(state.nodes.values(), key=lambda item: item.id)],
         "links": [_link_to_dict(link) for link in sorted(state.links.values(), key=lambda item: item.id)],
         "trains": [_train_to_dict(train) for train in sorted(state.trains.values(), key=lambda item: item.id)],
@@ -647,10 +807,14 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
     )
     for world_data in data.get("worlds", []):
         state.add_world(_world_from_dict(world_data))
+    for deposit_data in data.get("resource_deposits", []):
+        state.add_resource_deposit(_resource_deposit_from_dict(deposit_data))
     for node_data in data.get("nodes", []):
         state.add_node(_node_from_dict(node_data))
     for link_data in data.get("links", []):
         state.add_link(_link_from_dict(link_data))
+    for support_data in data.get("gate_supports", []):
+        state.add_gate_support(_gate_support_from_dict(support_data))
     for train_data in data.get("trains", []):
         state.add_train(_train_from_dict(train_data))
     for order_data in data.get("orders", []):
