@@ -10,12 +10,12 @@ The third gameplay layer is the facility layer, not the 3D layer. 3D is a presen
 
 ## Goal
 
-Make station/depot/hub design the place where GateRail becomes more than a rail graph. A player should eventually solve bottlenecks by placing and connecting loaders, unloaders, buffers, platforms, factory blocks, and gate interfaces rather than only placing abstract nodes.
+Make station/depot/hub design the place where GateRail becomes more than a rail graph. A player should eventually solve bottlenecks by placing and connecting loaders, unloaders, buffers, platforms, smelters, refineries, fabricators, semiconductor lines, power modules, and gate interfaces rather than only placing abstract nodes.
 
 ## Backend Concepts
 
 - `Facility`: an internal layout attached to a `NetworkNode`.
-- `FacilityComponent`: platform, cargo loader, cargo unloader, storage bay, warehouse bay, extractor head, factory block, power module, gate interface.
+- `FacilityComponent`: platform, cargo loader, cargo unloader, storage bay, warehouse bay, extractor head, crusher, sorter, smelter, refinery, chemical processor, fabricator, electronics assembler, semiconductor line, factory block, reactor, capacitor bank, power module, gate interface.
 - `FacilityPort`: typed input/output connector with cargo type, direction, transfer rate, and capacity.
 - `InternalConnection`: a connection between ports inside a facility.
 - `FacilitySnapshot`: JSON-safe state exposed to clients for 2D or 3D rendering.
@@ -25,9 +25,10 @@ Make station/depot/hub design the place where GateRail becomes more than a rail 
 - Loader/unloader rate limits affect train loading and unloading.
 - Buffer/storage component capacity affects whether cargo backs up.
 - Factory blocks consume input cargo and emit output cargo through ports.
+- Industrial components turn raw sources into refined elements, industrial materials, parts, electronics, semiconductors, advanced components, and gate inputs.
 - Platforms constrain train compatibility, train length, and concurrent loading.
 - Gate interfaces constrain local-to-galaxy throughput.
-- Power modules and gate modules have explicit power draw.
+- Power modules and gate modules have explicit power draw and eventually consume fuel, reactor inputs, charge, or advanced components.
 
 ## Recommended Sprint Sequence
 
@@ -39,24 +40,51 @@ Make station/depot/hub design the place where GateRail becomes more than a rail 
 - Add backend preview/build commands for facility components.
 - Add tests for loader rate, storage capacity, internal flow, and blocked components.
 
-### Sprint 17: Facility UI Prototype
+### Sprint 17: Resource and Industry Backbone
+
+- Add a data-driven resource catalog that can grow beyond the current cargo enum.
+- Model raw sources, refined elements, industrial materials, manufactured goods, advanced systems, and discoverable exotics.
+- Add ore/deposit metadata for grade, yield, and world or remote-site availability.
+- Keep the first implementation small enough to test through CLI reports.
+
+### Sprint 18: Processing and Manufacturing Chains
+
+- Expand facility processing beyond generic factory blocks.
+- Add smelting/refining recipes from raw ore to refined elements or bulk materials.
+- Add manufacturing recipes for parts, electronics, semiconductors, and construction modules.
+- Add blocked-flow reporting that explains which stage, input, or facility component is limiting production.
+
+### Sprint 19: Power and Gate Energy Economy
+
+- Add power-plant facility components and recipes.
+- Convert selected fuel/reactor inputs into world power capacity or gate charge.
+- Make gate operation and high-throughput gate use depend on power infrastructure and advanced inputs.
+
+### Sprint 20: Space Extraction and Outpost Logistics
+
+- Add remote extraction sites such as belts, moons, debris fields, gas pockets, and anomalies.
+- Model mining ships as fixed-tick logistics missions rather than real-time piloting.
+- Add orbital yards or collection stations that receive mission output and connect back to rail/gate logistics.
+- Make outpost and collection-station construction require delivered cargo, not only cash.
+
+### Sprint 21: Facility UI Prototype
 
 - Keep this 2D first.
 - Selecting a local node opens a facility detail panel or scene.
 - Render components as boxes with ports and arrows.
-- Allow adding a loader, unloader, buffer, and factory block through backend preview commands.
+- Allow adding loaders, unloaders, buffers, smelters, refineries, fabricators, semiconductor lines, power modules, and gate interfaces through backend preview commands.
 - Show blocked flow and throughput pressure.
 
-### Sprint 18: 3D Facility View Spike
+### Deferred: 3D Facility View Spike
 
 - Render the same facility snapshot in a Godot 3D scene.
 - Start with one depot: rail platform, train placeholder, loader crane, and storage bay.
 - Do not add new simulation rules in 3D.
-- Use 3D only after the facility contract is stable enough to render consistently.
+- Use 3D only after the resource, processing, power, space-extraction, and 2D facility contracts are stable enough to render consistently.
 
 ## Guardrails
 
 - Do not put simulation rules in Godot.
-- Do not start 3D before facility data exists.
+- Do not start 3D before facility data, resource chains, power rules, and remote extraction loops exist.
 - Do not replace the local planetary layer; facilities are drilled into from local nodes.
 - Keep all facility interactions previewable through Python commands before mutation.

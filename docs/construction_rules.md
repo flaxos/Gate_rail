@@ -35,6 +35,18 @@ Default node costs and capacities are centralized in `src/gaterail/construction.
 - If `travel_ticks` is omitted, the backend derives it from persisted local layout distance using 50 layout units per travel tick, minimum 1.
 - Rail cost is `150 * travel_ticks`.
 - Link build-time metadata is `travel_ticks * 2`, but Sprint 13 construction still completes immediately.
+- Current rail links are endpoint-only. Future rail construction should support backend-owned alignment geometry so local rails can curve, branch, enter underground vacuum tubes, and expose route/signal constraints without Godot inventing simulation rules.
+
+## Future Rail Geometry, Branches, and Signals
+
+Planned rail-depth work is tracked in `docs/rail_network_plan.md`. The intended direction:
+
+- `BuildLink` / `PreviewBuildLink` should eventually accept optional waypoint/control-point geometry.
+- Snapshots should expose persisted track alignment so Godot renders the same geometry Python prices and routes over.
+- Surface rail and underground vacuum tubes should have distinct costs, constraints, and power/maintenance implications.
+- Branches and junctions should become explicit routing objects rather than only visual line intersections.
+- Stop signals and path signals should protect blocks, junctions, station throats, and vacuum-tube portals.
+- Train capacity should evolve toward consists and cargo wagons so bulk ore, liquids, electronics, reactor inputs, construction modules, and exotic cargo can require different wagon types.
 
 ## Gate Links
 

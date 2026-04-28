@@ -501,6 +501,23 @@ def test_build_facility_component_installs_component_and_charges_cash() -> None:
 
 def test_build_facility_component_persists_ports_and_connections() -> None:
     state = _two_node_state()
+    state.nodes["frontier_smelter"].facility = Facility(
+        components={
+            "bay-1": FacilityComponent(
+                id="bay-1",
+                kind=FacilityComponentKind.STORAGE_BAY,
+                capacity=80,
+                ports={
+                    "bay_out": FacilityPort(
+                        id="bay_out",
+                        direction=PortDirection.OUTPUT,
+                        cargo_type=CargoType.ORE,
+                        rate=2,
+                    )
+                },
+            )
+        }
+    )
 
     result = state.apply_command(
         BuildFacilityComponent(
@@ -602,6 +619,56 @@ def test_build_facility_component_rejects_factory_block_without_inputs_or_output
                 kind=FacilityComponentKind.FACTORY_BLOCK,
             )
         )
+
+
+def test_build_facility_component_rejects_non_positive_flow_units() -> None:
+    state = _two_node_state()
+
+    with pytest.raises(ValueError, match="input units for ore must be positive"):
+        state.apply_command(
+            BuildFacilityComponent(
+                component_id="fab-bad",
+                node_id="frontier_smelter",
+                kind=FacilityComponentKind.FACTORY_BLOCK,
+                inputs={CargoType.ORE: 0},
+                outputs={CargoType.PARTS: 1},
+            )
+        )
+
+
+def test_preview_build_facility_component_rejects_invalid_inline_connection() -> None:
+    state = _two_node_state()
+
+    result = state.apply_command(
+        PreviewBuildFacilityComponent(
+            component_id="fab-1",
+            node_id="frontier_smelter",
+            kind=FacilityComponentKind.FACTORY_BLOCK,
+            inputs={CargoType.ORE: 2},
+            outputs={CargoType.PARTS: 1},
+            ports=(
+                FacilityPort(
+                    id="in_ore",
+                    direction=PortDirection.INPUT,
+                    cargo_type=CargoType.ORE,
+                    rate=2,
+                ),
+            ),
+            connections=(
+                InternalConnection(
+                    id="wire-1",
+                    source_component_id="bay-1",
+                    source_port_id="bay_out",
+                    destination_component_id="fab-1",
+                    destination_port_id="in_ore",
+                ),
+            ),
+        )
+    )
+
+    assert result["ok"] is False
+    assert "unknown source component" in result["message"]
+    assert state.nodes["frontier_smelter"].facility is None
 
 
 def test_build_facility_component_rejects_unknown_node() -> None:

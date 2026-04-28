@@ -5,6 +5,8 @@ from __future__ import annotations
 from gaterail.economy import specialization_profiles_for_state
 from gaterail.gate import preview_gate_power
 from gaterail.models import Contract, ContractKind, GameState, LinkMode
+from gaterail.resource_chains import resource_branch_pressure
+from gaterail.resources import resource_definition
 from gaterail.transport import shortest_route
 
 
@@ -60,6 +62,113 @@ def _format_resource_profile(mapping: object) -> str:
     return ", ".join(f"{cargo} {units}" for cargo, units in mapping.items())
 
 
+def _format_resource_map(mapping: object) -> str:
+    """Format a resource-id map for terminal reports."""
+
+    if not isinstance(mapping, dict) or not mapping:
+        return "none"
+    return ", ".join(f"{resource} {units}" for resource, units in mapping.items())
+
+
+def _format_node_resource_rollup(label: str, rollup: object) -> str:
+    """Format a node-to-resource report map."""
+
+    if not isinstance(rollup, dict) or not rollup:
+        return f"{label}: none"
+    parts: list[str] = []
+    for node_id, resource_map in rollup.items():
+        if not isinstance(resource_map, dict):
+            continue
+        resource_parts = [f"{resource} {units}" for resource, units in resource_map.items()]
+        parts.append(f"{node_id} ({', '.join(resource_parts)})")
+    return f"{label}: {'; '.join(parts) if parts else 'none'}"
+
+
+def _format_resource_distribution(rollup: object) -> str:
+    """Format node-to-node resource movement."""
+
+    if not isinstance(rollup, dict) or not rollup:
+        return "Resource Moves: none"
+    parts: list[str] = []
+    for source_id, targets in rollup.items():
+        if not isinstance(targets, dict):
+            continue
+        for target_id, resource_map in targets.items():
+            if not isinstance(resource_map, dict):
+                continue
+            parts.append(f"{source_id}->{target_id} ({_format_resource_map(resource_map)})")
+    return "Resource Moves: " + ("; ".join(parts) if parts else "none")
+
+
+def _format_resource_branch_pressure(pressure: object) -> str:
+    """Format resource branch-pressure warnings."""
+
+    if not isinstance(pressure, list) or not pressure:
+        return "Resource Branches: nominal"
+    parts: list[str] = []
+    for entry in pressure[:4]:
+        if not isinstance(entry, dict):
+            continue
+        parts.append(
+            f"{entry.get('severity', 'watch')} {entry.get('node', '?')} "
+            f"degree {entry.get('degree', 0)} {entry.get('recipe_kind') or '-'}"
+        )
+    return "Resource Branches: " + ("; ".join(parts) if parts else "nominal")
+
+
+def _format_resource_chains_rollup(chains: object) -> str:
+    """Format resource extraction, processing, and blockers."""
+
+    if not isinstance(chains, dict):
+        return "Resources: none"
+    segments: list[str] = []
+    extracted = chains.get("extracted")
+    if isinstance(extracted, dict) and extracted:
+        segments.append(_format_node_resource_rollup("extracted", extracted))
+    distributed = chains.get("distributed")
+    if isinstance(distributed, dict) and distributed:
+        segments.append(_format_resource_distribution(distributed))
+    recipes = chains.get("recipes")
+    if isinstance(recipes, dict):
+        produced = recipes.get("produced")
+        if isinstance(produced, dict) and produced:
+            segments.append(_format_node_resource_rollup("processed", produced))
+        blocked = recipes.get("blocked")
+        if isinstance(blocked, list) and blocked:
+            parts: list[str] = []
+            for event in blocked[:4]:
+                if not isinstance(event, dict):
+                    continue
+                missing = event.get("missing")
+                missing_text = _format_resource_map(missing)
+                parts.append(
+                    f"{event.get('node', '?')} {event.get('recipe', '?')}: "
+                    f"{event.get('reason', 'blocked')} ({missing_text})"
+                )
+            if parts:
+                segments.append("blocked " + "; ".join(parts))
+    pressure = chains.get("branch_pressure")
+    if isinstance(pressure, list) and pressure:
+        segments.append(_format_resource_branch_pressure(pressure))
+    return "Resources: " + (" | ".join(segments) if segments else "none")
+
+
+def _format_resource_deposit_summary(state: GameState) -> str:
+    """Format a compact resource-deposit summary."""
+
+    if not state.resource_deposits:
+        return "none"
+    parts: list[str] = []
+    for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id):
+        world = state.worlds[deposit.world_id]
+        definition = resource_definition(deposit.resource_id)
+        parts.append(
+            f"{world.name} {deposit.name} {definition.name} "
+            f"grade {deposit.grade:.2f} yield {deposit.yield_per_tick}/tick"
+        )
+    return "; ".join(parts)
+
+
 def format_state_summary(state: GameState) -> str:
     """Format a compact scenario summary."""
 
@@ -75,6 +184,8 @@ def format_state_summary(state: GameState) -> str:
         f"{len(state.trains)} trains, {len(state.orders)} orders",
         "Worlds: " + "; ".join(world_lines),
     ]
+    if state.resource_deposits:
+        lines.append("Deposits: " + _format_resource_deposit_summary(state))
     if state.trains:
         train_lines = [
             f"{train.name} at {train.node_id} capacity {train.capacity}"
@@ -211,6 +322,86 @@ def format_scenario_inspection(state: GameState, sections: ReportSections = None
             ]
         )
 
+    if _section_enabled(sections, "resources"):
+        deposit_rows: list[tuple[object, ...]] = []
+        for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id):
+            world = state.worlds[deposit.world_id]
+            definition = resource_definition(deposit.resource_id)
+            deposit_rows.append(
+                (
+                    world.name,
+                    deposit.name,
+                    definition.id,
+                    definition.category.value,
+                    f"{deposit.grade:.2f}",
+                    deposit.yield_per_tick,
+                    "yes" if deposit.discovered else "no",
+                )
+            )
+        lines.extend(
+            [
+                "",
+                "Resource Deposits",
+                _format_table(
+                    ("World", "Deposit", "Resource", "Category", "Grade", "Yield", "Known"),
+                    deposit_rows,
+                ),
+            ]
+        )
+        chain_rows: list[tuple[object, ...]] = []
+        for node in sorted(state.nodes.values(), key=lambda item: item.id):
+            if (
+                not node.resource_inventory
+                and not node.resource_production
+                and node.resource_recipe is None
+                and node.resource_deposit_id is None
+            ):
+                continue
+            recipe = "-"
+            if node.resource_recipe is not None:
+                recipe = (
+                    f"{node.resource_recipe.id} [{node.resource_recipe.kind.value}]: "
+                    f"{_format_resource_map(node.resource_recipe.inputs)} -> "
+                    f"{_format_resource_map(node.resource_recipe.outputs)}"
+                )
+            deposit = "-"
+            if node.resource_deposit_id is not None:
+                deposit_model = state.resource_deposits.get(node.resource_deposit_id)
+                deposit = node.resource_deposit_id if deposit_model is None else deposit_model.name
+            chain_rows.append(
+                (
+                    node.id,
+                    node.name,
+                    deposit,
+                    _format_resource_map(node.resource_inventory),
+                    recipe,
+                )
+            )
+        lines.extend(
+            [
+                "",
+                "Resource Chain Nodes",
+                _format_table(("Node", "Name", "Deposit", "Inventory", "Recipe"), chain_rows),
+            ]
+        )
+        pressure_rows = [
+            (
+                entry["node"],
+                entry["severity"],
+                entry["degree"],
+                entry["recipe_kind"] or "-",
+                ", ".join(entry["resource_links"]),
+            )
+            for entry in resource_branch_pressure(state)
+        ]
+        lines.extend(
+            [
+                "",
+                "Resource Branch Pressure",
+                _format_table(("Node", "Severity", "Degree", "Recipe Kind", "Links"), pressure_rows),
+            ]
+        )
+
     if _section_enabled(sections, "finance"):
         finance = state.finance.snapshot()
         lines.extend(
@@ -301,6 +492,8 @@ def format_tick_report(report: dict[str, object], sections: ReportSections = Non
         lines.append(_format_contracts_rollup(report.get("contracts")))
     if _section_enabled(sections, "progression"):
         lines.append(_format_progression_rollup(report.get("progression")))
+    if _section_enabled(sections, "resources"):
+        lines.append(_format_resource_chains_rollup(report.get("resource_chains")))
     if _section_enabled(sections, "shortages"):
         lines.append(_format_node_rollup("Shortages", report.get("shortages")))
     if _section_enabled(sections, "finance"):
@@ -370,14 +563,23 @@ def _format_gate_rollup(gates: object) -> str:
             continue
         source = status.get("source_world_name", status.get("source_world", "unknown"))
         required = status.get("power_required", 0)
+        support = ""
+        if status.get("support_id") is not None:
+            bonus = status.get("resource_power_bonus", 0)
+            support_node = status.get("support_node_id", "?")
+            missing = status.get("support_missing")
+            if isinstance(missing, dict) and missing:
+                support = f" support waiting {support_node} missing {_format_resource_map(missing)}"
+            elif bonus:
+                support = f" supported by {support_node} bonus {bonus}"
         if status.get("powered"):
             parts.append(
                 f"{link_id} powered by {source} draw {required} "
-                f"slots {status.get('slots_used', 0)}/{status.get('slot_capacity', 0)}"
+                f"slots {status.get('slots_used', 0)}/{status.get('slot_capacity', 0)}{support}"
             )
         else:
             parts.append(
-                f"{link_id} underpowered by {source} short {status.get('power_shortfall', 0)}"
+                f"{link_id} underpowered by {source} short {status.get('power_shortfall', 0)}{support}"
             )
     return "Gates: " + ("; ".join(parts) if parts else "none")
 

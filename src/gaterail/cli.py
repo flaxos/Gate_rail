@@ -32,6 +32,7 @@ REPORT_SECTIONS = frozenset(
         "gates",
         "production",
         "progression",
+        "resources",
         "schedules",
         "shortages",
         "stockpiles",
@@ -78,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Comma-separated report sections to print. "
             "Use all, cargo, contracts, economy, finance, freight, gates, production, "
-            "progression, schedules, shortages, stockpiles, or traffic."
+            "progression, resources, schedules, shortages, stockpiles, or traffic."
         ),
     )
     parser.add_argument(

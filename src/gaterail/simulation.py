@@ -20,6 +20,12 @@ from gaterail.gate import evaluate_gate_power
 from gaterail.models import GameState, GatePowerStatus, LinkMode
 from gaterail.operations import build_monthly_report
 from gaterail.progression import apply_world_progression
+from gaterail.resource_chains import (
+    apply_resource_distribution,
+    apply_resource_extraction,
+    apply_resource_recipes,
+    resource_branch_pressure,
+)
 from gaterail.scenarios import DEFAULT_SCENARIO, load_scenario
 from gaterail.traffic import build_traffic_report, reset_traffic_usage
 
@@ -61,6 +67,10 @@ def _plain_gate_status_map(mapping: dict[str, GatePowerStatus]) -> dict[str, dic
             "source_world": status.source_world_id,
             "source_world_name": status.source_world_name,
             "power_required": status.power_required,
+            "base_power_required": (
+                status.power_required if status.base_power_required is None else status.base_power_required
+            ),
+            "resource_power_bonus": status.resource_power_bonus,
             "power_available": status.power_available,
             "power_shortfall": status.power_shortfall,
             "powered": status.powered,
@@ -68,6 +78,10 @@ def _plain_gate_status_map(mapping: dict[str, GatePowerStatus]) -> dict[str, dic
             "slot_capacity": status.slot_capacity,
             "slots_used": status.slots_used,
             "slots_remaining": status.slots_remaining,
+            "support_id": status.support_id,
+            "support_node_id": status.support_node_id,
+            "support_inputs": dict(sorted(status.support_inputs.items())),
+            "support_missing": dict(sorted(status.support_missing.items())),
         }
         for link_id, status in sorted(mapping.items())
     }
@@ -108,6 +122,15 @@ class TickSimulation:
 
         recipes_result = apply_node_recipes(self.state)
         phase_order.append("node_recipes")
+
+        resource_extraction_result = apply_resource_extraction(self.state)
+        phase_order.append("resource_extraction")
+
+        resource_distribution_result = apply_resource_distribution(self.state)
+        phase_order.append("resource_distribution")
+
+        resource_recipes_result = apply_resource_recipes(self.state)
+        phase_order.append("resource_recipes")
 
         facilities_result = apply_facility_components(self.state)
         phase_order.append("facility_components")
@@ -157,6 +180,12 @@ class TickSimulation:
             "shortages": _plain_node_cargo_map(demand_result.shortages),
             "buffer_distribution": _plain_buffer_distribution(buffer_distribution),
             "recipes": recipes_result,
+            "resource_chains": {
+                "extracted": resource_extraction_result,
+                "distributed": resource_distribution_result,
+                "recipes": resource_recipes_result,
+                "branch_pressure": resource_branch_pressure(self.state),
+            },
             "facilities": facilities_result,
             "economy": economy_result,
             "gates": _plain_gate_status_map(gate_result),

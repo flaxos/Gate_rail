@@ -22,7 +22,7 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 12 hardening is complete: backend construction commands are immediate, validated, and test-covered for same-world rail/node expansion; delayed construction queues are deferred until build-time simulation is worth modeling.
 - Sprint 13 is underway in the Local Region scene only. Slices 13A through 13D are complete: backend-owned previews drive node, rail, train, and route creation, with persisted local-world layout metadata, visible HUD preview context, ESC/tool-switch cancellation, an explicit cargo picker on route creation, and a Select-tool inspector for nodes and links. The galaxy map stays focused on run/inspect/dispatch/navigation.
 - Sprint 14 is in progress. Slices 14A (buffer distribution), 14B (transfer-limit pressure visibility), and 14C (per-node recipes) are complete: depots/warehouses auto-feed neighbouring demand within their per-tick transfer budget, node snapshots expose transfer bottlenecks, and individual industry/extractor nodes can transform inputs into outputs through `NodeRecipe`.
-- Facility layer planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, components, ports, and internal cargo flow exist. Sprints 16-18 now cover facility simulation, 2D facility UI, and a 3D facility-view spike.
+- Facility, industry, and rail-depth planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, elemental resource chains, power inputs, space extraction, outpost logistics, and richer rail networks exist. Sprints 17-21 now prioritize core industry, curved/branched/signaled rail, and 2D diagnostics before any 3D facility-view spike.
 
 ## Long-term stages
 
@@ -40,13 +40,19 @@ Stage 2: Godot 2D prototype
 - staged construction, starting with existing-galaxy expansion
 
 Stage 3: Proper game expansion
+- elemental resource catalog
+- smelting, refining, manufacturing, and semiconductor chains
+- power-plant and gate-energy economies
+- space extraction and remote collection stations
+- outpost construction by delivered cargo
 - more worlds
 - contracts
 - corporate finance
 - rival operators
 - tech tree
 - facility/station automation
-- 3D facility presentation
+- curved rail alignments, branches, junctions, signals, consists, and cargo wagons
+- 3D facility presentation after core systems are stable
 - advanced rail types
 
 ## Working rules
@@ -546,32 +552,103 @@ Deliverables:
 Exit criteria:
 - a depot or industry bottleneck can be caused and fixed by changing facility components rather than changing only local rail
 
-## Sprint 17: Facility UI Prototype
+## Sprint 17: Elemental Resource Backbone
 
 Goal:
-- expose facility internals in 2D before attempting 3D
+- turn the compact cargo list into a data-driven resource catalog that can support periodic-table-scale industry without making the first playable chain unmanageable
 
 Deliverables:
-- local node drill-in to a facility detail panel or scene
-- component boxes, ports, and internal cargo-flow arrows
-- backend-preview UI for loader, unloader, buffer, and factory components
-- blocked-flow and throughput-pressure readouts
+- resource definitions with stable ids, display names, categories, and metadata for raw source, refined element, industrial material, manufactured good, advanced system, or exotic
+- first-pass element/isotope subset covering iron, copper, aluminum, silicon, carbon, hydrogen, oxygen, lithium, cobalt, uranium, thorium, helium-3, rare earth concentrate, and selected fictional exotics
+- raw deposit model for worlds and future remote sites, including grade/yield metadata
+- CLI inspection/reporting for what each world or site can extract
+- save/load and snapshot support for deposits and resource metadata
+- rail sidecar R17: persist optional rail alignment waypoints/control points on links, expose them in snapshots, and let local rail render as curved/segmented geometry while pathfinding stays endpoint-based
+- tests proving resource definitions, deposits, and snapshots remain deterministic
 
 Exit criteria:
-- the player can diagnose and improve a depot/industry bottleneck by modifying facility components
+- a playtest can show why a world matters because of specific raw elements or deposits, not only because it has generic `ore`, and the local map can render non-straight backend-owned rail geometry
 
-## Sprint 18: 3D Facility View Spike
+## Sprint 18: Refining and Manufacturing Chains
 
 Goal:
-- prove Godot can render facility snapshots in 3D without owning simulation rules
+- make raw extraction meaningful by adding multi-step processing from ore to refined materials, parts, electronics, semiconductors, and advanced components
 
 Deliverables:
-- one 3D depot scene rendered from backend facility snapshot data
-- rail platform, train placeholder, loader crane, and storage bay
+- smelting/refining recipes that convert raw sources into refined elements and bulk materials
+- alloying/chemistry recipes that convert refined elements into industrial materials
+- manufacturing recipes for parts, machinery, electronics, semiconductors, construction modules, and control systems
+- facility component kinds or typed factory blocks for smelters, refineries, fabricators, electronics assemblers, and semiconductor lines
+- blocked-flow reports that identify the missing material or component stage
+- balanced CLI scenario proving a mine-to-smelter-to-factory chain
+- rail sidecar R18: add junction/branch metadata and route-preview warnings for station throats or industry-yard pressure
+
+Exit criteria:
+- a player can improve production by connecting extraction, refining, and manufacturing nodes rather than only hauling generic cargo, with branch-heavy industry districts represented explicitly enough for future signaling
+
+## Sprint 19: Power Plants and Gate Energy Economy
+
+Goal:
+- make gate power and industrial power depend on mined and manufactured inputs instead of mostly static world margins
+
+Deliverables:
+- power-plant models or facility components for thermal, fission, fusion, and advanced gate-support generation
+- recipes for fuel, reactor fuel, coolant, reactor parts, capacitors, and gate-efficiency components
+- world power capacity changes driven by operating plants and their inputs
+- gate charge or gate operating-energy state tied to power infrastructure
+- reports and snapshots explaining power blockers, fuel shortages, and gate operating burden
+- rail sidecar R19: add stop signals, path signals, simple track blocks, and signal/block reasons in freight or traffic reports
+- tests for power generation, input shortages, gate blocking, and gate recovery
+
+Exit criteria:
+- a gate route can fail or improve because the player did or did not build the upstream fuel, reactor, coolant, or capacitor chain, and dense power/gate approaches can be diagnosed through signal or block reports
+
+## Sprint 20: Space Extraction and Collection Stations
+
+Goal:
+- let wormholes and orbital yards open access to remote resources without turning the game into a real-time piloting sim
+
+Deliverables:
+- `SpaceSite` or equivalent model for asteroid fields, moons, debris fields, gas pockets, and anomalies
+- mining ships as fixed-tick logistics missions with travel time, yield, return node, fuel/power requirements, and risk hooks
+- orbital yards and collection stations as logistics nodes that receive mining output
+- commands/previews for starting mining missions and constructing collection stations
+- CLI reports for mission status, expected return, cargo yield, and blockers
+- rail sidecar R20: introduce train consists or typed capacity maps for bulk ore, liquids, protected electronics, heavy modules, reactor materials, and exotic cargo
+- tests for mission dispatch, return cargo, collection-station storage, and save/load
+
+Exit criteria:
+- a player can open access to a remote ore source, send mining missions, and feed the returned material into the rail/gate industrial chain using appropriate cargo capacity or wagon types
+
+## Sprint 21: Outpost Construction and Facility UI
+
+Goal:
+- make expansion into remote resource sites and industrial facilities diagnosable from the 2D client before any 3D work starts
+
+Deliverables:
+- outpost and ore collection station construction projects that require delivered cargo such as construction modules, machinery, power equipment, electronics, food, water, and habitat supplies
+- construction progress/status reports and snapshot fields
+- local node drill-in to a 2D facility detail panel or scene
+- component boxes, ports, internal cargo-flow arrows, and blocked-flow readouts
+- backend-preview UI for loaders, unloaders, buffers, smelters, refineries, fabricators, semiconductor lines, power modules, and gate interfaces
+- local rail planning UI for curved alignments, waypoint edits, branches, signals, protected blocks, vacuum-tube portals, and consist/cargo compatibility
+- overlay or inspector support for resource chain blockers and power bottlenecks
+
+Exit criteria:
+- the player can diagnose and improve a resource, manufacturing, rail, power, or outpost bottleneck through 2D backend-owned facility, track, signal, consist, and project data
+
+## Deferred: 3D Facility View Spike
+
+Goal:
+- prove Godot can render facility snapshots in 3D without owning simulation rules after the core industry loop is stable
+
+Deliverables:
+- one 3D depot or factory scene rendered from backend facility snapshot data
+- rail platform, train placeholder, loader crane, storage bay, and one processing line
 - read-only first pass unless the 2D facility UI contract is stable
 
 Exit criteria:
-- the 3D scene visually matches the same backend facility state as the 2D facility view
+- the 3D scene visually matches the same backend facility state as the 2D facility view, with no simulation duplicated in Godot
 
 ## Interactive cadence
 
@@ -594,11 +671,64 @@ Slice 16A completed state:
 - 25 new tests in `tests/test_sprint16a_facility_foundation.py` cover loader-rate caps on freight load, unloader-rate caps on freight unload, storage-bay capacity overrides, fall-through to raw fields when no relevant components exist, factory-block consume/produce/blocked behavior, output clamping by effective storage cap, full simulation phase ordering, snapshot exposure, persistence round-trip, all build/preview validation rules, command JSON parsing, and the Sprint 16 exit-criterion scenario (a slow loader caps throughput; swapping it for a fast one removes the bottleneck without touching any rail link).
 - Full pytest suite passes 179 tests; stdio bridge round-trip emits the new facility/effective-rate fields without regressions.
 
+Slice 16B completed state:
+- `DemolishFacilityComponent` and `PreviewDemolishFacilityComponent` remove or preview removing an existing component without charging cash.
+- Component demolition rejects missing nodes/facilities/components, rejects removal while any `InternalConnection` references the component, and rejects loader/unloader removals that would reduce an active schedule endpoint below its `units_per_departure`.
+- `BuildInternalConnection` / `PreviewBuildInternalConnection` validate and create port-to-port connections inside one facility, including duplicate id checks, existing endpoint checks, output-to-input direction checks, cargo compatibility checks, and one incoming connection per destination input.
+- `RemoveInternalConnection` / `PreviewRemoveInternalConnection` validate and remove existing internal connections without mutating state during previews.
+- Factory blocks with declared input ports now require those relevant ports to be internally wired before they can consume node inventory; removing a required connection surfaces a blocked facility entry with `reason: "open input ports"`.
+- 9 new tests in `tests/test_sprint16b_facility_editing.py` cover command parsing, non-mutating previews, component removal, orphaned connection protection, active-schedule throughput protection, storage-bay capacity reclamping after demolition, connection build validation, and connection removal causing factory blockage.
+- Full pytest suite passes 188 tests after the 16B facility-editing slice.
+
+Slice 17A completed state:
+- `src/gaterail/resources.py` adds a data-driven `ResourceCategory`, `ResourceDefinition`, and `ResourceDeposit` catalog separate from compact `CargoType` gameplay cargo. The first catalog covers raw sources, refined elements, industrial materials, manufactured goods, advanced systems, and undiscovered exotics.
+- `GameState.resource_deposits` persists surveyed deposits with world id, resource id, grade, yield-per-tick, discovery state, and remaining-estimate metadata. Deposit validation rejects unknown worlds/resources and invalid grade/yield values.
+- Built-in scenarios now seed frontier, core, and outer-world deposits such as iron-rich ore, silica sand, carbon feedstock, fissile ore, and water ice, so inspection can explain why a location matters before refining recipes exist.
+- Snapshots expose top-level `resources` and `resource_deposits`, and each world includes its deposit ids. CLI/reporting adds a `resources` inspection section with deposit resource, category, grade, yield, and discovery status.
+- `TrackPoint` and `NetworkLink.alignment` add backend-owned local rail geometry. Save/load and snapshots preserve alignment points, and the default scenario now includes node layouts plus curved alignment metadata for local rails.
+- `BuildLink` / `PreviewBuildLink` parse `alignment`, `waypoints`, or `control_points`, reject alignment on gate links, and derive rail travel ticks from the endpoint-to-waypoint polyline when endpoint layouts are known.
+- 7 new tests in `tests/test_sprint17a_resource_backbone.py` cover catalog metadata, scenario deposits, snapshot exposure, save/load persistence, CLI resource inspection, curved-link build previews, gate-alignment rejection, and model-level finite-point validation.
+- Full pytest suite passes 198 tests after the 17A resource-backbone slice.
+
+Slice 17B completed state:
+- `ResourceRecipe` adds a node-owned resource transformation layer separate from cargo `NodeRecipe`, with resource-id inputs/outputs validated against the catalog.
+- `NetworkNode` now supports `resource_inventory`, `resource_production`, `resource_demand`, `resource_recipe`, and optional `resource_deposit_id`, with shared storage capacity across cargo and resource units.
+- `resource_chains.py` adds three fixed-tick phases: deposit/direct extraction, same-world rail-adjacent resource distribution into resource demand/recipe deficits, and resource recipe processing with all-or-nothing input validation.
+- `TickSimulation.step_tick()` now runs `resource_extraction`, `resource_distribution`, and `resource_recipes` after cargo node recipes and before facility components, and emits a `resource_chains` report section.
+- Sprint 8/default now includes a narrow 17B demo chain: North Ridge ore and Low Basin carbon feed Brink Ore Smelter, which makes iron, then Brink Gate Fabricator turns iron plus seeded electronics into `gate_components`.
+- Persistence and snapshots now include resource inventories, resource production/demand, resource recipes, resource deposit ids, and resource recipe blockers.
+- CLI `--report resources` now shows tick-level extraction, resource moves, processing output, and blockers; scenario inspection also lists resource-chain nodes and recipes.
+- 5 new tests in `tests/test_sprint17b_resource_chains.py` cover extraction-to-smelting-to-gate-component output, blocker reporting/snapshots, save/load persistence, CLI resource reports, and invalid resource recipe validation.
+- Full pytest suite passes 203 tests after the 17B resource-chain slice.
+
+Slice 18 completed state:
+- `ResourceRecipeKind` adds typed resource-industry roles: `generic`, `smelting`, `refining`, `electronics_assembly`, `semiconductor`, and `fabrication`.
+- Resource recipes persist and snapshot their `kind`, while older saves without a kind load as `generic`.
+- The default Sprint 8 playtest now has a deeper chain: iron-rich ore plus carbon becomes iron, silica plus carbon becomes silicon, copper ore becomes copper, copper plus silicon becomes electronics, electronics plus silicon becomes semiconductors, and semiconductors plus iron become gate components.
+- The gate-component recipe now depends on `semiconductors` instead of seeded generic electronics, making the advanced component chain visible in blocker reports.
+- `resource_branch_pressure(state)` identifies dense local resource rail clusters and reports node degree, severity, recipe kind, involved links, and neighbours.
+- Snapshots expose top-level `resource_branch_pressure`; CLI `--report resources` shows branch-pressure warnings in both tick reports and scenario inspection.
+- 5 new tests in `tests/test_sprint18_resource_industry.py` cover typed recipe metadata, silicon/electronics/semiconductor flow, gate-component output, branch-pressure snapshots/reports, CLI resource inspection, and legacy save compatibility.
+- Full pytest suite passes 208 tests after the Sprint 18 typed-industry slice.
+
+Slice 19 completed state:
+- `GatePowerSupport` adds a resource-chain gate support model keyed to one gate link and one support node, with required resource inputs, active state, and a power-bonus value.
+- `GameState.add_gate_support()` validates target gate links, endpoint-world support nodes, positive resource inputs, positive power bonus, duplicate support ids, and duplicate supports for one gate.
+- Gate evaluation now applies available resource support as an effective power-draw reduction while preserving the base link power requirement. Missing support resources surface as gate support shortages instead of silently behaving like static world power.
+- `GatePowerStatus` now records base power required, effective power required, resource power bonus, support id/node, support inputs, and support missing resources.
+- Persistence, snapshots, and tick reports now include gate support data. Link snapshots expose `effective_power_required` and `gate_support`, and gate reports describe whether a gate is waiting on resources or supported by a node.
+- New `sprint19` / `power` / `gate_power` scenario lowers Brink Frontier's static power margin and adds a gate-component support rule for `gate_frontier_outer`, so the gate remains underpowered until the Sprint 18 chain fabricates `gate_components`.
+- 5 new tests in `tests/test_sprint19_gate_power_resources.py` cover resource-gated power recovery, support persistence/snapshots, CLI report text, non-gate validation, and unknown resource validation.
+- Full pytest suite passes 213 tests after the Sprint 19 resource-backed gate-power slice.
+
 ## Current next step
 
-Slice 16A landed (backend foundation only — no UI). Next recommended slice is 16B: extend the build/preview surface to the destructive and unwiring operations the player will need before the Sprint 17 UI lands. Suggested scope:
-- `DemolishFacilityComponent` and `PreviewDemolishFacilityComponent` (reject if removing the only loader/unloader would drop a node's effective rate below an active schedule's `units_per_departure`, or if removal would orphan an `InternalConnection`).
-- `BuildInternalConnection` / `RemoveInternalConnection` (and previews) so the player can rewire ports without rebuilding the whole component.
-- Tests covering: demolishing a loader strands an idle train order on the next tick, demolishing a storage bay re-clamps `add_inventory` to remaining bay capacity, and removing a connection drops a factory block to "blocked" if it depended on internal feed rather than node inventory.
+Sprint 20 should add remote extraction and outpost logistics:
+- add remote resource sites such as asteroid fields, moons, debris fields, gas pockets, or anomalies, with resource ids, yield metadata, travel time, and discovery state
+- add fixed-tick mining missions that require launch/return nodes, travel time, fuel or power inputs, and deterministic returned resources
+- add orbital or collection-station nodes/projects that connect returned resources to the rail/gate industry chain
+- add CLI/snapshot reports for mission status, expected return, blockers, and returned resources
+- add rail sidecar work for train consists or typed capacity maps where remote outputs include bulk ore, liquids, protected electronics, heavy modules, reactor materials, or exotic cargo
+- add tests for mission dispatch, mission return, storage, save/load continuity, and report determinism
 
-After 16B the next step is Sprint 17 (the 2D facility detail UI in Godot, drilling into one node to render its facility components and internal flow).
+The 2D facility UI should wait until the backend can show real resource-chain, power, remote-extraction, and rail-network blockers, and 3D facility presentation should wait until after resource, power, space-extraction, outpost, rail-depth, and 2D diagnostic contracts are stable.

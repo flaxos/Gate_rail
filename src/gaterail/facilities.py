@@ -80,6 +80,28 @@ def _ports_with_open_inputs(facility: Facility, component: FacilityComponent) ->
     return open_inputs
 
 
+def _factory_block_open_input_ports(facility: Facility, component: FacilityComponent) -> list[str]:
+    """Return required factory-block input ports that are not internally wired."""
+
+    if not component.inputs:
+        return []
+    input_ports = [
+        port
+        for port in component.ports.values()
+        if port.direction == PortDirection.INPUT
+    ]
+    if not input_ports:
+        return []
+    open_input_ids = set(_ports_with_open_inputs(facility, component))
+    required_cargo = set(component.inputs)
+    return sorted(
+        port.id
+        for port in input_ports
+        if port.id in open_input_ids
+        and (port.cargo_type is None or port.cargo_type in required_cargo)
+    )
+
+
 def apply_facility_components(state: GameState) -> dict[str, object]:
     """Run one tick of facility-component flow.
 
@@ -102,6 +124,18 @@ def apply_facility_components(state: GameState) -> dict[str, object]:
             if component.kind != FacilityComponentKind.FACTORY_BLOCK:
                 continue
             if not component.inputs and not component.outputs:
+                continue
+            open_inputs = _factory_block_open_input_ports(facility, component)
+            if open_inputs:
+                blocked_entries.append(
+                    {
+                        "node": node_id,
+                        "component": component.id,
+                        "reason": "open input ports",
+                        "open_inputs": open_inputs,
+                    }
+                )
+                blocked_by_node.setdefault(node_id, []).append(component.id)
                 continue
             if not _factory_block_inputs_satisfied(node, component):
                 missing = _missing_inputs(node, component)
