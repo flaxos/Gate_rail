@@ -97,6 +97,7 @@ var _world_nodes: Array = []
 var _world_links: Array = []
 var _node_positions: Dictionary = {}
 var _gate_hub_node_id: String = ""
+var _outposts_by_id: Dictionary = {}
 
 var _canvas_rect: Rect2 = Rect2()
 
@@ -2000,6 +2001,14 @@ func _draw_logistics_overlays(_size: Vector2) -> void:
 			var offset := Vector2(-38 + float(i) * 19.0, -38)
 			_draw_overlay_badge(pos + offset, str(badge.get("label", "")), badge.get("color", COLOR_STEEL))
 
+		# Sprint 21C: outpost progress ring
+		if node.get("outpost_kind", null) != null and _outposts_by_id.has(node_id):
+			var outpost: Dictionary = _outposts_by_id[node_id]
+			var fraction := clampf(float(outpost.get("progress_fraction", 0.0)), 0.0, 1.0)
+			_canvas_panel.draw_arc(pos, 22.0, -PI / 2.0, -PI / 2.0 + TAU, 32, Color(COLOR_CYAN.r, COLOR_CYAN.g, COLOR_CYAN.b, 0.18), 2.0, true)
+			if fraction > 0.0:
+				_canvas_panel.draw_arc(pos, 22.0, -PI / 2.0, -PI / 2.0 + TAU * fraction, 32, COLOR_CYAN, 2.4, true)
+
 		var note := _node_overlay_note(node)
 		if not note.is_empty():
 			var note_pos := pos + Vector2(34, -30)
@@ -2061,10 +2070,40 @@ func _node_overlay_badges(node: Dictionary) -> Array:
 		badges.append({"label": "I", "color": COLOR_CYAN})
 	if float(node.get("transfer_pressure", 0.0)) >= 0.75:
 		badges.append({"label": "T", "color": _transfer_pressure_color(float(node.get("transfer_pressure", 0.0)), int(node.get("saturation_streak", 0)))})
+	# Sprint 21C overlay pip
+	var pip = node.get("overlay_pip")
+	if typeof(pip) == TYPE_DICTIONARY:
+		var layer := String(pip.get("layer", ""))
+		var color := COLOR_STEEL
+		var label := "·"
+		match layer:
+			"facility_block_layer":
+				color = COLOR_ERR
+				label = "B"
+			"outpost_layer":
+				color = COLOR_CYAN
+				label = "O"
+			"power_layer":
+				color = COLOR_AMBER
+				label = "P"
+		badges.append({"label": label, "color": color})
 	return badges
 
 
 func _node_overlay_note(node: Dictionary) -> String:
+	# Sprint 21C: outposts and power-layer notes take priority for actionable info.
+	var node_id := str(node.get("id", ""))
+	if node.get("outpost_kind", null) != null and _outposts_by_id.has(node_id):
+		var outpost: Dictionary = _outposts_by_id[node_id]
+		var fraction := float(outpost.get("progress_fraction", 0.0))
+		var pct := int(round(fraction * 100.0))
+		var top_needs: Array = outpost.get("top_needs", [])
+		if not top_needs.is_empty() and typeof(top_needs[0]) == TYPE_DICTIONARY:
+			return "outpost %d%% need %s" % [pct, str(top_needs[0].get("cargo", ""))]
+		return "outpost %d%%" % pct
+	var pip = node.get("overlay_pip")
+	if typeof(pip) == TYPE_DICTIONARY and String(pip.get("layer", "")) == "power_layer":
+		return "power draw %d" % int(node.get("power_required", 0))
 	var shortages := _cargo_dict(node.get("shortages", {}))
 	if _dict_positive_total(shortages) > 0:
 		return "short %s" % _format_top_cargo(shortages, 1)
@@ -2090,6 +2129,11 @@ func _node_overlay_note(node: Dictionary) -> String:
 
 
 func _node_overlay_note_color(node: Dictionary) -> Color:
+	if node.get("outpost_kind", null) != null:
+		return COLOR_CYAN
+	var pip = node.get("overlay_pip")
+	if typeof(pip) == TYPE_DICTIONARY and String(pip.get("layer", "")) == "power_layer":
+		return COLOR_AMBER
 	if _dict_positive_total(node.get("shortages", {})) > 0:
 		return COLOR_ERR
 	if _dict_positive_total(node.get("recipe_blocked", {})) > 0:
@@ -3633,6 +3677,12 @@ func _apply_snapshot(snapshot: Dictionary) -> void:
 			_world_nodes.append(n)
 			if str(n.get("kind", "")) == "gate_hub" and _gate_hub_node_id == "":
 				_gate_hub_node_id = str(n.get("id", ""))
+
+	_outposts_by_id = {}
+	for outpost in snapshot.get("outposts", []):
+		if typeof(outpost) != TYPE_DICTIONARY:
+			continue
+		_outposts_by_id[str(outpost.get("id", ""))] = outpost
 
 	var node_ids := {}
 	for n in _world_nodes:
