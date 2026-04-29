@@ -6,15 +6,23 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any, Literal, TypeAlias
 
-from gaterail.cargo import CargoType
+from gaterail.cargo import CargoType, required_consist_for
 from gaterail.construction import (
     DEFAULT_GATE_CAPACITY_PER_TICK,
     DEFAULT_GATE_POWER_REQUIRED,
     DEFAULT_GATE_TRAVEL_TICKS,
     DEFAULT_RAIL_CAPACITY_PER_TICK,
+    facility_component_build_cargo,
     facility_component_build_cost,
+    facility_component_default_concurrent_loading_limit,
+    facility_component_default_discharge_per_tick,
+    facility_component_default_ports,
+    facility_component_default_power_provided,
+    facility_component_default_power_required,
+    facility_component_default_train_capacity,
     link_build_cost,
     link_build_time,
+    node_build_cargo,
     node_build_cost,
     node_default_storage,
     node_default_transfer,
@@ -23,6 +31,7 @@ from gaterail.construction import (
     travel_ticks_from_layout_distance,
 )
 from gaterail.models import (
+    ConstructionProject,
     Facility,
     FacilityComponent,
     FacilityComponentKind,
@@ -32,11 +41,15 @@ from gaterail.models import (
     FreightTrain,
     InternalConnection,
     LinkMode,
+    MiningMissionStatus,
     NetworkLink,
     NetworkNode,
     NodeKind,
     PortDirection,
     TrackPoint,
+    TrackSignal,
+    TrackSignalKind,
+    TrainConsist,
 )
 from gaterail.traffic import effective_link_capacity
 from gaterail.transport import shortest_route
@@ -138,6 +151,30 @@ class PreviewBuildLink:
 
 
 @dataclass(frozen=True, slots=True)
+class BuildTrackSignal:
+    """Place a signal on a rail link endpoint."""
+
+    signal_id: str
+    link_id: str
+    kind: TrackSignalKind = TrackSignalKind.STOP
+    node_id: str | None = None
+    active: bool = True
+    type: Literal["BuildTrackSignal"] = "BuildTrackSignal"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewBuildTrackSignal:
+    """Preview a signal placement without mutating state."""
+
+    signal_id: str
+    link_id: str
+    kind: TrackSignalKind = TrackSignalKind.STOP
+    node_id: str | None = None
+    active: bool = True
+    type: Literal["PreviewBuildTrackSignal"] = "PreviewBuildTrackSignal"
+
+
+@dataclass(frozen=True, slots=True)
 class DemolishLink:
     """Demolish an existing transport link."""
 
@@ -153,6 +190,7 @@ class PurchaseTrain:
     name: str
     node_id: str
     capacity: int
+    consist: str = "general"
     type: Literal["PurchaseTrain"] = "PurchaseTrain"
 
 
@@ -164,6 +202,7 @@ class PreviewPurchaseTrain:
     name: str
     node_id: str
     capacity: int
+    consist: str = "general"
     type: Literal["PreviewPurchaseTrain"] = "PreviewPurchaseTrain"
 
 
@@ -219,12 +258,17 @@ class BuildFacilityComponent:
 
     component_id: str
     node_id: str
-    kind: FacilityComponentKind
+    kind: FacilityComponentKind | str
     capacity: int = 0
     rate: int = 0
     power_required: int = 0
+    power_provided: int = 0
     inputs: dict[CargoType, int] | None = None
     outputs: dict[CargoType, int] | None = None
+    train_capacity: int = 0
+    concurrent_loading_limit: int = 1
+    stored_charge: int = 0
+    discharge_per_tick: int = 0
     ports: tuple[FacilityPort, ...] = ()
     connections: tuple[InternalConnection, ...] = ()
     type: Literal["BuildFacilityComponent"] = "BuildFacilityComponent"
@@ -236,12 +280,17 @@ class PreviewBuildFacilityComponent:
 
     component_id: str
     node_id: str
-    kind: FacilityComponentKind
+    kind: FacilityComponentKind | str
     capacity: int = 0
     rate: int = 0
     power_required: int = 0
+    power_provided: int = 0
     inputs: dict[CargoType, int] | None = None
     outputs: dict[CargoType, int] | None = None
+    train_capacity: int = 0
+    concurrent_loading_limit: int = 1
+    stored_charge: int = 0
+    discharge_per_tick: int = 0
     ports: tuple[FacilityPort, ...] = ()
     connections: tuple[InternalConnection, ...] = ()
     type: Literal["PreviewBuildFacilityComponent"] = "PreviewBuildFacilityComponent"
@@ -309,6 +358,28 @@ class PreviewRemoveInternalConnection:
     type: Literal["PreviewRemoveInternalConnection"] = "PreviewRemoveInternalConnection"
 
 
+@dataclass(frozen=True, slots=True)
+class DispatchMiningMission:
+    """Launch a fixed-tick mining mission to a remote site."""
+
+    mission_id: str
+    site_id: str
+    launch_node_id: str
+    return_node_id: str
+    type: Literal["DispatchMiningMission"] = "DispatchMiningMission"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewDispatchMiningMission:
+    """Preview a mining mission launch without mutating state."""
+
+    mission_id: str
+    site_id: str
+    launch_node_id: str
+    return_node_id: str
+    type: Literal["PreviewDispatchMiningMission"] = "PreviewDispatchMiningMission"
+
+
 PlayerCommand: TypeAlias = (
     SetScheduleEnabled
     | DispatchOrder
@@ -317,6 +388,8 @@ PlayerCommand: TypeAlias = (
     | PreviewBuildNode
     | BuildLink
     | PreviewBuildLink
+    | BuildTrackSignal
+    | PreviewBuildTrackSignal
     | DemolishLink
     | PurchaseTrain
     | PreviewPurchaseTrain
@@ -331,6 +404,8 @@ PlayerCommand: TypeAlias = (
     | PreviewBuildInternalConnection
     | RemoveInternalConnection
     | PreviewRemoveInternalConnection
+    | DispatchMiningMission
+    | PreviewDispatchMiningMission
 )
 
 
@@ -449,6 +524,21 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             bidirectional=bool(data.get("bidirectional", True)),
             alignment=_alignment_fields(data),
         )
+    if command_type in {"BuildTrackSignal", "PreviewBuildTrackSignal"}:
+        signal_command = (
+            BuildTrackSignal if command_type == "BuildTrackSignal" else PreviewBuildTrackSignal
+        )
+        signal_id = data.get("signal_id", data.get("id"))
+        if signal_id is None:
+            raise ValueError("track signal command missing signal_id")
+        node_id = data.get("node_id")
+        return signal_command(
+            signal_id=str(signal_id),
+            link_id=str(data["link_id"]),
+            kind=TrackSignalKind(str(data.get("kind", TrackSignalKind.STOP.value))),
+            node_id=None if node_id is None else str(node_id),
+            active=bool(data.get("active", True)),
+        )
     if command_type == "DemolishLink":
         return DemolishLink(link_id=str(data["link_id"]))
     if command_type in {"PurchaseTrain", "PreviewPurchaseTrain"}:
@@ -458,6 +548,7 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             name=str(data["name"]),
             node_id=str(data["node_id"]),
             capacity=int(data["capacity"]),
+            consist=str(data.get("consist", "general")),
         )
     if command_type in {"CreateSchedule", "PreviewCreateSchedule"}:
         next_departure = data.get("next_departure_tick")
@@ -488,6 +579,11 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
         connections = tuple(_internal_connection_from_dict(item) for item in connections_payload)
         inputs_data = data.get("inputs")
         outputs_data = data.get("outputs")
+        raw_kind = str(data["kind"])
+        try:
+            parsed_kind: FacilityComponentKind | str = FacilityComponentKind(raw_kind)
+        except ValueError:
+            parsed_kind = raw_kind
         component_command = (
             BuildFacilityComponent
             if command_type == "BuildFacilityComponent"
@@ -496,12 +592,17 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
         return component_command(
             component_id=str(data["component_id"]),
             node_id=str(data["node_id"]),
-            kind=FacilityComponentKind(str(data["kind"])),
+            kind=parsed_kind,
             capacity=int(data.get("capacity", 0)),
             rate=int(data.get("rate", 0)),
             power_required=int(data.get("power_required", 0)),
+            power_provided=int(data.get("power_provided", 0)),
             inputs=None if inputs_data is None else _facility_cargo_map_from_dict(inputs_data),
             outputs=None if outputs_data is None else _facility_cargo_map_from_dict(outputs_data),
+            train_capacity=int(data.get("train_capacity", 0)),
+            concurrent_loading_limit=int(data.get("concurrent_loading_limit", 1)),
+            stored_charge=int(data.get("stored_charge", 0)),
+            discharge_per_tick=int(data.get("discharge_per_tick", 0)),
             ports=ports,
             connections=connections,
         )
@@ -538,6 +639,18 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
         return connection_command(
             node_id=str(data["node_id"]),
             connection_id=str(data["connection_id"]),
+        )
+    if command_type in {"DispatchMiningMission", "PreviewDispatchMiningMission"}:
+        mission_command = (
+            DispatchMiningMission
+            if command_type == "DispatchMiningMission"
+            else PreviewDispatchMiningMission
+        )
+        return mission_command(
+            mission_id=str(data["mission_id"]),
+            site_id=str(data["site_id"]),
+            launch_node_id=str(data["launch_node_id"]),
+            return_node_id=str(data["return_node_id"]),
         )
     raise ValueError(f"unknown command type: {command_type}")
 
@@ -828,6 +941,47 @@ def _link_build_payload(
     return payload
 
 
+def _validate_track_signal(
+    state: object,
+    command: BuildTrackSignal | PreviewBuildTrackSignal,
+) -> TrackSignal:
+    """Validate and normalize a track-signal command."""
+
+    signal = TrackSignal(
+        id=command.signal_id,
+        link_id=command.link_id,
+        kind=command.kind,
+        node_id=command.node_id,
+        active=command.active,
+    )
+    if signal.id in state.track_signals:
+        raise ValueError(f"duplicate track signal id: {signal.id}")
+    if signal.link_id not in state.links:
+        raise ValueError(f"track signal {signal.id} references unknown link {signal.link_id}")
+    link = state.links[signal.link_id]
+    if link.mode != LinkMode.RAIL:
+        raise ValueError(f"track signal {signal.id} target link is not rail")
+    if signal.node_id is not None:
+        if signal.node_id not in state.nodes:
+            raise ValueError(f"track signal {signal.id} references unknown node {signal.node_id}")
+        if signal.node_id not in {link.origin, link.destination}:
+            raise ValueError("track signal node must be one endpoint of its link")
+    return signal
+
+
+def _track_signal_payload(signal: TrackSignal) -> dict[str, object]:
+    """Return a normalized BuildTrackSignal command payload."""
+
+    return {
+        "type": "BuildTrackSignal",
+        "signal_id": signal.id,
+        "link_id": signal.link_id,
+        "kind": signal.kind.value,
+        "node_id": signal.node_id,
+        "active": signal.active,
+    }
+
+
 def _gate_preview_payload(
     state: object,
     command: BuildLink | PreviewBuildLink,
@@ -896,6 +1050,7 @@ def _train_purchase_payload(command: PurchaseTrain | PreviewPurchaseTrain) -> di
         "name": command.name,
         "node_id": command.node_id,
         "capacity": command.capacity,
+        "consist": command.consist,
     }
 
 
@@ -934,6 +1089,9 @@ def _validate_create_schedule(
         raise ValueError(f"schedule train {command.train_id} is at {train.node_id}, not {command.origin}")
     if command.units_per_departure > train.capacity:
         raise ValueError("schedule units_per_departure cannot exceed train capacity")
+    required_consist = required_consist_for(command.cargo_type)
+    if train.consist != required_consist and required_consist != "general":
+        raise ValueError(f"schedule cargo {command.cargo_type.value} requires {required_consist.value} consist, train is {train.consist.value}")
     next_departure_tick = _effective_next_departure_tick(state, command)
     if next_departure_tick <= state.tick:
         raise ValueError("schedule next_departure_tick must be in the future")
@@ -1121,10 +1279,66 @@ def _insufficient_cash_message(state: object, label: str, cost: float) -> str:
     return f"insufficient cash for {label}: need {cost:.0f}, have {state.finance.cash:.0f}"
 
 
+def _facility_kind_value(kind: FacilityComponentKind | str) -> str:
+    """Return a stable string value for one component kind payload."""
+
+    if isinstance(kind, FacilityComponentKind):
+        return kind.value
+    return str(kind)
+
+
+def _resolve_facility_component_kind(kind: FacilityComponentKind | str) -> FacilityComponentKind:
+    """Parse a component kind or raise a command-facing validation error."""
+
+    if isinstance(kind, FacilityComponentKind):
+        return kind
+    raw_kind = str(kind)
+    try:
+        return FacilityComponentKind(raw_kind)
+    except ValueError as exc:
+        raise ValueError(f"unknown facility component kind: {raw_kind}") from exc
+
+
+def _plain_cargo_cost(mapping: dict[CargoType, int]) -> dict[str, int]:
+    """Return stable JSON-safe cargo build-cost payloads."""
+
+    return {
+        cargo.value: int(units)
+        for cargo, units in sorted(mapping.items(), key=lambda item: item[0].value)
+        if int(units) > 0
+    }
+
+
+def _missing_component_build_cargo(
+    node: NetworkNode,
+    required_cargo: dict[CargoType, int],
+) -> dict[CargoType, int]:
+    """Return any node inventory shortfall for an immediate component build."""
+
+    return {
+        cargo_type: units - node.stock(cargo_type)
+        for cargo_type, units in required_cargo.items()
+        if node.stock(cargo_type) < units
+    }
+
+
+def _insufficient_component_cargo_message(
+    kind: FacilityComponentKind,
+    missing: dict[CargoType, int],
+) -> str:
+    """Return a stable error string for component cargo shortages."""
+
+    parts = ", ".join(
+        f"{cargo_type.value} {units}"
+        for cargo_type, units in sorted(missing.items(), key=lambda item: item[0].value)
+    )
+    return f"insufficient node inventory for {kind.value}: missing {parts}"
+
+
 def _validate_facility_component(
     state: object,
     command: BuildFacilityComponent | PreviewBuildFacilityComponent,
-) -> tuple[float, dict[CargoType, int], dict[CargoType, int], tuple[FacilityPort, ...], tuple[InternalConnection, ...]]:
+) -> tuple[FacilityComponent, float, dict[CargoType, int], tuple[InternalConnection, ...]]:
     """Validate a facility component install and return its normalized fields."""
 
     if command.node_id not in state.nodes:
@@ -1135,26 +1349,70 @@ def _validate_facility_component(
     facility = node.facility
     if facility is not None and command.component_id in facility.components:
         raise ValueError(f"duplicate component id: {command.component_id}")
+    kind = _resolve_facility_component_kind(command.kind)
     if command.capacity < 0:
         raise ValueError("component capacity cannot be negative")
     if command.rate < 0:
         raise ValueError("component rate cannot be negative")
     if command.power_required < 0:
         raise ValueError("component power_required cannot be negative")
+    if command.power_provided < 0:
+        raise ValueError("component power_provided cannot be negative")
+    if command.train_capacity < 0:
+        raise ValueError("component train_capacity cannot be negative")
+    if command.concurrent_loading_limit <= 0:
+        raise ValueError("component concurrent_loading_limit must be positive")
+    if command.stored_charge < 0:
+        raise ValueError("component stored_charge cannot be negative")
+    if command.discharge_per_tick < 0:
+        raise ValueError("component discharge_per_tick cannot be negative")
+
     inputs = dict(command.inputs or {})
     outputs = dict(command.outputs or {})
+    cargo_cost = facility_component_build_cargo(kind)
     _validate_facility_cargo_quantities(inputs, "input")
     _validate_facility_cargo_quantities(outputs, "output")
-    if command.kind == FacilityComponentKind.STORAGE_BAY and command.capacity <= 0:
+
+    capacity = int(command.capacity)
+    rate = int(command.rate)
+    power_required = int(command.power_required)
+    power_provided = int(command.power_provided)
+    train_capacity = int(command.train_capacity)
+    concurrent_loading_limit = int(command.concurrent_loading_limit)
+    stored_charge = int(command.stored_charge)
+    discharge_per_tick = int(command.discharge_per_tick)
+
+    if not command.ports:
+        ports = tuple(facility_component_default_ports(kind, command.component_id))
+    else:
+        ports = command.ports
+
+    if power_required == 0:
+        power_required = facility_component_default_power_required(kind)
+    if power_provided == 0:
+        power_provided = facility_component_default_power_provided(kind)
+    if train_capacity == 0:
+        train_capacity = facility_component_default_train_capacity(kind)
+    if discharge_per_tick == 0:
+        discharge_per_tick = facility_component_default_discharge_per_tick(kind)
+    concurrent_loading_limit = max(
+        concurrent_loading_limit,
+        facility_component_default_concurrent_loading_limit(kind),
+    )
+
+    if kind == FacilityComponentKind.WAREHOUSE_BAY and capacity <= 0:
+        capacity = 600
+    if kind == FacilityComponentKind.STORAGE_BAY and capacity <= 0:
         raise ValueError("storage_bay capacity must be positive")
-    if command.kind == FacilityComponentKind.LOADER and command.rate <= 0:
+    if kind == FacilityComponentKind.LOADER and rate <= 0:
         raise ValueError("loader rate must be positive")
-    if command.kind == FacilityComponentKind.UNLOADER and command.rate <= 0:
+    if kind == FacilityComponentKind.UNLOADER and rate <= 0:
         raise ValueError("unloader rate must be positive")
-    if command.kind == FacilityComponentKind.FACTORY_BLOCK and not (inputs or outputs):
+    if kind == FacilityComponentKind.FACTORY_BLOCK and not (inputs or outputs):
         raise ValueError("factory_block requires at least one input or output")
+
     seen_port_ids: set[str] = set()
-    for port in command.ports:
+    for port in ports:
         if not port.id.strip():
             raise ValueError("port id cannot be empty")
         if port.id in seen_port_ids:
@@ -1164,19 +1422,28 @@ def _validate_facility_component(
             raise ValueError(f"port {port.id} rate cannot be negative")
         if port.capacity < 0:
             raise ValueError(f"port {port.id} capacity cannot be negative")
+
     component = FacilityComponent(
         id=command.component_id,
-        kind=command.kind,
-        ports={port.id: port for port in command.ports},
-        capacity=int(command.capacity),
-        rate=int(command.rate),
-        power_required=int(command.power_required),
+        kind=kind,
+        ports={port.id: port for port in ports},
+        capacity=capacity,
+        rate=rate,
+        power_required=power_required,
+        power_provided=power_provided,
         inputs=dict(inputs),
         outputs=dict(outputs),
+        train_capacity=train_capacity,
+        concurrent_loading_limit=concurrent_loading_limit,
+        stored_charge=stored_charge,
+        discharge_per_tick=discharge_per_tick,
+        build_cost=float(facility_component_build_cost(kind)),
     )
     _validate_inline_facility_connections(node, component, command.connections)
-    cost = facility_component_build_cost(command.kind)
-    return cost, inputs, outputs, command.ports, command.connections
+    missing_cargo = _missing_component_build_cargo(node, cargo_cost)
+    if missing_cargo:
+        raise ValueError(_insufficient_component_cargo_message(kind, missing_cargo))
+    return component, facility_component_build_cost(kind), cargo_cost, command.connections
 
 
 def _validate_facility_cargo_quantities(mapping: dict[CargoType, int], label: str) -> None:
@@ -1214,9 +1481,8 @@ def _validate_inline_facility_connections(
 def _facility_component_payload(
     command: BuildFacilityComponent | PreviewBuildFacilityComponent,
     *,
-    inputs: dict[CargoType, int],
-    outputs: dict[CargoType, int],
-    ports: tuple[FacilityPort, ...],
+    component: FacilityComponent,
+    cargo_cost: dict[CargoType, int],
     connections: tuple[InternalConnection, ...],
 ) -> dict[str, object]:
     """Return a normalized BuildFacilityComponent command payload."""
@@ -1225,12 +1491,18 @@ def _facility_component_payload(
         "type": "BuildFacilityComponent",
         "component_id": command.component_id,
         "node_id": command.node_id,
-        "kind": command.kind.value,
-        "capacity": int(command.capacity),
-        "rate": int(command.rate),
-        "power_required": int(command.power_required),
-        "inputs": {cargo.value: int(units) for cargo, units in sorted(inputs.items(), key=lambda item: item[0].value)},
-        "outputs": {cargo.value: int(units) for cargo, units in sorted(outputs.items(), key=lambda item: item[0].value)},
+        "kind": component.kind.value,
+        "capacity": int(component.capacity),
+        "rate": int(component.rate),
+        "power_required": int(component.power_required),
+        "power_provided": int(component.power_provided),
+        "train_capacity": int(component.train_capacity),
+        "concurrent_loading_limit": int(component.concurrent_loading_limit),
+        "stored_charge": int(component.stored_charge),
+        "discharge_per_tick": int(component.discharge_per_tick),
+        "cargo_cost": _plain_cargo_cost(cargo_cost),
+        "inputs": _plain_cargo_cost(component.inputs),
+        "outputs": _plain_cargo_cost(component.outputs),
         "ports": [
             {
                 "id": port.id,
@@ -1239,7 +1511,7 @@ def _facility_component_payload(
                 "rate": int(port.rate),
                 "capacity": int(port.capacity),
             }
-            for port in ports
+            for port in sorted(component.ports.values(), key=lambda item: item.id)
         ],
         "connections": [
             {
@@ -1352,11 +1624,17 @@ def _validate_demolish_facility_component(
         command.node_id,
         command.component_id,
     )
-    referencing = _connections_referencing_component(facility, command.component_id)
-    if referencing:
+    referencing_connections = _connections_referencing_component(facility, component.id)
+    buffered_cargo = any(
+        units > 0
+        for cargo_map in component.port_inventory.values()
+        for units in cargo_map.values()
+    )
+    if referencing_connections and not buffered_cargo:
         raise ValueError(
-            f"cannot demolish component {command.component_id}; remove internal connections first: "
-            + ", ".join(referencing)
+            f"cannot demolish {component.kind.value} {component.id}; "
+            "remove internal connections first: "
+            + ", ".join(referencing_connections)
         )
     future_rate = _rate_after_component_removal(node, facility, component)
     conflicts = _schedule_conflicts_after_component_removal(state, node, component, future_rate)
@@ -1379,6 +1657,37 @@ def _demolish_facility_component_payload(
         "node_id": command.node_id,
         "component_id": command.component_id,
     }
+
+
+def _demolish_cargo_plan(
+    node: NetworkNode,
+    component: FacilityComponent,
+) -> tuple[dict[CargoType, int], dict[CargoType, int]]:
+    """Plan cargo returned to node inventory versus dropped on demolition."""
+
+    cargo_returned: dict[CargoType, int] = {}
+    cargo_dropped: dict[CargoType, int] = {}
+    remaining_capacity = max(0, int(node.storage_capacity) - node.total_inventory())
+    for port_id in sorted(component.port_inventory):
+        cargo_map = component.port_inventory[port_id]
+        for cargo_type, units in sorted(cargo_map.items(), key=lambda item: item[0].value):
+            if units <= 0:
+                continue
+            returned = min(int(units), remaining_capacity)
+            dropped = max(0, int(units) - returned)
+            if returned > 0:
+                cargo_returned[cargo_type] = cargo_returned.get(cargo_type, 0) + returned
+                remaining_capacity -= returned
+            if dropped > 0:
+                cargo_dropped[cargo_type] = cargo_dropped.get(cargo_type, 0) + dropped
+    return cargo_returned, cargo_dropped
+
+
+def _demolish_refund(component: FacilityComponent) -> float:
+    """Return the fixed 50% component refund."""
+
+    build_cost = component.build_cost if component.build_cost > 0 else facility_component_build_cost(component.kind)
+    return round(build_cost * 0.5, 2)
 
 
 def _connection_from_command(
@@ -1527,6 +1836,62 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             message=f"order {command.order_id} cancelled",
         )
 
+    if isinstance(command, PreviewDispatchMiningMission):
+        site = state.space_sites.get(command.site_id)
+        if not site:
+            return _preview_error(command.type, command.mission_id, ValueError(f"unknown space site: {command.site_id}"))
+        
+        normalized_command = {
+            "type": "DispatchMiningMission",
+            "mission_id": command.mission_id,
+            "site_id": command.site_id,
+            "launch_node_id": command.launch_node_id,
+            "return_node_id": command.return_node_id,
+        }
+        
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.mission_id,
+            message=f"valid mission preview for site {command.site_id}",
+            travel_ticks=site.travel_ticks * 2,
+            expected_yield=site.base_yield,
+            normalized_command=normalized_command,
+        )
+
+    if isinstance(command, DispatchMiningMission):
+        site = state.space_sites.get(command.site_id)
+        if not site:
+            raise ValueError(f"unknown space site: {command.site_id}")
+            
+        launch_node = state.nodes.get(command.launch_node_id)
+        if not launch_node:
+            raise ValueError(f"unknown launch node: {command.launch_node_id}")
+            
+        return_node = state.nodes.get(command.return_node_id)
+        if not return_node:
+            raise ValueError(f"unknown return node: {command.return_node_id}")
+            
+        from gaterail.models import MiningMission
+        mission = MiningMission(
+            id=command.mission_id,
+            site_id=command.site_id,
+            launch_node_id=command.launch_node_id,
+            return_node_id=command.return_node_id,
+            status=MiningMissionStatus.EN_ROUTE,
+            ticks_remaining=site.travel_ticks * 2,
+            fuel_input=0,
+            power_input=0,
+            expected_yield=site.base_yield,
+        )
+        state.add_mining_mission(mission)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.mission_id,
+            message=f"mission {command.mission_id} dispatched",
+        )
+
     if isinstance(command, PreviewBuildNode):
         try:
             cost, storage, transfer, layout = _validate_build_node(state, command)
@@ -1577,11 +1942,24 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
         )
         state.add_node(node)
         state.finance.record_cost(cost)
+        
+        required_cargo = node_build_cargo(command.kind)
+        if required_cargo:
+            project = ConstructionProject(
+                id=f"proj_{command.node_id}",
+                target_node_id=command.node_id,
+                required_cargo=required_cargo,
+            )
+            state.add_construction_project(project)
+            message = f"started {command.kind.value} {command.node_id} project for {cost:.0f}"
+        else:
+            message = f"built {command.kind.value} {command.node_id} for {cost:.0f}"
+
         return command_result(
             command.type,
             ok=True,
             target_id=command.node_id,
-            message=f"built {command.kind.value} {command.node_id} for {cost:.0f}",
+            message=message,
             cost=cost,
             build_time=0,
             storage_capacity=storage,
@@ -1690,12 +2068,54 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             **gate_context,
         )
 
+    if isinstance(command, PreviewBuildTrackSignal):
+        try:
+            signal = _validate_track_signal(state, command)
+        except ValueError as exc:
+            return _preview_error(command.type, command.signal_id, exc)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=signal.id,
+            message=f"valid {signal.kind.value} signal preview on {signal.link_id}",
+            normalized_command=_track_signal_payload(signal),
+            link_id=signal.link_id,
+            node_id=signal.node_id,
+            kind=signal.kind.value,
+            active=signal.active,
+            block=signal.link_id,
+        )
+
+    if isinstance(command, BuildTrackSignal):
+        signal = _validate_track_signal(state, command)
+        state.add_track_signal(signal)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=signal.id,
+            message=f"built {signal.kind.value} signal {signal.id} on {signal.link_id}",
+            link_id=signal.link_id,
+            node_id=signal.node_id,
+            kind=signal.kind.value,
+            active=signal.active,
+            block=signal.link_id,
+        )
+
     if isinstance(command, DemolishLink):
         if command.link_id not in state.links:
             raise ValueError(f"unknown link id: {command.link_id}")
         for train in state.trains.values():
             if command.link_id in train.route_link_ids:
                 raise ValueError(f"cannot demolish link in active train route: {command.link_id}")
+        signal_ids = [
+            signal.id
+            for signal in state.track_signals.values()
+            if signal.link_id == command.link_id
+        ]
+        if signal_ids:
+            raise ValueError(
+                f"cannot demolish link with track signals: {', '.join(sorted(signal_ids))}"
+            )
         del state.links[command.link_id]
         return command_result(
             command.type,
@@ -1741,6 +2161,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             name=command.name,
             node_id=command.node_id,
             capacity=command.capacity,
+            consist=TrainConsist(command.consist),
         )
         state.add_train(train)
         state.finance.record_cost(cost)
@@ -1806,18 +2227,24 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
 
     if isinstance(command, PreviewBuildFacilityComponent):
         try:
-            cost, inputs, outputs, ports, connections = _validate_facility_component(state, command)
+            component, cost, cargo_cost, connections = _validate_facility_component(state, command)
         except ValueError as exc:
+            if str(exc).startswith("unknown facility component kind: "):
+                return command_result(
+                    command.type,
+                    ok=False,
+                    target_id=command.component_id,
+                    message=str(exc),
+                )
             return _preview_error(command.type, command.component_id, exc)
         normalized_command = _facility_component_payload(
             command,
-            inputs=inputs,
-            outputs=outputs,
-            ports=ports,
+            component=component,
+            cargo_cost=cargo_cost,
             connections=connections,
         )
         if not _cash_available(state, cost):
-            reason = _insufficient_cash_message(state, f"{command.kind.value} component", cost)
+            reason = _insufficient_cash_message(state, f"{component.kind.value} component", cost)
             return command_result(
                 command.type,
                 ok=False,
@@ -1825,38 +2252,38 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
                 message=reason,
                 reason=reason,
                 cost=cost,
+                cargo_cost=_plain_cargo_cost(cargo_cost),
+                default_ports=normalized_command["ports"],
                 node_id=command.node_id,
-                kind=command.kind.value,
+                kind=component.kind.value,
+                power_required=int(component.power_required),
+                power_provided=int(component.power_provided),
                 normalized_command=normalized_command,
             )
         return command_result(
             command.type,
             ok=True,
             target_id=command.component_id,
-            message=f"valid {command.kind.value} component preview for {cost:.0f}",
+            message=f"valid {component.kind.value} component preview for {cost:.0f}",
             cost=cost,
+            cargo_cost=_plain_cargo_cost(cargo_cost),
+            default_ports=normalized_command["ports"],
             node_id=command.node_id,
-            kind=command.kind.value,
+            kind=component.kind.value,
+            power_required=int(component.power_required),
+            power_provided=int(component.power_provided),
             normalized_command=normalized_command,
         )
 
     if isinstance(command, BuildFacilityComponent):
-        cost, inputs, outputs, ports, connections = _validate_facility_component(state, command)
+        component, cost, cargo_cost, connections = _validate_facility_component(state, command)
         if not _cash_available(state, cost):
-            raise ValueError(_insufficient_cash_message(state, f"{command.kind.value} component", cost))
+            raise ValueError(_insufficient_cash_message(state, f"{component.kind.value} component", cost))
         node = state.nodes[command.node_id]
         if node.facility is None:
             node.facility = Facility()
-        component = FacilityComponent(
-            id=command.component_id,
-            kind=command.kind,
-            ports={port.id: port for port in ports},
-            capacity=int(command.capacity),
-            rate=int(command.rate),
-            power_required=int(command.power_required),
-            inputs=dict(inputs),
-            outputs=dict(outputs),
-        )
+        for cargo_type, units in cargo_cost.items():
+            node.remove_inventory(cargo_type, units)
         node.facility.components[component.id] = component
         for connection in connections:
             if connection.id in node.facility.connections:
@@ -1867,17 +2294,22 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             command.type,
             ok=True,
             target_id=command.component_id,
-            message=f"installed {command.kind.value} component {command.component_id} for {cost:.0f}",
+            message=f"installed {component.kind.value} component {command.component_id} for {cost:.0f}",
             cost=cost,
+            cargo_cost=_plain_cargo_cost(cargo_cost),
             node_id=command.node_id,
-            kind=command.kind.value,
+            kind=component.kind.value,
+            power_required=int(component.power_required),
+            power_provided=int(component.power_provided),
         )
 
     if isinstance(command, PreviewDemolishFacilityComponent):
         try:
-            _, _, component, future_rate = _validate_demolish_facility_component(state, command)
+            node, facility, component, future_rate = _validate_demolish_facility_component(state, command)
         except ValueError as exc:
             return _preview_error(command.type, command.component_id, exc)
+        cargo_returned, cargo_dropped = _demolish_cargo_plan(node, component)
+        connections_removed = _connections_referencing_component(facility, command.component_id)
         return command_result(
             command.type,
             ok=True,
@@ -1886,12 +2318,24 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             node_id=command.node_id,
             kind=component.kind.value,
             future_rate=future_rate,
+            refund=_demolish_refund(component),
+            cargo_returned=_plain_cargo_cost(cargo_returned),
+            cargo_dropped=_plain_cargo_cost(cargo_dropped),
+            connections_removed=connections_removed,
             normalized_command=_demolish_facility_component_payload(command),
         )
 
     if isinstance(command, DemolishFacilityComponent):
-        _, facility, component, future_rate = _validate_demolish_facility_component(state, command)
+        node, facility, component, future_rate = _validate_demolish_facility_component(state, command)
+        refund = _demolish_refund(component)
+        cargo_returned, cargo_dropped = _demolish_cargo_plan(node, component)
+        connections_removed = _connections_referencing_component(facility, command.component_id)
+        for cargo_type, units in cargo_returned.items():
+            node.add_inventory(cargo_type, units)
+        for connection_id in connections_removed:
+            facility.connections.pop(connection_id, None)
         del facility.components[command.component_id]
+        state.finance.cash += refund
         return command_result(
             command.type,
             ok=True,
@@ -1900,6 +2344,10 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             node_id=command.node_id,
             kind=component.kind.value,
             future_rate=future_rate,
+            refund=refund,
+            cargo_returned=_plain_cargo_cost(cargo_returned),
+            cargo_dropped=_plain_cargo_cost(cargo_dropped),
+            connections_removed=connections_removed,
         )
 
     if isinstance(command, PreviewBuildInternalConnection):

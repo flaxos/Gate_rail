@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GateRail | Resource Relationship Atlas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg-0: #0b1522;
+            --bg-1: #12233b;
+            --bg-2: #1e3a5f;
+            --steel: #95a5a6;
+            --steel-2: #bdc3c7;
+            --ice: #dfe8ef;
+            --amber: #f39c12;
+            --amber-hot: #ffc15e;
+            --ok: #2ecc71;
+            --err: #e74c3c;
+            --cyan: #58c6d8;
+            --hair: rgba(149, 165, 166, 0.2);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-0);
+            color: var(--ice);
+            font-family: 'Inter', sans-serif;
+            line-height: 1.6;
+            background-image: 
+                linear-gradient(var(--hair) 1px, transparent 1px),
+                linear-gradient(90deg, var(--hair) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        header {
+            background-color: var(--bg-1);
+            border-bottom: 2px solid var(--amber);
+            padding: 2rem;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        h1 {
+            margin: 0;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            color: var(--amber-hot);
+            font-size: 2.5rem;
+        }
+
+        .subtitle {
+            font-family: 'Roboto Mono', monospace;
+            color: var(--steel);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        section {
+            background-color: var(--bg-1);
+            border: 1px solid var(--bg-2);
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 3rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        h2 {
+            border-left: 4px solid var(--cyan);
+            padding-left: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 2rem;
+            font-size: 1.5rem;
+            color: var(--cyan);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .card {
+            background-color: var(--bg-2);
+            border: 1px solid var(--hair);
+            border-radius: 6px;
+            padding: 1.5rem;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: var(--cyan);
+        }
+
+        .card h3 {
+            margin-top: 0;
+            color: var(--ice);
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .tag {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.7rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--hair);
+        }
+
+        .tag.raw { color: var(--amber); border-color: var(--amber); }
+        .tag.refined { color: var(--ok); border-color: var(--ok); }
+        .tag.manufactured { color: var(--cyan); border-color: var(--cyan); }
+
+        .recipe {
+            margin-top: 1rem;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.85rem;
+            background: rgba(0,0,0,0.2);
+            padding: 0.75rem;
+            border-radius: 4px;
+        }
+
+        .recipe .io { display: flex; justify-content: space-between; margin: 0.25rem 0; }
+        .recipe .in { color: var(--steel-2); }
+        .recipe .out { color: var(--ok); font-weight: bold; }
+
+        .mermaid {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 3rem;
+            color: var(--steel);
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 1rem;
+            background: var(--bg-0);
+            border: 1px solid var(--bg-2);
+            color: var(--ice);
+            border-radius: 4px;
+            font-family: 'Inter', sans-serif;
+            margin-bottom: 2rem;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--amber);
+        }
+
+        /* SVG Icon simulation */
+        .icon-box {
+            width: 32px;
+            height: 32px;
+            background: var(--bg-1);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--hair);
+        }
+
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>GateRail Atlas</h1>
+    <div class="subtitle">Logistics & Industry Relationship Schematic v21.C</div>
+</header>
+
+<main>
+    <section>
+        <h2>Supply Chain Schematic</h2>
+        <div class="mermaid">
+graph TD
+    %% RAW SOURCES
+    MixedOre[Mixed Ore] --> Smelter
+    IronOre[Iron-rich Ore] --> Smelter
+    Carbon[Carbon Feedstock] --> Smelter
+    Carbon --> Refiner
+    Silica[Silica Sand] --> Refiner
+    CopperOre[Copper Sulfide Ore] --> Refinery
+
+    %% PROCESSORS
+    Smelter[Smelter] --> Iron[Iron]
+    Refiner[Silicon Refiner] --> Silicon[Silicon]
+    Refinery[Copper Refinery] --> Copper[Copper]
+
+    %% ASSEMBLERS
+    Copper --> Electronics[Electronics Assembler]
+    Silicon --> Electronics
+    Electronics --> Logic[Electronics]
+
+    Logic --> Semiconductors[Semiconductor Line]
+    Silicon --> Semiconductors
+    Semiconductors --> Chips[Semiconductors]
+
+    Chips --> Fabricator[Gate Fabricator]
+    Iron --> Fabricator
+    Fabricator --> GateComp[Gate Components]
+
+    %% STYLING
+    classDef raw fill:#f39c12,stroke:#333,color:white
+    classDef refined fill:#2ecc71,stroke:#333,color:white
+    classDef manufactured fill:#3498db,stroke:#333,color:white
+    class MixedOre,IronOre,Carbon,Silica,CopperOre raw
+    class Iron,Silicon,Copper refined
+    class Logic,Chips,GateComp manufactured
+        </div>
+    </section>
+
+    <section id="catalog">
+        <h2>Resource Catalog</h2>
+        <input type="text" class="search-box" placeholder="Filter resources by name, category or tag..." id="search">
+        
+        <div class="grid" id="resource-grid">
+            <!-- Raw -->
+            <div class="card" data-tags="ore starter">
+                <h3><div class="icon-box">⛏️</div> Mixed Ore <span class="tag raw">Raw Source</span></h3>
+                <p>Unsorted metal-bearing ore suitable for early smelting.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">Deposit Grade 1.0</span> <span class="out">Yield Variable</span></div>
+                </div>
+            </div>
+
+            <div class="card" data-tags="ore iron">
+                <h3><div class="icon-box">⛓️</div> Iron-rich Ore <span class="tag raw">Raw Source</span></h3>
+                <p>High-ferrous ore body that can support dedicated iron output.</p>
+            </div>
+
+            <div class="card" data-tags="carbon fuel">
+                <h3><div class="icon-box">🔥</div> Carbon Feedstock <span class="tag raw">Raw Source</span></h3>
+                <p>Organic or mineral carbon source for fuel, polymers, and composites.</p>
+            </div>
+
+            <!-- Refined -->
+            <div class="card" data-tags="metal structural">
+                <h3><div class="icon-box">🧱</div> Iron <span class="tag refined">Refined</span></h3>
+                <p>Refined structural metal. Essential for base construction.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">6x Iron Ore + 1x Carbon</span> <span class="out">4x Iron</span></div>
+                </div>
+            </div>
+
+            <div class="card" data-tags="metal conductor">
+                <h3><div class="icon-box">⚡</div> Copper <span class="tag refined">Refined</span></h3>
+                <p>Refined conductive metal. Foundation of the electronics chain.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">4x Copper Ore</span> <span class="out">2x Copper</span></div>
+                </div>
+            </div>
+
+            <div class="card" data-tags="wafer electronics">
+                <h3><div class="icon-box">💎</div> Silicon <span class="tag refined">Refined</span></h3>
+                <p>Refined semiconductor element from silica sand.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">3x Silica + 1x Carbon</span> <span class="out">3x Silicon</span></div>
+                </div>
+            </div>
+
+            <!-- Manufactured -->
+            <div class="card" data-tags="factory control">
+                <h3><div class="icon-box">📟</div> Electronics <span class="tag manufactured">Manufactured</span></h3>
+                <p>Control boards and industrial automation assemblies.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">1x Copper + 2x Silicon</span> <span class="out">2x Electronics</span></div>
+                </div>
+            </div>
+
+            <div class="card" data-tags="wafer advanced">
+                <h3><div class="icon-box">💾</div> Semiconductors <span class="tag manufactured">Manufactured</span></h3>
+                <p>Wafer and chip output for advanced plants and gates.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">1x Electronics + 1x Silicon</span> <span class="out">1x Semiconductors</span></div>
+                </div>
+            </div>
+
+            <div class="card" data-tags="gate advanced">
+                <h3><div class="icon-box">🌀</div> Gate Components <span class="tag manufactured">Manufactured</span></h3>
+                <p>Precision assemblies used to build and stabilize wormhole gates.</p>
+                <div class="recipe">
+                    <div class="io"><span class="in">4x Iron + 1x Semiconductors</span> <span class="out">1x Gate Comp</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Facility Components</h2>
+        <div class="grid">
+            <div class="card">
+                <h3>Platform</h3>
+                <p>The structural foundation for internal facility units. Increases node base stability.</p>
+            </div>
+            <div class="card">
+                <h3>Loader / Unloader</h3>
+                <p>High-speed internal cargo transfer units. Increases per-tick node transfer limit.</p>
+            </div>
+            <div class="card">
+                <h3>Factory Block</h3>
+                <p>The workhorse of industry. Runs specific recipes based on installed software modules.</p>
+            </div>
+            <div class="card">
+                <h3>Power Module</h3>
+                <p>Internal capacitors or local generators. Necessary for advanced high-draw components.</p>
+            </div>
+        </div>
+    </section>
+</main>
+
+<div class="footer">
+    GATE_RAIL SIMULATION KERNEL // DATA_ATLAS // END_TRANSMISSION
+</div>
+
+<script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+
+    const search = document.getElementById('search');
+    const cards = document.querySelectorAll('.card');
+
+    search.addEventListener('input', (e) => {
+        const term = e.target.value.toLowerCase();
+        cards.forEach(card => {
+            const text = card.innerText.toLowerCase();
+            const tags = card.getAttribute('data-tags') || '';
+            if (text.includes(term) || tags.includes(term)) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    });
+</script>
+
+</body>
+</html>

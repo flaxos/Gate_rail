@@ -192,7 +192,6 @@ def _apply_world_progression(
         world.stability = min(1.0, world.stability + 0.035)
         world.last_trend = ProgressionTrend.IMPROVING
     else:
-        world.support_streak = 0
         world.shortage_streak = 0
         world.last_trend = ProgressionTrend.STALLED
 

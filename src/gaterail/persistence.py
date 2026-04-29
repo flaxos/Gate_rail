@@ -8,6 +8,8 @@ from typing import Any
 
 from gaterail.cargo import CargoType
 from gaterail.models import (
+    ConstructionProject,
+    ConstructionStatus,
     Contract,
     ContractKind,
     ContractStatus,
@@ -25,16 +27,24 @@ from gaterail.models import (
     GatePowerSupport,
     InternalConnection,
     LinkMode,
+    MiningMission,
+    MiningMissionStatus,
     NetworkDisruption,
     NetworkLink,
     NetworkNode,
     NodeKind,
     NodeRecipe,
     PortDirection,
+    PowerPlant,
+    PowerPlantKind,
     ProgressionTrend,
     ResourceRecipe,
     ResourceRecipeKind,
+    SpaceSite,
     TrackPoint,
+    TrackSignal,
+    TrackSignalKind,
+    TrainConsist,
     TrainStatus,
     WorldState,
 )
@@ -98,6 +108,7 @@ def _world_to_dict(world: WorldState) -> dict[str, object]:
         "power_available": world.power_available,
         "power_used": world.power_used,
         "gate_power_used": world.gate_power_used,
+        "power_generated_this_tick": world.power_generated_this_tick,
         "specialization": world.specialization,
         "development_progress": world.development_progress,
         "support_streak": world.support_streak,
@@ -118,6 +129,7 @@ def _world_from_dict(data: dict[str, Any]) -> WorldState:
         power_available=int(data.get("power_available", 0)),
         power_used=int(data.get("power_used", 0)),
         gate_power_used=int(data.get("gate_power_used", 0)),
+        power_generated_this_tick=int(data.get("power_generated_this_tick", 0)),
         specialization=data.get("specialization"),
         development_progress=int(data.get("development_progress", 0)),
         support_streak=int(data.get("support_streak", 0)),
@@ -206,9 +218,20 @@ def _component_to_dict(component: FacilityComponent) -> dict[str, object]:
         "id": component.id,
         "kind": component.kind.value,
         "ports": [_port_to_dict(port) for port in sorted(component.ports.values(), key=lambda item: item.id)],
+        "port_inventory": {
+            port_id: _cargo_map_to_dict(cargo_map)
+            for port_id, cargo_map in sorted(component.port_inventory.items())
+            if cargo_map
+        },
         "capacity": int(component.capacity),
         "rate": int(component.rate),
         "power_required": int(component.power_required),
+        "power_provided": int(component.power_provided),
+        "train_capacity": int(component.train_capacity),
+        "concurrent_loading_limit": int(component.concurrent_loading_limit),
+        "stored_charge": int(component.stored_charge),
+        "discharge_per_tick": int(component.discharge_per_tick),
+        "build_cost": float(component.build_cost),
         "inputs": _cargo_map_to_dict(component.inputs),
         "outputs": _cargo_map_to_dict(component.outputs),
     }
@@ -221,15 +244,29 @@ def _component_from_dict(data: dict[str, Any]) -> FacilityComponent:
     for port_data in data.get("ports", []):
         port = _port_from_dict(port_data)
         ports[port.id] = port
+    port_inventory_data = data.get("port_inventory", {})
+    port_inventory: dict[str, dict[CargoType, int]] = {}
+    if isinstance(port_inventory_data, dict):
+        for port_id, cargo_map in port_inventory_data.items():
+            parsed = _cargo_map_from_dict(cargo_map)
+            if parsed:
+                port_inventory[str(port_id)] = parsed
     return FacilityComponent(
         id=str(data["id"]),
         kind=FacilityComponentKind(str(data["kind"])),
         ports=ports,
+        port_inventory=port_inventory,
         capacity=int(data.get("capacity", 0)),
         rate=int(data.get("rate", 0)),
         power_required=int(data.get("power_required", 0)),
+        power_provided=int(data.get("power_provided", 0)),
         inputs=_cargo_map_from_dict(data.get("inputs", {})),
         outputs=_cargo_map_from_dict(data.get("outputs", {})),
+        train_capacity=int(data.get("train_capacity", 0)),
+        concurrent_loading_limit=int(data.get("concurrent_loading_limit", 1)),
+        stored_charge=int(data.get("stored_charge", 0)),
+        discharge_per_tick=int(data.get("discharge_per_tick", 0)),
+        build_cost=float(data.get("build_cost", 0.0)),
     )
 
 
@@ -312,6 +349,7 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "resource_recipe": _resource_recipe_to_dict(node.resource_recipe),
         "resource_deposit_id": node.resource_deposit_id,
         "facility": _facility_to_dict(node.facility),
+        "construction_project_id": node.construction_project_id,
     }
 
 
@@ -339,6 +377,7 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
             None if data.get("resource_deposit_id") is None else str(data["resource_deposit_id"])
         ),
         facility=_facility_from_dict(data.get("facility")),
+        construction_project_id=data.get("construction_project_id"),
     )
 
 
@@ -354,6 +393,30 @@ def _track_point_from_dict(data: object) -> TrackPoint:
     if not isinstance(data, dict):
         raise ValueError("track alignment points must be objects")
     return TrackPoint(x=float(data["x"]), y=float(data["y"]))
+
+
+def _track_signal_to_dict(signal: TrackSignal) -> dict[str, object]:
+    """Serialize a rail signal."""
+
+    return {
+        "id": signal.id,
+        "link_id": signal.link_id,
+        "kind": signal.kind.value,
+        "node_id": signal.node_id,
+        "active": signal.active,
+    }
+
+
+def _track_signal_from_dict(data: dict[str, Any]) -> TrackSignal:
+    """Deserialize a rail signal."""
+
+    return TrackSignal(
+        id=str(data["id"]),
+        link_id=str(data["link_id"]),
+        kind=TrackSignalKind(str(data.get("kind", TrackSignalKind.STOP.value))),
+        node_id=None if data.get("node_id") is None else str(data["node_id"]),
+        active=bool(data.get("active", True)),
+    )
 
 
 def _resource_deposit_to_dict(deposit: ResourceDeposit) -> dict[str, object]:
@@ -388,6 +451,64 @@ def _resource_deposit_from_dict(data: dict[str, Any]) -> ResourceDeposit:
     )
 
 
+def _space_site_to_dict(site: SpaceSite) -> dict[str, object]:
+    """Serialize a space site."""
+
+    return {
+        "id": site.id,
+        "name": site.name,
+        "resource_id": site.resource_id,
+        "travel_ticks": site.travel_ticks,
+        "base_yield": site.base_yield,
+        "discovered": site.discovered,
+    }
+
+
+def _space_site_from_dict(data: dict[str, Any]) -> SpaceSite:
+    """Deserialize a space site."""
+
+    return SpaceSite(
+        id=str(data["id"]),
+        name=str(data["name"]),
+        resource_id=str(data["resource_id"]),
+        travel_ticks=int(data["travel_ticks"]),
+        base_yield=int(data["base_yield"]),
+        discovered=bool(data.get("discovered", True)),
+    )
+
+
+def _mining_mission_to_dict(mission: MiningMission) -> dict[str, object]:
+    """Serialize a mining mission."""
+
+    return {
+        "id": mission.id,
+        "site_id": mission.site_id,
+        "launch_node_id": mission.launch_node_id,
+        "return_node_id": mission.return_node_id,
+        "status": mission.status.value,
+        "ticks_remaining": mission.ticks_remaining,
+        "fuel_input": mission.fuel_input,
+        "power_input": mission.power_input,
+        "expected_yield": mission.expected_yield,
+    }
+
+
+def _mining_mission_from_dict(data: dict[str, Any]) -> MiningMission:
+    """Deserialize a mining mission."""
+
+    return MiningMission(
+        id=str(data["id"]),
+        site_id=str(data["site_id"]),
+        launch_node_id=str(data["launch_node_id"]),
+        return_node_id=str(data["return_node_id"]),
+        status=MiningMissionStatus(str(data.get("status", MiningMissionStatus.PREPARING.value))),
+        ticks_remaining=int(data["ticks_remaining"]),
+        fuel_input=int(data.get("fuel_input", 0)),
+        power_input=int(data.get("power_input", 0)),
+        expected_yield=int(data["expected_yield"]),
+    )
+
+
 def _gate_support_to_dict(support: GatePowerSupport) -> dict[str, object]:
     """Serialize a gate power support rule."""
 
@@ -410,6 +531,32 @@ def _gate_support_from_dict(data: dict[str, Any]) -> GatePowerSupport:
         node_id=str(data["node_id"]),
         inputs=_resource_map_from_dict(data.get("inputs", {})),
         power_bonus=int(data.get("power_bonus", 0)),
+        active=bool(data.get("active", True)),
+    )
+
+
+def _power_plant_to_dict(plant: PowerPlant) -> dict[str, object]:
+    """Serialize a power plant."""
+
+    return {
+        "id": plant.id,
+        "node_id": plant.node_id,
+        "kind": plant.kind.value,
+        "inputs": _resource_map_to_dict(plant.inputs),
+        "power_output": int(plant.power_output),
+        "active": plant.active,
+    }
+
+
+def _power_plant_from_dict(data: dict[str, Any]) -> PowerPlant:
+    """Deserialize a power plant."""
+
+    return PowerPlant(
+        id=str(data["id"]),
+        node_id=str(data["node_id"]),
+        kind=PowerPlantKind(str(data.get("kind", PowerPlantKind.THERMAL.value))),
+        inputs=_resource_map_from_dict(data.get("inputs", {})),
+        power_output=int(data.get("power_output", 0)),
         active=bool(data.get("active", True)),
     )
 
@@ -490,6 +637,7 @@ def _train_to_dict(train: FreightTrain) -> dict[str, object]:
         "name": train.name,
         "node_id": train.node_id,
         "capacity": train.capacity,
+        "consist": train.consist.value,
         "cargo_type": _cargo_key(train.cargo_type),
         "cargo_units": train.cargo_units,
         "status": train.status.value,
@@ -514,6 +662,7 @@ def _train_from_dict(data: dict[str, Any]) -> FreightTrain:
         name=str(data["name"]),
         node_id=str(data["node_id"]),
         capacity=int(data["capacity"]),
+        consist=TrainConsist(str(data.get("consist", TrainConsist.GENERAL.value))),
         cargo_type=None if cargo_type is None else CargoType(str(cargo_type)),
         cargo_units=int(data.get("cargo_units", 0)),
         status=TrainStatus(str(data.get("status", TrainStatus.IDLE.value))),
@@ -746,6 +895,61 @@ def _finance_from_dict(data: object) -> FinanceState:
     )
 
 
+def _json_safe_value(value: object) -> object:
+    """Return a deterministic JSON-safe copy of transient diagnostic payloads."""
+
+    if isinstance(value, dict):
+        return {
+            str(key.value if hasattr(key, "value") else key): _json_safe_value(item)
+            for key, item in sorted(
+                value.items(),
+                key=lambda pair: str(pair[0].value if hasattr(pair[0], "value") else pair[0]),
+            )
+        }
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe_value(item) for item in value]
+    if hasattr(value, "value"):
+        return value.value
+    return value
+
+
+def _facility_block_entry_to_dict(entry: object) -> dict[str, object]:
+    """Serialize one structured facility block entry."""
+
+    if not isinstance(entry, dict):
+        return {}
+    return {
+        "node": str(entry.get("node", "")),
+        "component": str(entry.get("component", "")),
+        "kind": str(entry.get("kind", "")),
+        "reason": str(entry.get("reason").value if hasattr(entry.get("reason"), "value") else entry.get("reason", "")),
+        "detail": _json_safe_value(entry.get("detail", {})),
+    }
+
+
+def _facility_block_entries_from_dict(data: object) -> list[dict[str, object]]:
+    """Deserialize structured facility block entries."""
+
+    if not isinstance(data, list):
+        return []
+    entries: list[dict[str, object]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        entries.append(
+            {
+                "node": str(entry.get("node", "")),
+                "component": str(entry.get("component", "")),
+                "kind": str(entry.get("kind", "")),
+                "reason": str(entry.get("reason", "")),
+                "detail": _json_safe_value(entry.get("detail", {})),
+            }
+        )
+    return entries
+
+
 def state_to_dict(state: GameState) -> dict[str, object]:
     """Serialize game state to JSON-safe data."""
 
@@ -756,12 +960,32 @@ def state_to_dict(state: GameState) -> dict[str, object]:
             _resource_deposit_to_dict(deposit)
             for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id)
         ],
+        "space_sites": [
+            _space_site_to_dict(site)
+            for site in sorted(state.space_sites.values(), key=lambda item: item.id)
+        ],
+        "mining_missions": [
+            _mining_mission_to_dict(mission)
+            for mission in sorted(state.mining_missions.values(), key=lambda item: item.id)
+        ],
         "gate_supports": [
             _gate_support_to_dict(support)
             for support in sorted(state.gate_supports.values(), key=lambda item: item.id)
         ],
+        "power_plants": [
+            _power_plant_to_dict(plant)
+            for plant in sorted(state.power_plants.values(), key=lambda item: item.id)
+        ],
         "nodes": [_node_to_dict(node) for node in sorted(state.nodes.values(), key=lambda item: item.id)],
         "links": [_link_to_dict(link) for link in sorted(state.links.values(), key=lambda item: item.id)],
+        "track_signals": [
+            _track_signal_to_dict(signal)
+            for signal in sorted(state.track_signals.values(), key=lambda item: item.id)
+        ],
+        "construction_projects": [
+            _construction_project_to_dict(project)
+            for project in sorted(state.construction_projects.values(), key=lambda item: item.id)
+        ],
         "trains": [_train_to_dict(train) for train in sorted(state.trains.values(), key=lambda item: item.id)],
         "orders": [_order_to_dict(order) for order in sorted(state.orders.values(), key=lambda item: item.id)],
         "schedules": [
@@ -783,6 +1007,26 @@ def state_to_dict(state: GameState) -> dict[str, object]:
         "link_usage_this_tick": {
             link_id: int(used)
             for link_id, used in sorted(state.link_usage_this_tick.items())
+        },
+        "power_generation_this_tick": {
+            world_id: int(power)
+            for world_id, power in sorted(state.power_generation_this_tick.items())
+        },
+        "facility_block_entries": [
+            payload
+            for payload in (
+                _facility_block_entry_to_dict(entry)
+                for entry in state.facility_block_entries
+            )
+            if payload
+        ],
+        "facility_power_contribution": {
+            world_id: int(power)
+            for world_id, power in sorted(state.facility_power_contribution.items())
+        },
+        "rail_block_reservations": {
+            link_id: str(train_id)
+            for link_id, train_id in sorted(state.rail_block_reservations.items())
         },
         "finance": _finance_to_dict(state.finance),
         "contracts": [
@@ -809,12 +1053,22 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
         state.add_world(_world_from_dict(world_data))
     for deposit_data in data.get("resource_deposits", []):
         state.add_resource_deposit(_resource_deposit_from_dict(deposit_data))
+    for site_data in data.get("space_sites", []):
+        state.add_space_site(_space_site_from_dict(site_data))
+    for project_data in data.get("construction_projects", []):
+        state.add_construction_project(_construction_project_from_dict(project_data))
     for node_data in data.get("nodes", []):
         state.add_node(_node_from_dict(node_data))
+    for mission_data in data.get("mining_missions", []):
+        state.add_mining_mission(_mining_mission_from_dict(mission_data))
     for link_data in data.get("links", []):
         state.add_link(_link_from_dict(link_data))
+    for signal_data in data.get("track_signals", []):
+        state.add_track_signal(_track_signal_from_dict(signal_data))
     for support_data in data.get("gate_supports", []):
         state.add_gate_support(_gate_support_from_dict(support_data))
+    for plant_data in data.get("power_plants", []):
+        state.add_power_plant(_power_plant_from_dict(plant_data))
     for train_data in data.get("trains", []):
         state.add_train(_train_from_dict(train_data))
     for order_data in data.get("orders", []):
@@ -839,6 +1093,38 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
         state.link_usage_this_tick = {
             str(link_id): int(used)
             for link_id, used in link_usage.items()
+        }
+    power_generation = data.get("power_generation_this_tick", {})
+    if isinstance(power_generation, dict):
+        state.power_generation_this_tick = {
+            str(world_id): int(power)
+            for world_id, power in power_generation.items()
+        }
+    state.facility_block_entries = _facility_block_entries_from_dict(
+        data.get("facility_block_entries", [])
+    )
+    state.facility_blocked = {}
+    for entry in state.facility_block_entries:
+        node_id = str(entry.get("node", ""))
+        component_id = str(entry.get("component", ""))
+        if not node_id or not component_id:
+            continue
+        state.facility_blocked.setdefault(node_id, []).append(component_id)
+    state.facility_blocked = {
+        node_id: sorted(set(component_ids))
+        for node_id, component_ids in sorted(state.facility_blocked.items())
+    }
+    facility_power = data.get("facility_power_contribution", {})
+    if isinstance(facility_power, dict):
+        state.facility_power_contribution = {
+            str(world_id): int(power)
+            for world_id, power in facility_power.items()
+        }
+    rail_block_reservations = data.get("rail_block_reservations", {})
+    if isinstance(rail_block_reservations, dict):
+        state.rail_block_reservations = {
+            str(link_id): str(train_id)
+            for link_id, train_id in rail_block_reservations.items()
         }
     return state
 

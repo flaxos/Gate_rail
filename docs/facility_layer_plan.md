@@ -59,6 +59,7 @@ Make station/depot/hub design the place where GateRail becomes more than a rail 
 - Add power-plant facility components and recipes.
 - Convert selected fuel/reactor inputs into world power capacity or gate charge.
 - Make gate operation and high-throughput gate use depend on power infrastructure and advanced inputs.
+- Status: gate-efficiency support landed in Sprint 19, and the backend power-generation foundation landed as Sprint 19B / Sprint 20A before remote mining missions require fuel or power. Facility UI and richer plant component editing remain later work.
 
 ### Sprint 20: Space Extraction and Outpost Logistics
 
@@ -74,6 +75,7 @@ Make station/depot/hub design the place where GateRail becomes more than a rail 
 - Render components as boxes with ports and arrows.
 - Allow adding loaders, unloaders, buffers, smelters, refineries, fabricators, semiconductor lines, power modules, and gate interfaces through backend preview commands.
 - Show blocked flow and throughput pressure.
+- Status: Sprint 21D implemented backend-owned internal wiring flow for specific facility ports, port-buffer persistence/snapshots, and a Godot Local Region wire tool with a 2D drill-in flow panel.
 
 ### Deferred: 3D Facility View Spike
 

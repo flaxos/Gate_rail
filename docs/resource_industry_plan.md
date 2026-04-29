@@ -177,6 +177,11 @@ Early backend model:
 - power plants need maintenance inputs such as coolant, reactor parts, or fuel,
 - power shortages block gates, slow industry, or reduce facility throughput.
 
+Sprint placement:
+- Sprint 19 implemented resource-backed gate efficiency only.
+- Sprint 19B / Sprint 20A implemented the first true power-generation model before remote mining missions depend on fuel or power.
+- The first slice is backend-only: operating plants, generated-power totals, missing-input blockers, and gate evaluation using generated capacity. Later slices should add richer reactor-fuel/coolant recipes and plant construction UI.
+
 Power chain examples:
 - carbon feedstock -> fuel -> thermal plant -> early power
 - uranium/thorium -> reactor fuel -> fission plant -> stable colony power

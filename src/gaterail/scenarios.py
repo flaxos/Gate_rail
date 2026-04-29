@@ -20,6 +20,8 @@ from gaterail.models import (
     NetworkLink,
     NetworkNode,
     NodeKind,
+    PowerPlant,
+    PowerPlantKind,
     ResourceRecipe,
     ResourceRecipeKind,
     TrackPoint,
@@ -28,7 +30,7 @@ from gaterail.models import (
 from gaterail.resources import ResourceDeposit
 
 
-DEFAULT_SCENARIO = "sprint8"
+DEFAULT_SCENARIO = "sprint20"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1009,6 +1011,95 @@ def build_sprint19_scenario() -> GameState:
     return state
 
 
+def build_sprint19b_scenario() -> GameState:
+    """Build the resource-backed power generation scenario."""
+
+    state = build_sprint8_scenario()
+    state.worlds["frontier"].power_available = 110
+    state.resource_deposits["frontier_carbon_basin"] = replace(
+        state.resource_deposits["frontier_carbon_basin"],
+        yield_per_tick=3,
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_thermal_plant",
+            name="Low Basin Thermal Plant",
+            world_id="frontier",
+            kind=NodeKind.INDUSTRY,
+            resource_demand={"carbon_feedstock": 1},
+            storage_capacity=160,
+            transfer_limit_per_tick=8,
+            layout_x=-88.0,
+            layout_y=18.0,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_carbon_power",
+            origin="frontier_carbon_rig",
+            destination="frontier_thermal_plant",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=6,
+            alignment=(TrackPoint(-124.0, 24.0), TrackPoint(-104.0, 18.0)),
+        )
+    )
+    state.add_power_plant(
+        PowerPlant(
+            id="frontier_low_basin_thermal",
+            node_id="frontier_thermal_plant",
+            kind=PowerPlantKind.THERMAL,
+            inputs={"carbon_feedstock": 1},
+            power_output=40,
+        )
+    )
+    return state
+
+
+def build_sprint20_scenario() -> GameState:
+    """Build the space extraction scenario."""
+
+    state = build_sprint19b_scenario()
+    
+    from gaterail.models import SpaceSite
+    
+    state.add_node(
+        NetworkNode(
+            id="frontier_orbital",
+            name="High Orbit Platform",
+            world_id="frontier",
+            kind=NodeKind.SPACEPORT,
+            storage_capacity=3000,
+            layout_x=200.0,
+            layout_y=-120.0,
+        )
+    )
+    
+    state.add_space_site(
+        SpaceSite(
+            id="site_kessler_belt",
+            name="Kessler Debris Belt",
+            resource_id="mixed_ore",
+            travel_ticks=4,
+            base_yield=80,
+            discovered=True,
+        )
+    )
+    
+    state.add_space_site(
+        SpaceSite(
+            id="site_jovian_cloud",
+            name="Jovian Gas Cloud",
+            resource_id="carbon_feedstock",
+            travel_ticks=6,
+            base_yield=120,
+            discovered=True,
+        )
+    )
+
+    return state
+
+
 def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
     """Return all built-in scenarios in roadmap order."""
 
@@ -1096,6 +1187,20 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
             title="Resource-backed Gate Power",
             description="A frontier gate recovers when upstream industry fabricates gate components.",
             builder=build_sprint19_scenario,
+        ),
+        ScenarioDefinition(
+            key="sprint19b",
+            aliases=("power_generation", "plants", "generation"),
+            title="Resource-backed Power Generation",
+            description="A carbon-fed thermal plant adds generated world power before gate operation.",
+            builder=build_sprint19b_scenario,
+        ),
+        ScenarioDefinition(
+            key="sprint20",
+            aliases=("space", "extraction", "orbital"),
+            title="Space Extraction Logistics",
+            description="Orbital stations extract resources from remote space sites via mining missions.",
+            builder=build_sprint20_scenario,
         ),
     )
 

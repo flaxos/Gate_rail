@@ -28,6 +28,7 @@ class NodeKind(StrEnum):
     WAREHOUSE = "warehouse"
     EXTRACTOR = "extractor"
     INDUSTRY = "industry"
+    SPACEPORT = "spaceport"
     GATE_HUB = "gate_hub"
 
 
@@ -38,12 +39,28 @@ class LinkMode(StrEnum):
     GATE = "gate"
 
 
+class TrackSignalKind(StrEnum):
+    """Track signal roles for backend-owned rail blocks."""
+
+    STOP = "stop"
+    PATH = "path"
+
+
 class TrainStatus(StrEnum):
     """Fixed-tick freight train operating states."""
 
     IDLE = "idle"
     IN_TRANSIT = "in_transit"
     BLOCKED = "blocked"
+
+
+class TrainConsist(StrEnum):
+    """Specialized rolling stock configurations."""
+
+    GENERAL = "general"
+    BULK_HOPPER = "bulk_hopper"
+    LIQUID_TANKER = "liquid_tanker"
+    PROTECTED = "protected"
 
 
 class ProgressionTrend(StrEnum):
@@ -72,6 +89,25 @@ class ContractStatus(StrEnum):
     FAILED = "failed"
 
 
+class MiningMissionStatus(StrEnum):
+    """Lifecycle state for a remote mining mission."""
+
+    PREPARING = "preparing"
+    EN_ROUTE = "en_route"
+    MINING = "mining"
+    RETURNING = "returning"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class PowerPlantKind(StrEnum):
+    """Operating power-generation plant roles."""
+
+    THERMAL = "thermal"
+    FISSION = "fission"
+    FUSION = "fusion"
+
+
 @dataclass(frozen=True, slots=True)
 class GatePowerSupport:
     """Resource-chain support that reduces one gate link's effective power draw."""
@@ -82,6 +118,52 @@ class GatePowerSupport:
     inputs: dict[str, int] = field(default_factory=dict)
     power_bonus: int = 0
     active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class PowerPlant:
+    """A node-attached plant that converts resource inputs into world power."""
+
+    id: str
+    node_id: str
+    kind: PowerPlantKind = PowerPlantKind.THERMAL
+    inputs: dict[str, int] = field(default_factory=dict)
+    power_output: int = 0
+    active: bool = True
+
+
+class ConstructionStatus(StrEnum):
+    """Lifecycle states for a staged construction project."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
+@dataclass(slots=True)
+class ConstructionProject:
+    """A staged construction project requiring delivered cargo."""
+
+    id: str
+    target_node_id: str
+    required_cargo: dict[CargoType, int] = field(default_factory=dict)
+    delivered_cargo: dict[CargoType, int] = field(default_factory=dict)
+    status: ConstructionStatus = ConstructionStatus.PENDING
+
+    @property
+    def remaining_cargo(self) -> dict[CargoType, int]:
+        """Return cargo still required to complete this project."""
+        remaining: dict[CargoType, int] = {}
+        for cargo, amount in self.required_cargo.items():
+            diff = amount - self.delivered_cargo.get(cargo, 0)
+            if diff > 0:
+                remaining[cargo] = diff
+        return remaining
+
+    @property
+    def is_completed(self) -> bool:
+        """Return True if all required cargo is delivered."""
+        return not self.remaining_cargo
 
 
 @dataclass(slots=True)
@@ -156,6 +238,7 @@ class WorldState:
     power_available: int = 0
     power_used: int = 0
     gate_power_used: int = 0
+    power_generated_this_tick: int = 0
     specialization: str | None = None
     development_progress: int = 0
     support_streak: int = 0
@@ -172,7 +255,7 @@ class WorldState:
     def base_power_margin(self) -> int:
         """Power margin before gate reservations."""
 
-        return self.power_available - self.power_used
+        return self.power_available + self.power_generated_this_tick - self.power_used
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +297,30 @@ class FacilityComponentKind(StrEnum):
     FACTORY_BLOCK = "factory_block"
     POWER_MODULE = "power_module"
     GATE_INTERFACE = "gate_interface"
+    WAREHOUSE_BAY = "warehouse_bay"
+    EXTRACTOR_HEAD = "extractor_head"
+    CRUSHER = "crusher"
+    SORTER = "sorter"
+    SMELTER = "smelter"
+    REFINERY = "refinery"
+    CHEMICAL_PROCESSOR = "chemical_processor"
+    FABRICATOR = "fabricator"
+    ELECTRONICS_ASSEMBLER = "electronics_assembler"
+    SEMICONDUCTOR_LINE = "semiconductor_line"
+    REACTOR = "reactor"
+    CAPACITOR_BANK = "capacitor_bank"
+
+
+class FacilityBlockReason(StrEnum):
+    """Structured reason codes for blocked facility components."""
+
+    OPEN_INPUT_PORTS = "open_input_ports"
+    MISSING_INPUTS = "missing_inputs"
+    MISSING_NODE_INVENTORY = "missing_node_inventory"
+    OUTPUT_PORTS_FULL = "output_ports_full"
+    NODE_STORAGE_FULL = "node_storage_full"
+    POWER_SHORTFALL = "power_shortfall"
+    DEMOLISHED = "demolished"
 
 
 class PortDirection(StrEnum):
@@ -241,11 +348,18 @@ class FacilityComponent:
     id: str
     kind: FacilityComponentKind
     ports: dict[str, FacilityPort] = field(default_factory=dict)
+    port_inventory: dict[str, dict[CargoType, int]] = field(default_factory=dict)
     capacity: int = 0
     rate: int = 0
     power_required: int = 0
+    power_provided: int = 0
     inputs: dict[CargoType, int] = field(default_factory=dict)
     outputs: dict[CargoType, int] = field(default_factory=dict)
+    train_capacity: int = 0
+    concurrent_loading_limit: int = 1
+    stored_charge: int = 0
+    discharge_per_tick: int = 0
+    build_cost: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,9 +386,12 @@ class Facility:
         return [component for component in self.components.values() if component.kind == kind]
 
     def storage_capacity_override(self) -> int | None:
-        """Return summed storage-bay capacity, or None if no bays exist."""
+        """Return summed storage-bay and warehouse-bay capacity, or None if no bays exist."""
 
-        bays = self._components_of(FacilityComponentKind.STORAGE_BAY)
+        bays = (
+            self._components_of(FacilityComponentKind.STORAGE_BAY)
+            + self._components_of(FacilityComponentKind.WAREHOUSE_BAY)
+        )
         if not bays:
             return None
         return sum(max(0, component.capacity) for component in bays)
@@ -300,6 +417,19 @@ class Facility:
 
         return sum(max(0, component.power_required) for component in self.components.values())
 
+    def power_provided(self) -> int:
+        """Return total power provided by all components (before reactor input check)."""
+
+        return sum(max(0, component.power_provided) for component in self.components.values())
+
+    def platform_concurrent_loading_limit(self) -> int | None:
+        """Return the minimum concurrent-loading limit across all platforms, or None if no platforms."""
+
+        platforms = self._components_of(FacilityComponentKind.PLATFORM)
+        if not platforms:
+            return None
+        return min(max(1, component.concurrent_loading_limit) for component in platforms)
+
 
 @dataclass(slots=True)
 class NetworkNode:
@@ -323,6 +453,7 @@ class NetworkNode:
     resource_recipe: ResourceRecipe | None = None
     resource_deposit_id: str | None = None
     facility: Facility | None = None
+    construction_project_id: str | None = None
 
     def effective_storage_capacity(self) -> int:
         """Return active storage cap, derived from facility bays when present."""
@@ -444,6 +575,17 @@ class TrackPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class TrackSignal:
+    """A signal protecting entry into one rail-link block."""
+
+    id: str
+    link_id: str
+    kind: TrackSignalKind = TrackSignalKind.STOP
+    node_id: str | None = None
+    active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class NetworkLink:
     """A rail or gate edge between network nodes."""
 
@@ -501,6 +643,7 @@ class FreightTrain:
     name: str
     node_id: str
     capacity: int
+    consist: TrainConsist = TrainConsist.GENERAL
     cargo_type: CargoType | None = None
     cargo_units: int = 0
     status: TrainStatus = TrainStatus.IDLE
@@ -635,6 +778,33 @@ class GatePowerStatus:
 
 
 @dataclass(slots=True)
+class SpaceSite:
+    """A remote resource site such as an asteroid field or gas pocket."""
+
+    id: str
+    name: str
+    resource_id: str
+    travel_ticks: int
+    base_yield: int
+    discovered: bool = True
+
+
+@dataclass(slots=True)
+class MiningMission:
+    """A fixed-tick mission to extract resources from a SpaceSite."""
+
+    id: str
+    site_id: str
+    launch_node_id: str
+    return_node_id: str
+    status: MiningMissionStatus
+    ticks_remaining: int
+    fuel_input: int
+    power_input: int
+    expected_yield: int
+
+
+@dataclass(slots=True)
 class GameState:
     """Canonical deterministic state for the fixed-tick simulation."""
 
@@ -648,17 +818,32 @@ class GameState:
     disruptions: dict[str, NetworkDisruption] = field(default_factory=dict)
     resource_deposits: dict[str, ResourceDeposit] = field(default_factory=dict)
     gate_supports: dict[str, GatePowerSupport] = field(default_factory=dict)
+    power_plants: dict[str, PowerPlant] = field(default_factory=dict)
+    track_signals: dict[str, TrackSignal] = field(default_factory=dict)
+    construction_projects: dict[str, ConstructionProject] = field(default_factory=dict)
     shortages: dict[str, dict[CargoType, int]] = field(default_factory=dict)
     buffer_distribution: dict[str, dict[str, dict[CargoType, int]]] = field(default_factory=dict)
     recipe_blocked: dict[str, dict[CargoType, int]] = field(default_factory=dict)
     resource_recipe_blocked: dict[str, dict[str, int]] = field(default_factory=dict)
     facility_blocked: dict[str, list[str]] = field(default_factory=dict)
+    facility_block_entries: list[dict[str, object]] = field(default_factory=list)
+    facility_power_contribution: dict[str, int] = field(default_factory=dict)
+    platform_loading_this_tick: dict[str, int] = field(default_factory=dict)
+    platform_queue_depth_this_tick: dict[str, int] = field(default_factory=dict)
+    freight_loader_used_this_tick: dict[str, int] = field(default_factory=dict)
+    freight_unloader_used_this_tick: dict[str, int] = field(default_factory=dict)
     transfer_used_this_tick: dict[str, int] = field(default_factory=dict)
     transfer_saturation_streak: dict[str, int] = field(default_factory=dict)
+    power_generation_this_tick: dict[str, int] = field(default_factory=dict)
+    power_plant_blocked: dict[str, dict[str, int]] = field(default_factory=dict)
     gate_statuses: dict[str, GatePowerStatus] = field(default_factory=dict)
     link_usage_this_tick: dict[str, int] = field(default_factory=dict)
+    rail_block_reservations: dict[str, str] = field(default_factory=dict)
+    rail_block_blocked_this_tick: list[dict[str, object]] = field(default_factory=list)
     finance: FinanceState = field(default_factory=FinanceState)
     contracts: dict[str, Contract] = field(default_factory=dict)
+    space_sites: dict[str, SpaceSite] = field(default_factory=dict)
+    mining_missions: dict[str, MiningMission] = field(default_factory=dict)
     reputation: int = 0
     month_length: int = 30
     economic_identity_enabled: bool = False
@@ -733,6 +918,16 @@ class GameState:
                 raise ValueError("link alignment points must be finite numbers")
         self.links[link.id] = link
 
+    def add_construction_project(self, project: ConstructionProject) -> None:
+        """Register a new construction project."""
+
+        if project.id in self.construction_projects:
+            raise ValueError(f"duplicate construction project id: {project.id}")
+        if project.target_node_id not in self.nodes:
+            raise ValueError(f"project {project.id} references unknown node {project.target_node_id}")
+        self.construction_projects[project.id] = project
+        self.nodes[project.target_node_id].construction_project_id = project.id
+
     def add_resource_deposit(self, deposit: ResourceDeposit) -> None:
         """Register a surveyed world resource deposit."""
 
@@ -776,6 +971,40 @@ class GameState:
             if units <= 0:
                 raise ValueError("gate support input units must be positive")
         self.gate_supports[support.id] = support
+
+    def add_power_plant(self, plant: PowerPlant) -> None:
+        """Register a node-attached power plant."""
+
+        if plant.id in self.power_plants:
+            raise ValueError(f"duplicate power plant id: {plant.id}")
+        if plant.node_id not in self.nodes:
+            raise ValueError(f"power plant {plant.id} references unknown node {plant.node_id}")
+        if plant.power_output <= 0:
+            raise ValueError("power plant power_output must be positive")
+        if not plant.inputs:
+            raise ValueError("power plant inputs cannot be empty")
+        self._validate_resource_map(plant.inputs, "power plant input")
+        for units in plant.inputs.values():
+            if units <= 0:
+                raise ValueError("power plant input units must be positive")
+        self.power_plants[plant.id] = plant
+
+    def add_track_signal(self, signal: TrackSignal) -> None:
+        """Register a rail signal that protects one link block."""
+
+        if signal.id in self.track_signals:
+            raise ValueError(f"duplicate track signal id: {signal.id}")
+        if signal.link_id not in self.links:
+            raise ValueError(f"track signal {signal.id} references unknown link {signal.link_id}")
+        link = self.links[signal.link_id]
+        if link.mode != LinkMode.RAIL:
+            raise ValueError(f"track signal {signal.id} target link is not rail")
+        if signal.node_id is not None:
+            if signal.node_id not in self.nodes:
+                raise ValueError(f"track signal {signal.id} references unknown node {signal.node_id}")
+            if signal.node_id not in {link.origin, link.destination}:
+                raise ValueError("track signal node must be one endpoint of its link")
+        self.track_signals[signal.id] = signal
 
     def add_disruption(self, disruption: NetworkDisruption) -> None:
         """Register a timed network disruption."""
@@ -868,6 +1097,38 @@ class GameState:
         else:
             raise ValueError(f"contract {contract.id} has unsupported kind {contract.kind}")
         self.contracts[contract.id] = contract
+
+    def add_space_site(self, site: SpaceSite) -> None:
+        """Register a remote resource site."""
+
+        if site.id in self.space_sites:
+            raise ValueError(f"duplicate space site id: {site.id}")
+        if site.resource_id not in RESOURCE_DEFINITIONS:
+            raise ValueError(f"space site {site.id} references unknown resource {site.resource_id}")
+        if site.travel_ticks <= 0:
+            raise ValueError("space site travel_ticks must be positive")
+        if site.base_yield <= 0:
+            raise ValueError("space site base_yield must be positive")
+        self.space_sites[site.id] = site
+
+    def add_mining_mission(self, mission: MiningMission) -> None:
+        """Register a fixed-tick mining mission."""
+
+        if mission.id in self.mining_missions:
+            raise ValueError(f"duplicate mining mission id: {mission.id}")
+        if mission.site_id not in self.space_sites:
+            raise ValueError(f"mining mission {mission.id} references unknown site {mission.site_id}")
+        if mission.launch_node_id not in self.nodes:
+            raise ValueError(f"mining mission {mission.id} references unknown launch node {mission.launch_node_id}")
+        if mission.return_node_id not in self.nodes:
+            raise ValueError(f"mining mission {mission.id} references unknown return node {mission.return_node_id}")
+        if mission.ticks_remaining < 0:
+            raise ValueError("mining mission ticks_remaining cannot be negative")
+        if mission.fuel_input < 0 or mission.power_input < 0:
+            raise ValueError("mining mission fuel/power inputs cannot be negative")
+        if mission.expected_yield < 0:
+            raise ValueError("mining mission expected_yield cannot be negative")
+        self.mining_missions[mission.id] = mission
 
     def apply_command(self, command: object) -> dict[str, object]:
         """Apply a player command to this state."""
