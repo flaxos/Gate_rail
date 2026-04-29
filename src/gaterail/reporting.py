@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from gaterail.economy import specialization_profiles_for_state
 from gaterail.gate import preview_gate_power
-from gaterail.models import Contract, ContractKind, GameState, LinkMode
+from gaterail.models import ConstructionStatus, Contract, ContractKind, GameState, LinkMode, NodeKind
 from gaterail.resource_chains import resource_branch_pressure
 from gaterail.resources import resource_definition
 from gaterail.traffic import build_signal_report
@@ -638,6 +638,105 @@ def format_scenario_inspection(state: GameState, sections: ReportSections = None
                         "Rep-",
                     ),
                     contract_rows,
+                ),
+            ]
+        )
+
+    if _section_enabled(sections, "space"):
+        space_rows = [
+            (
+                site.id,
+                site.name,
+                site.resource_id,
+                site.travel_ticks,
+                site.base_yield,
+                "yes" if site.discovered else "no",
+            )
+            for site in sorted(state.space_sites.values(), key=lambda item: item.id)
+        ]
+        lines.extend(
+            [
+                "",
+                "Space Sites",
+                _format_table(
+                    ("ID", "Name", "Resource", "Travel", "Yield", "Discovered"),
+                    space_rows,
+                ),
+            ]
+        )
+
+        mission_rows = [
+            (
+                mission.id,
+                mission.status.value,
+                mission.ticks_remaining,
+                mission.launch_node_id,
+                mission.return_node_id,
+                mission.expected_yield,
+                mission.reserved_power,
+                mission.fuel_consumed,
+            )
+            for mission in sorted(state.mining_missions.values(), key=lambda item: item.id)
+        ]
+        lines.extend(
+            [
+                "",
+                "Mining Missions",
+                _format_table(
+                    (
+                        "ID",
+                        "Status",
+                        "Ticks",
+                        "Launch",
+                        "Return",
+                        "Yield",
+                        "reserved_power",
+                        "fuel_consumed",
+                    ),
+                    mission_rows,
+                ),
+            ]
+        )
+
+    if _section_enabled(sections, "space") or _section_enabled(sections, "outposts"):
+        outpost_rows = []
+        for node in sorted(state.nodes.values(), key=lambda item: item.id):
+            if node.outpost_kind is None:
+                continue
+            project = (
+                state.construction_projects.get(node.construction_project_id)
+                if node.construction_project_id
+                else None
+            )
+            if project is None or project.status == ConstructionStatus.COMPLETED:
+                status_label = "completed (active)"
+            else:
+                status_label = project.status.value
+            required_total = sum(
+                int(v) for v in (project.required_cargo if project else {}).values()
+            )
+            delivered_total = sum(
+                int(v) for v in (project.delivered_cargo if project else {}).values()
+            )
+            progress = (
+                f"{delivered_total}/{required_total}" if required_total > 0 else "-"
+            )
+            outpost_rows.append(
+                (
+                    node.id,
+                    node.outpost_kind.value,
+                    node.kind.value,
+                    status_label,
+                    progress,
+                )
+            )
+        lines.extend(
+            [
+                "",
+                "Outposts",
+                _format_table(
+                    ("ID", "Outpost", "Kind", "Status", "Progress"),
+                    outpost_rows,
                 ),
             ]
         )

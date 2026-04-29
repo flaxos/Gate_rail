@@ -34,6 +34,7 @@ from gaterail.models import (
     NetworkNode,
     NodeKind,
     NodeRecipe,
+    OutpostKind,
     PortDirection,
     PowerPlant,
     PowerPlantKind,
@@ -335,6 +336,7 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "name": node.name,
         "world_id": node.world_id,
         "kind": node.kind.value,
+        "outpost_kind": None if node.outpost_kind is None else node.outpost_kind.value,
         "inventory": _cargo_map_to_dict(node.inventory),
         "production": _cargo_map_to_dict(node.production),
         "demand": _cargo_map_to_dict(node.demand),
@@ -361,6 +363,9 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         name=str(data["name"]),
         world_id=str(data["world_id"]),
         kind=NodeKind(str(data["kind"])),
+        outpost_kind=(
+            None if data.get("outpost_kind") is None else OutpostKind(str(data["outpost_kind"]))
+        ),
         inventory=_cargo_map_from_dict(data.get("inventory", {})),
         production=_cargo_map_from_dict(data.get("production", {})),
         demand=_cargo_map_from_dict(data.get("demand", {})),
@@ -378,6 +383,32 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         ),
         facility=_facility_from_dict(data.get("facility")),
         construction_project_id=data.get("construction_project_id"),
+    )
+
+
+def _construction_project_to_dict(project: ConstructionProject) -> dict[str, object]:
+    """Serialize a staged construction project."""
+
+    return {
+        "id": project.id,
+        "target_node_id": project.target_node_id,
+        "required_cargo": _cargo_map_to_dict(project.required_cargo),
+        "delivered_cargo": _cargo_map_to_dict(project.delivered_cargo),
+        "status": project.status.value,
+        "cash_cost": float(project.cash_cost),
+    }
+
+
+def _construction_project_from_dict(data: dict[str, Any]) -> ConstructionProject:
+    """Deserialize a staged construction project."""
+
+    return ConstructionProject(
+        id=str(data["id"]),
+        target_node_id=str(data["target_node_id"]),
+        required_cargo=_cargo_map_from_dict(data.get("required_cargo", {})),
+        delivered_cargo=_cargo_map_from_dict(data.get("delivered_cargo", {})),
+        status=ConstructionStatus(str(data.get("status", ConstructionStatus.PENDING.value))),
+        cash_cost=float(data.get("cash_cost", 0.0)),
     )
 
 
@@ -490,6 +521,8 @@ def _mining_mission_to_dict(mission: MiningMission) -> dict[str, object]:
         "fuel_input": mission.fuel_input,
         "power_input": mission.power_input,
         "expected_yield": mission.expected_yield,
+        "reserved_power": mission.reserved_power,
+        "fuel_consumed": mission.fuel_consumed,
     }
 
 
@@ -506,6 +539,8 @@ def _mining_mission_from_dict(data: dict[str, Any]) -> MiningMission:
         fuel_input=int(data.get("fuel_input", 0)),
         power_input=int(data.get("power_input", 0)),
         expected_yield=int(data["expected_yield"]),
+        reserved_power=int(data.get("reserved_power", 0)),
+        fuel_consumed=int(data.get("fuel_consumed", data.get("fuel_input", 0))),
     )
 
 
@@ -1055,10 +1090,10 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
         state.add_resource_deposit(_resource_deposit_from_dict(deposit_data))
     for site_data in data.get("space_sites", []):
         state.add_space_site(_space_site_from_dict(site_data))
-    for project_data in data.get("construction_projects", []):
-        state.add_construction_project(_construction_project_from_dict(project_data))
     for node_data in data.get("nodes", []):
         state.add_node(_node_from_dict(node_data))
+    for project_data in data.get("construction_projects", []):
+        state.add_construction_project(_construction_project_from_dict(project_data))
     for mission_data in data.get("mining_missions", []):
         state.add_mining_mission(_mining_mission_from_dict(mission_data))
     for link_data in data.get("links", []):

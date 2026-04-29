@@ -26,11 +26,15 @@ from gaterail.construction import (
     node_build_cost,
     node_default_storage,
     node_default_transfer,
+    outpost_build_cargo,
+    outpost_build_cost,
+    outpost_duration_estimate_ticks,
     node_upgrade_cost,
     train_purchase_cost,
     travel_ticks_from_layout_distance,
 )
 from gaterail.models import (
+    ConstructionStatus,
     ConstructionProject,
     Facility,
     FacilityComponent,
@@ -41,16 +45,19 @@ from gaterail.models import (
     FreightTrain,
     InternalConnection,
     LinkMode,
+    MiningMission,
     MiningMissionStatus,
     NetworkLink,
     NetworkNode,
     NodeKind,
+    OutpostKind,
     PortDirection,
     TrackPoint,
     TrackSignal,
     TrackSignalKind,
     TrainConsist,
 )
+from gaterail.space import mission_return_capacity
 from gaterail.traffic import effective_link_capacity
 from gaterail.transport import shortest_route
 
@@ -366,6 +373,8 @@ class DispatchMiningMission:
     site_id: str
     launch_node_id: str
     return_node_id: str
+    fuel_input: int = 0
+    power_input: int = 0
     type: Literal["DispatchMiningMission"] = "DispatchMiningMission"
 
 
@@ -377,7 +386,49 @@ class PreviewDispatchMiningMission:
     site_id: str
     launch_node_id: str
     return_node_id: str
+    fuel_input: int = 0
+    power_input: int = 0
     type: Literal["PreviewDispatchMiningMission"] = "PreviewDispatchMiningMission"
+
+
+@dataclass(frozen=True, slots=True)
+class BuildOutpost:
+    """Stage an outpost construction project on a world."""
+
+    world_id: str
+    outpost_kind: str
+    outpost_id: str = ""
+    layout_x: float | None = None
+    layout_y: float | None = None
+    type: Literal["BuildOutpost"] = "BuildOutpost"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewBuildOutpost:
+    """Preview an outpost build without mutating state."""
+
+    world_id: str
+    outpost_kind: str
+    outpost_id: str = ""
+    layout_x: float | None = None
+    layout_y: float | None = None
+    type: Literal["PreviewBuildOutpost"] = "PreviewBuildOutpost"
+
+
+@dataclass(frozen=True, slots=True)
+class CancelOutpost:
+    """Cancel a staged outpost project and refund 50% of cash and delivered cargo."""
+
+    outpost_id: str
+    type: Literal["CancelOutpost"] = "CancelOutpost"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewCancelOutpost:
+    """Preview outpost cancellation refunds without mutating state."""
+
+    outpost_id: str
+    type: Literal["PreviewCancelOutpost"] = "PreviewCancelOutpost"
 
 
 PlayerCommand: TypeAlias = (
@@ -406,6 +457,10 @@ PlayerCommand: TypeAlias = (
     | PreviewRemoveInternalConnection
     | DispatchMiningMission
     | PreviewDispatchMiningMission
+    | BuildOutpost
+    | PreviewBuildOutpost
+    | CancelOutpost
+    | PreviewCancelOutpost
 )
 
 
@@ -651,7 +706,22 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             site_id=str(data["site_id"]),
             launch_node_id=str(data["launch_node_id"]),
             return_node_id=str(data["return_node_id"]),
+            fuel_input=int(data.get("fuel_input", 0)),
+            power_input=int(data.get("power_input", 0)),
         )
+    if command_type in {"BuildOutpost", "PreviewBuildOutpost"}:
+        layout_x, layout_y = _layout_fields(data)
+        outpost_command = BuildOutpost if command_type == "BuildOutpost" else PreviewBuildOutpost
+        return outpost_command(
+            world_id=str(data["world_id"]),
+            outpost_kind=str(data["outpost_kind"]),
+            outpost_id=str(data.get("outpost_id", "")),
+            layout_x=layout_x,
+            layout_y=layout_y,
+        )
+    if command_type in {"CancelOutpost", "PreviewCancelOutpost"}:
+        cancel_command = CancelOutpost if command_type == "CancelOutpost" else PreviewCancelOutpost
+        return cancel_command(outpost_id=str(data["outpost_id"]))
     raise ValueError(f"unknown command type: {command_type}")
 
 
@@ -848,14 +918,18 @@ def _validate_build_link(
         raise ValueError(f"unknown link origin: {command.origin}")
     if command.destination not in state.nodes:
         raise ValueError(f"unknown link destination: {command.destination}")
+    origin_node = state.nodes[command.origin]
+    destination_node = state.nodes[command.destination]
+    if origin_node.kind == NodeKind.OUTPOST or destination_node.kind == NodeKind.OUTPOST:
+        raise ValueError("outpost_not_operational")
     if command.capacity_per_tick <= 0:
         raise ValueError("link capacity_per_tick must be positive")
     if command.power_required < 0:
         raise ValueError("link power_required cannot be negative")
     _validate_track_alignment(command.alignment)
 
-    origin_world_id = state.nodes[command.origin].world_id
-    destination_world_id = state.nodes[command.destination].world_id
+    origin_world_id = origin_node.world_id
+    destination_world_id = destination_node.world_id
 
     if command.mode == LinkMode.RAIL:
         if origin_world_id != destination_world_id:
@@ -1307,6 +1381,288 @@ def _plain_cargo_cost(mapping: dict[CargoType, int]) -> dict[str, int]:
         for cargo, units in sorted(mapping.items(), key=lambda item: item[0].value)
         if int(units) > 0
     }
+
+
+_MISSION_LAUNCH_KINDS = frozenset({NodeKind.ORBITAL_YARD, NodeKind.SPACEPORT})
+_MISSION_RETURN_KINDS = frozenset(
+    {
+        NodeKind.COLLECTION_STATION,
+        NodeKind.ORBITAL_YARD,
+        NodeKind.SPACEPORT,
+        NodeKind.WAREHOUSE,
+    }
+)
+_OUTPOST_REFUND_NODE_KINDS = frozenset({NodeKind.DEPOT, NodeKind.WAREHOUSE})
+
+
+def _command_failure(
+    command_type: str,
+    target_id: str,
+    *,
+    reason: str,
+    message: str,
+    **extra: object,
+) -> dict[str, object]:
+    """Return one structured command failure without raising."""
+
+    return command_result(
+        command_type,
+        ok=False,
+        target_id=target_id,
+        message=message,
+        reason=reason,
+        **extra,
+    )
+
+
+def _next_outpost_id(state: object) -> str:
+    """Return the next deterministic outpost id for one state."""
+
+    highest = 0
+    for node_id in getattr(state, "nodes", {}):
+        if not str(node_id).startswith("outpost_"):
+            continue
+        suffix = str(node_id)[len("outpost_") :]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return f"outpost_{highest + 1}"
+
+
+def _resolve_outpost_kind(raw_kind: str) -> OutpostKind:
+    """Parse one outpost kind or raise a command-facing validation error."""
+
+    try:
+        return OutpostKind(raw_kind)
+    except ValueError as exc:
+        raise ValueError(f"unknown outpost kind: {raw_kind}") from exc
+
+
+def _outpost_distance(origin: NetworkNode, candidate: NetworkNode) -> float:
+    """Return a deterministic distance metric for refund-node selection."""
+
+    if (
+        origin.layout_x is None
+        or origin.layout_y is None
+        or candidate.layout_x is None
+        or candidate.layout_y is None
+    ):
+        return float("inf")
+    dx = candidate.layout_x - origin.layout_x
+    dy = candidate.layout_y - origin.layout_y
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def _refund_node_for_outpost(state: object, outpost: NetworkNode) -> NetworkNode | None:
+    """Return the nearest same-world refund node for one outpost."""
+
+    candidates = [
+        node
+        for node in getattr(state, "nodes", {}).values()
+        if node.world_id == outpost.world_id
+        and node.id != outpost.id
+        and node.kind in _OUTPOST_REFUND_NODE_KINDS
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (_outpost_distance(outpost, item), item.id))
+
+
+def _outpost_project_for_node(state: object, node: NetworkNode) -> ConstructionProject | None:
+    """Return the construction project attached to one outpost node."""
+
+    project_id = node.construction_project_id
+    if project_id:
+        project = getattr(state, "construction_projects", {}).get(project_id)
+        if project is not None:
+            return project
+    for project in getattr(state, "construction_projects", {}).values():
+        if project.target_node_id == node.id:
+            return project
+    return None
+
+
+def _outpost_layout_payload(command: BuildOutpost | PreviewBuildOutpost) -> dict[str, float] | None:
+    """Return JSON-safe layout metadata for one outpost command."""
+
+    return _node_layout_payload(command.layout_x, command.layout_y)
+
+
+def _outpost_command_payload(
+    outpost_id: str,
+    command: BuildOutpost | PreviewBuildOutpost,
+    *,
+    layout: dict[str, float],
+) -> dict[str, object]:
+    """Return the normalized BuildOutpost command payload."""
+
+    return {
+        "type": "BuildOutpost",
+        "outpost_id": outpost_id,
+        "world_id": command.world_id,
+        "outpost_kind": command.outpost_kind,
+        "layout": layout,
+    }
+
+
+def _validate_outpost_build(
+    state: object,
+    command: BuildOutpost | PreviewBuildOutpost,
+) -> tuple[str, OutpostKind, dict[str, float], float, dict[CargoType, int]]:
+    """Validate one outpost-build command and return normalized values."""
+
+    outpost_id = command.outpost_id.strip() or _next_outpost_id(state)
+    if command.world_id not in state.worlds:
+        raise ValueError(f"world_not_found:{command.world_id}")
+    if outpost_id in state.nodes:
+        raise ValueError(f"duplicate_outpost_id:{outpost_id}")
+    layout = _outpost_layout_payload(command)
+    if layout is None:
+        raise ValueError("missing_layout")
+    kind = _resolve_outpost_kind(command.outpost_kind)
+    cost = outpost_build_cost(kind)
+    cargo_required = outpost_build_cargo(kind)
+    return outpost_id, kind, layout, cost, cargo_required
+
+
+def _validate_mining_mission(
+    state: object,
+    command: DispatchMiningMission | PreviewDispatchMiningMission,
+) -> tuple[dict[str, object] | None, dict[str, object]]:
+    """Validate one mining mission command and return either an error or normalized fields."""
+
+    target_id = command.mission_id
+    if command.mission_id in state.mining_missions:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="duplicate_mining_mission",
+                message=f"duplicate mining mission id: {command.mission_id}",
+            ),
+            {},
+        )
+    site = state.space_sites.get(command.site_id)
+    if site is None:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="unknown_space_site",
+                message=f"unknown space site: {command.site_id}",
+            ),
+            {},
+        )
+    launch_node = state.nodes.get(command.launch_node_id)
+    if launch_node is None:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="unknown_launch_node",
+                message=f"unknown launch node: {command.launch_node_id}",
+            ),
+            {},
+        )
+    return_node = state.nodes.get(command.return_node_id)
+    if return_node is None:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="unknown_return_node",
+                message=f"unknown return node: {command.return_node_id}",
+            ),
+            {},
+        )
+    if launch_node.kind not in _MISSION_LAUNCH_KINDS:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="invalid_launch_kind",
+                message=f"invalid launch kind: {launch_node.kind.value}",
+            ),
+            {},
+        )
+    if return_node.kind not in _MISSION_RETURN_KINDS:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="invalid_return_kind",
+                message=f"invalid return kind: {return_node.kind.value}",
+            ),
+            {},
+        )
+    launch_world = state.worlds.get(launch_node.world_id)
+    if launch_world is None:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="world_not_found",
+                message=f"unknown world: {launch_node.world_id}",
+            ),
+            {},
+        )
+    fuel_input = max(0, int(command.fuel_input))
+    power_input = max(0, int(command.power_input))
+    fuel_available = launch_node.stock(CargoType.FUEL)
+    power_available = max(0, int(launch_world.base_power_margin))
+    normalized_command = {
+        "type": "DispatchMiningMission",
+        "mission_id": command.mission_id,
+        "site_id": command.site_id,
+        "launch_node_id": command.launch_node_id,
+        "return_node_id": command.return_node_id,
+        "fuel_input": fuel_input,
+        "power_input": power_input,
+    }
+    result_extra = {
+        "travel_ticks": site.travel_ticks * 2,
+        "expected_yield": site.base_yield,
+        "fuel_required": fuel_input,
+        "fuel_available": fuel_available,
+        "power_required": power_input,
+        "power_available": power_available,
+        "power_shortfall_if_dispatched": max(0, power_input - power_available),
+        "return_capacity_estimate": mission_return_capacity(return_node),
+        "normalized_command": normalized_command,
+    }
+    if fuel_available < fuel_input:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="insufficient_fuel",
+                message=f"insufficient fuel: need {fuel_input}, have {fuel_available}",
+                **result_extra,
+            ),
+            {},
+        )
+    if power_available < power_input:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="insufficient_power",
+                message=f"insufficient power: need {power_input}, have {power_available}",
+                **result_extra,
+            ),
+            {},
+        )
+    return (
+        None,
+        {
+            "site": site,
+            "launch_node": launch_node,
+            "return_node": return_node,
+            "launch_world": launch_world,
+            "fuel_input": fuel_input,
+            "power_input": power_input,
+            **result_extra,
+        },
+    )
 
 
 def _missing_component_build_cargo(
@@ -1837,52 +2193,48 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
         )
 
     if isinstance(command, PreviewDispatchMiningMission):
-        site = state.space_sites.get(command.site_id)
-        if not site:
-            return _preview_error(command.type, command.mission_id, ValueError(f"unknown space site: {command.site_id}"))
-        
-        normalized_command = {
-            "type": "DispatchMiningMission",
-            "mission_id": command.mission_id,
-            "site_id": command.site_id,
-            "launch_node_id": command.launch_node_id,
-            "return_node_id": command.return_node_id,
-        }
-        
+        error, fields = _validate_mining_mission(state, command)
+        if error is not None:
+            return error
         return command_result(
             command.type,
             ok=True,
             target_id=command.mission_id,
             message=f"valid mission preview for site {command.site_id}",
-            travel_ticks=site.travel_ticks * 2,
-            expected_yield=site.base_yield,
-            normalized_command=normalized_command,
+            travel_ticks=fields["travel_ticks"],
+            expected_yield=fields["expected_yield"],
+            fuel_required=fields["fuel_required"],
+            fuel_available=fields["fuel_available"],
+            power_required=fields["power_required"],
+            power_available=fields["power_available"],
+            power_shortfall_if_dispatched=fields["power_shortfall_if_dispatched"],
+            return_capacity_estimate=fields["return_capacity_estimate"],
+            normalized_command=fields["normalized_command"],
         )
 
     if isinstance(command, DispatchMiningMission):
-        site = state.space_sites.get(command.site_id)
-        if not site:
-            raise ValueError(f"unknown space site: {command.site_id}")
-            
-        launch_node = state.nodes.get(command.launch_node_id)
-        if not launch_node:
-            raise ValueError(f"unknown launch node: {command.launch_node_id}")
-            
-        return_node = state.nodes.get(command.return_node_id)
-        if not return_node:
-            raise ValueError(f"unknown return node: {command.return_node_id}")
-            
-        from gaterail.models import MiningMission
+        error, fields = _validate_mining_mission(state, command)
+        if error is not None:
+            return error
+        launch_node = fields["launch_node"]
+        launch_world = fields["launch_world"]
+        fuel_input = fields["fuel_input"]
+        power_input = fields["power_input"]
+        site = fields["site"]
+        launch_node.remove_inventory(CargoType.FUEL, fuel_input)
+        launch_world.power_used += power_input
         mission = MiningMission(
             id=command.mission_id,
             site_id=command.site_id,
             launch_node_id=command.launch_node_id,
             return_node_id=command.return_node_id,
             status=MiningMissionStatus.EN_ROUTE,
-            ticks_remaining=site.travel_ticks * 2,
-            fuel_input=0,
-            power_input=0,
+            ticks_remaining=fields["travel_ticks"],
+            fuel_input=fuel_input,
+            power_input=power_input,
             expected_yield=site.base_yield,
+            reserved_power=power_input,
+            fuel_consumed=fuel_input,
         )
         state.add_mining_mission(mission)
         return command_result(
@@ -1890,6 +2242,246 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             ok=True,
             target_id=command.mission_id,
             message=f"mission {command.mission_id} dispatched",
+            travel_ticks=fields["travel_ticks"],
+            expected_yield=site.base_yield,
+            reserved_power=power_input,
+            fuel_consumed=fuel_input,
+        )
+
+    if isinstance(command, PreviewBuildOutpost):
+        outpost_id = command.outpost_id.strip() or _next_outpost_id(state)
+        try:
+            resolved_id, outpost_kind, layout, cost, cargo_required = _validate_outpost_build(state, command)
+        except ValueError as exc:
+            reason = str(exc)
+            if reason.startswith("unknown outpost kind: "):
+                return _command_failure(
+                    command.type,
+                    outpost_id,
+                    reason="unknown_outpost_kind",
+                    message=reason,
+                )
+            if reason == "missing_layout":
+                return _command_failure(
+                    command.type,
+                    outpost_id,
+                    reason="missing_layout",
+                    message="outpost layout requires x and y",
+                )
+            if reason.startswith("world_not_found:"):
+                world_id = reason.split(":", 1)[1]
+                return _command_failure(
+                    command.type,
+                    outpost_id,
+                    reason="world_not_found",
+                    message=f"unknown world: {world_id}",
+                )
+            if reason.startswith("duplicate_outpost_id:"):
+                duplicate_id = reason.split(":", 1)[1]
+                return _command_failure(
+                    command.type,
+                    duplicate_id,
+                    reason="duplicate_outpost_id",
+                    message=f"duplicate outpost id: {duplicate_id}",
+                )
+            return _command_failure(
+                command.type,
+                outpost_id,
+                reason="invalid_outpost_command",
+                message=reason,
+            )
+        normalized_command = _outpost_command_payload(resolved_id, command, layout=layout)
+        if not _cash_available(state, cost):
+            return _command_failure(
+                command.type,
+                resolved_id,
+                reason="insufficient_cash",
+                message=_insufficient_cash_message(state, outpost_kind.value, cost),
+                cost=cost,
+                cargo_required=_plain_cargo_cost(cargo_required),
+                duration_estimate_ticks=outpost_duration_estimate_ticks(outpost_kind),
+                normalized_command=normalized_command,
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=resolved_id,
+            message=f"valid {outpost_kind.value} preview for {cost:.0f}",
+            cost=cost,
+            cargo_required=_plain_cargo_cost(cargo_required),
+            duration_estimate_ticks=outpost_duration_estimate_ticks(outpost_kind),
+            normalized_command=normalized_command,
+        )
+
+    if isinstance(command, BuildOutpost):
+        outpost_id = command.outpost_id.strip() or _next_outpost_id(state)
+        try:
+            resolved_id, outpost_kind, _, cost, cargo_required = _validate_outpost_build(state, command)
+        except ValueError as exc:
+            reason = str(exc)
+            if reason.startswith("unknown outpost kind: "):
+                return _command_failure(
+                    command.type,
+                    outpost_id,
+                    reason="unknown_outpost_kind",
+                    message=reason,
+                )
+            if reason == "missing_layout":
+                return _command_failure(
+                    command.type,
+                    outpost_id,
+                    reason="missing_layout",
+                    message="outpost layout requires x and y",
+                )
+            if reason.startswith("world_not_found:"):
+                world_id = reason.split(":", 1)[1]
+                return _command_failure(
+                    command.type,
+                    outpost_id,
+                    reason="world_not_found",
+                    message=f"unknown world: {world_id}",
+                )
+            if reason.startswith("duplicate_outpost_id:"):
+                duplicate_id = reason.split(":", 1)[1]
+                return _command_failure(
+                    command.type,
+                    duplicate_id,
+                    reason="duplicate_outpost_id",
+                    message=f"duplicate outpost id: {duplicate_id}",
+                )
+            return _command_failure(
+                command.type,
+                outpost_id,
+                reason="invalid_outpost_command",
+                message=reason,
+            )
+        if not _cash_available(state, cost):
+            return _command_failure(
+                command.type,
+                resolved_id,
+                reason="insufficient_cash",
+                message=_insufficient_cash_message(state, outpost_kind.value, cost),
+                cost=cost,
+                cargo_required=_plain_cargo_cost(cargo_required),
+                duration_estimate_ticks=outpost_duration_estimate_ticks(outpost_kind),
+            )
+        node = NetworkNode(
+            id=resolved_id,
+            name=f"{outpost_kind.value.replace('_', ' ').title()} {resolved_id}",
+            world_id=command.world_id,
+            kind=NodeKind.OUTPOST,
+            storage_capacity=node_default_storage(NodeKind.OUTPOST),
+            transfer_limit_per_tick=node_default_transfer(NodeKind.OUTPOST),
+            layout_x=command.layout_x,
+            layout_y=command.layout_y,
+            outpost_kind=outpost_kind,
+        )
+        state.add_node(node)
+        state.finance.record_cost(cost)
+        project = ConstructionProject(
+            id=f"proj_{resolved_id}",
+            target_node_id=resolved_id,
+            required_cargo=cargo_required,
+            status=ConstructionStatus.PENDING,
+            cash_cost=cost,
+        )
+        state.add_construction_project(project)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=resolved_id,
+            message=f"staged {outpost_kind.value} {resolved_id}",
+            cost=cost,
+            cargo_required=_plain_cargo_cost(cargo_required),
+            duration_estimate_ticks=outpost_duration_estimate_ticks(outpost_kind),
+        )
+
+    if isinstance(command, PreviewCancelOutpost):
+        node = state.nodes.get(command.outpost_id)
+        if node is None or node.outpost_kind is None:
+            return _command_failure(
+                command.type,
+                command.outpost_id,
+                reason="unknown_outpost",
+                message=f"unknown outpost: {command.outpost_id}",
+            )
+        project = _outpost_project_for_node(state, node)
+        if project is None or project.status == ConstructionStatus.COMPLETED:
+            return _command_failure(
+                command.type,
+                command.outpost_id,
+                reason="outpost_not_under_construction",
+                message=f"outpost {command.outpost_id} is not under construction",
+            )
+        refund_node = _refund_node_for_outpost(state, node)
+        if refund_node is None:
+            return _command_failure(
+                command.type,
+                command.outpost_id,
+                reason="no_refund_node",
+                message=f"no refund node on world {node.world_id}",
+            )
+        refund_cash = round(project.cash_cost * 0.5, 2)
+        refund_cargo = {
+            cargo_type: units // 2
+            for cargo_type, units in project.delivered_cargo.items()
+            if units // 2 > 0
+        }
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.outpost_id,
+            message=f"valid cancellation preview for {command.outpost_id}",
+            refund_cash=refund_cash,
+            refund_cargo=_plain_cargo_cost(refund_cargo),
+            refund_node_id=refund_node.id,
+            normalized_command={"type": "CancelOutpost", "outpost_id": command.outpost_id},
+        )
+
+    if isinstance(command, CancelOutpost):
+        node = state.nodes.get(command.outpost_id)
+        if node is None or node.outpost_kind is None:
+            return _command_failure(
+                command.type,
+                command.outpost_id,
+                reason="unknown_outpost",
+                message=f"unknown outpost: {command.outpost_id}",
+            )
+        project = _outpost_project_for_node(state, node)
+        if project is None or project.status == ConstructionStatus.COMPLETED:
+            return _command_failure(
+                command.type,
+                command.outpost_id,
+                reason="outpost_not_under_construction",
+                message=f"outpost {command.outpost_id} is not under construction",
+            )
+        refund_node = _refund_node_for_outpost(state, node)
+        if refund_node is None:
+            return _command_failure(
+                command.type,
+                command.outpost_id,
+                reason="no_refund_node",
+                message=f"no refund node on world {node.world_id}",
+            )
+        refund_cash = round(project.cash_cost * 0.5, 2)
+        refund_cargo = {
+            cargo_type: units // 2
+            for cargo_type, units in project.delivered_cargo.items()
+            if units // 2 > 0
+        }
+        for cargo_type, units in refund_cargo.items():
+            refund_node.add_inventory(cargo_type, units)
+        state.finance.cash += refund_cash
+        state.construction_projects.pop(project.id, None)
+        state.nodes.pop(node.id, None)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.outpost_id,
+            message=f"cancelled outpost {command.outpost_id}",
+            refund_cash=refund_cash,
+            refund_cargo=_plain_cargo_cost(refund_cargo),
+            refund_node_id=refund_node.id,
         )
 
     if isinstance(command, PreviewBuildNode):
@@ -1922,6 +2514,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             build_time=0,
             storage_capacity=storage,
             transfer_limit_per_tick=transfer,
+            cargo_required=_plain_cargo_cost(node_build_cargo(command.kind)),
             layout=layout,
             normalized_command=normalized_command,
         )
@@ -1949,6 +2542,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
                 id=f"proj_{command.node_id}",
                 target_node_id=command.node_id,
                 required_cargo=required_cargo,
+                cash_cost=cost,
             )
             state.add_construction_project(project)
             message = f"started {command.kind.value} {command.node_id} project for {cost:.0f}"
@@ -1964,6 +2558,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             build_time=0,
             storage_capacity=storage,
             transfer_limit_per_tick=transfer,
+            cargo_required=_plain_cargo_cost(required_cargo),
             layout=layout,
         )
 

@@ -30,6 +30,9 @@ class NodeKind(StrEnum):
     INDUSTRY = "industry"
     SPACEPORT = "spaceport"
     GATE_HUB = "gate_hub"
+    ORBITAL_YARD = "orbital_yard"
+    COLLECTION_STATION = "collection_station"
+    OUTPOST = "outpost"
 
 
 class LinkMode(StrEnum):
@@ -100,6 +103,14 @@ class MiningMissionStatus(StrEnum):
     FAILED = "failed"
 
 
+class OutpostKind(StrEnum):
+    """Player-built outpost specializations."""
+
+    OUTPOST_FRONTIER = "outpost_frontier"
+    OUTPOST_RESEARCH = "outpost_research"
+    OUTPOST_MINING_HUB = "outpost_mining_hub"
+
+
 class PowerPlantKind(StrEnum):
     """Operating power-generation plant roles."""
 
@@ -149,6 +160,7 @@ class ConstructionProject:
     required_cargo: dict[CargoType, int] = field(default_factory=dict)
     delivered_cargo: dict[CargoType, int] = field(default_factory=dict)
     status: ConstructionStatus = ConstructionStatus.PENDING
+    cash_cost: float = 0.0
 
     @property
     def remaining_cargo(self) -> dict[CargoType, int]:
@@ -454,6 +466,7 @@ class NetworkNode:
     resource_deposit_id: str | None = None
     facility: Facility | None = None
     construction_project_id: str | None = None
+    outpost_kind: OutpostKind | None = None
 
     def effective_storage_capacity(self) -> int:
         """Return active storage cap, derived from facility bays when present."""
@@ -802,6 +815,8 @@ class MiningMission:
     fuel_input: int
     power_input: int
     expected_yield: int
+    reserved_power: int = 0
+    fuel_consumed: int = 0
 
 
 @dataclass(slots=True)
@@ -1126,6 +1141,8 @@ class GameState:
             raise ValueError("mining mission ticks_remaining cannot be negative")
         if mission.fuel_input < 0 or mission.power_input < 0:
             raise ValueError("mining mission fuel/power inputs cannot be negative")
+        if mission.reserved_power < 0 or mission.fuel_consumed < 0:
+            raise ValueError("mining mission reserved/consumed values cannot be negative")
         if mission.expected_yield < 0:
             raise ValueError("mining mission expected_yield cannot be negative")
         self.mining_missions[mission.id] = mission

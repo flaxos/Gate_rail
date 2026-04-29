@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from gaterail.cargo import CargoType
-from gaterail.models import ConstructionStatus, FacilityComponentKind, FacilityPort, LinkMode, NodeKind, PortDirection
+from gaterail.models import ConstructionStatus, FacilityComponentKind, FacilityPort, LinkMode, NodeKind, OutpostKind, PortDirection
 
 
 DEFAULT_RAIL_CAPACITY_PER_TICK = 24
@@ -21,6 +21,9 @@ NODE_BUILD_COST: dict[NodeKind, float] = {
     NodeKind.INDUSTRY: 2_000.0,
     NodeKind.GATE_HUB: 8_000.0,
     NodeKind.SPACEPORT: 3_000.0,
+    NodeKind.ORBITAL_YARD: 6_000.0,
+    NodeKind.COLLECTION_STATION: 4_000.0,
+    NodeKind.OUTPOST: 0.0,
 }
 
 
@@ -32,6 +35,9 @@ NODE_DEFAULT_STORAGE: dict[NodeKind, int] = {
     NodeKind.INDUSTRY: 1_000,
     NodeKind.GATE_HUB: 1_500,
     NodeKind.SPACEPORT: 2_000,
+    NodeKind.ORBITAL_YARD: 3_000,
+    NodeKind.COLLECTION_STATION: 5_000,
+    NodeKind.OUTPOST: 1_500,
 }
 
 
@@ -43,6 +49,9 @@ NODE_DEFAULT_TRANSFER: dict[NodeKind, int] = {
     NodeKind.INDUSTRY: 24,
     NodeKind.GATE_HUB: 30,
     NodeKind.SPACEPORT: 24,
+    NodeKind.ORBITAL_YARD: 24,
+    NodeKind.COLLECTION_STATION: 36,
+    NodeKind.OUTPOST: 24,
 }
 
 
@@ -57,6 +66,51 @@ NODE_BUILD_CARGO: dict[NodeKind, dict[CargoType, int]] = {
         CargoType.ELECTRONICS: 50,
         CargoType.WATER: 50,
     },
+    NodeKind.ORBITAL_YARD: {
+        CargoType.CONSTRUCTION_MATERIALS: 200,
+        CargoType.ELECTRONICS: 50,
+        CargoType.PARTS: 50,
+    },
+    NodeKind.COLLECTION_STATION: {
+        CargoType.CONSTRUCTION_MATERIALS: 250,
+        CargoType.PARTS: 30,
+    },
+}
+
+
+OUTPOST_BUILD_COST: dict[OutpostKind, float] = {
+    OutpostKind.OUTPOST_FRONTIER: 600.0,
+    OutpostKind.OUTPOST_RESEARCH: 900.0,
+    OutpostKind.OUTPOST_MINING_HUB: 1_200.0,
+}
+
+# The cargo layer does not have dedicated power_cells or machine_parts freight ids.
+# Use the closest shipped cargo families so the save/bridge contract stays stable.
+OUTPOST_BUILD_CARGO: dict[OutpostKind, dict[CargoType, int]] = {
+    OutpostKind.OUTPOST_FRONTIER: {
+        CargoType.CONSTRUCTION_MATERIALS: 300,
+        CargoType.ELECTRONICS: 80,
+        CargoType.FOOD: 200,
+        CargoType.WATER: 200,
+        CargoType.REACTOR_PARTS: 40,
+    },
+    OutpostKind.OUTPOST_RESEARCH: {
+        CargoType.CONSTRUCTION_MATERIALS: 250,
+        CargoType.ELECTRONICS: 230,
+        CargoType.PARTS: 60,
+    },
+    OutpostKind.OUTPOST_MINING_HUB: {
+        CargoType.CONSTRUCTION_MATERIALS: 350,
+        CargoType.PARTS: 120,
+        CargoType.ELECTRONICS: 80,
+        CargoType.FUEL: 100,
+    },
+}
+
+OUTPOST_PROMOTION_KIND: dict[OutpostKind, NodeKind] = {
+    OutpostKind.OUTPOST_FRONTIER: NodeKind.EXTRACTOR,
+    OutpostKind.OUTPOST_RESEARCH: NodeKind.INDUSTRY,
+    OutpostKind.OUTPOST_MINING_HUB: NodeKind.ORBITAL_YARD,
 }
 
 
@@ -82,6 +136,32 @@ def node_build_cargo(kind: NodeKind) -> dict[CargoType, int]:
     """Return the required cargo to construct a node of ``kind``."""
 
     return NODE_BUILD_CARGO.get(kind, {})
+
+
+def outpost_build_cost(kind: OutpostKind) -> float:
+    """Return the cash cost to stage one outpost specialization."""
+
+    return OUTPOST_BUILD_COST[kind]
+
+
+def outpost_build_cargo(kind: OutpostKind) -> dict[CargoType, int]:
+    """Return the cargo requirement for one outpost specialization."""
+
+    return dict(OUTPOST_BUILD_CARGO[kind])
+
+
+def outpost_promotion_kind(kind: OutpostKind) -> NodeKind:
+    """Return the node kind unlocked when one outpost completes."""
+
+    return OUTPOST_PROMOTION_KIND[kind]
+
+
+def outpost_duration_estimate_ticks(kind: OutpostKind) -> int:
+    """Return a deterministic cargo-delivery estimate for one outpost build."""
+
+    required_units = sum(outpost_build_cargo(kind).values())
+    rate = max(1, node_default_transfer(NodeKind.OUTPOST))
+    return max(1, (required_units + rate - 1) // rate)
 
 
 def link_build_cost(mode: LinkMode, travel_ticks: int) -> float:
@@ -322,5 +402,10 @@ def apply_construction_projects(state: object) -> dict[str, dict[str, int]]:
         if project.is_completed:
             project.status = ConstructionStatus.COMPLETED
             node.construction_project_id = None
+            if node.kind == NodeKind.OUTPOST and node.outpost_kind is not None:
+                promoted_kind = outpost_promotion_kind(node.outpost_kind)
+                node.kind = promoted_kind
+                node.storage_capacity = node_default_storage(promoted_kind)
+                node.transfer_limit_per_tick = node_default_transfer(promoted_kind)
 
     return progress_report

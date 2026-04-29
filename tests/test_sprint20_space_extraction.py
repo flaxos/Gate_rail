@@ -25,7 +25,7 @@ def test_mining_mission_lifecycle():
         id="node_station_1",
         world_id="w1",
         name="Orbital Station",
-        kind=NodeKind.SETTLEMENT,
+        kind=NodeKind.SPACEPORT,
         storage_capacity=1000,
     )
     state.add_node(node)
@@ -100,7 +100,7 @@ def test_mining_mission_persistence():
     )
     
     # Fake a node for validation
-    state.add_node(NetworkNode(id="node_0", world_id="w1", name="N", kind=NodeKind.SETTLEMENT))
+    state.add_node(NetworkNode(id="node_0", world_id="w1", name="N", kind=NodeKind.SPACEPORT))
     apply_player_command(state, command)
     
     sim = TickSimulation(state=state)

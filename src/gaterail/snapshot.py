@@ -5,7 +5,15 @@ from __future__ import annotations
 from gaterail.economy import BUFFER_NODE_KINDS
 from gaterail.facilities import facility_summary
 from gaterail.gate import preview_gate_power
-from gaterail.models import Contract, ContractKind, FacilityBlockReason, GameState, LinkMode
+from gaterail.models import (
+    ConstructionStatus,
+    Contract,
+    ContractKind,
+    FacilityBlockReason,
+    GameState,
+    LinkMode,
+    NodeKind,
+)
 from gaterail.resource_chains import resource_branch_pressure
 from gaterail.resources import resource_catalog_payload, resource_deposit_to_dict
 from gaterail.traffic import active_signals_for_link, build_signal_report, effective_link_capacity
@@ -147,6 +155,13 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "population": world.population,
                 "stability": round(world.stability, 3),
                 "specialization": world.specialization,
+                "power_available": world.power_available,
+                "power_used": world.power_used,
+                "power_pressure": (
+                    round(world.power_used / world.power_available, 3)
+                    if world.power_available > 0
+                    else 0.0
+                ),
                 "power": {
                     "available": world.power_available,
                     "generated": world.power_generated_this_tick,
@@ -220,6 +235,45 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             "effective_unloader_rate": int(node.effective_inbound_rate()),
             "platform_queue_depth": int(state.platform_queue_depth_this_tick.get(node.id, 0)),
         }
+        node_power_required = (
+            int(node.facility.power_required()) if node.facility is not None else 0
+        )
+        overlay_pip: dict[str, str] | None = None
+        if facility_blocked_payload:
+            block_reason = next(
+                (
+                    entry.get("reason")
+                    for entry in state.facility_block_entries
+                    if isinstance(entry, dict) and entry.get("node") == node.id
+                ),
+                None,
+            )
+            reason_value = (
+                block_reason.value if hasattr(block_reason, "value") else str(block_reason)
+            )
+            overlay_pip = {
+                "layer": "facility_block_layer",
+                "severity": "warn",
+                "label": reason_value.replace("_", " ") if reason_value else "blocked",
+            }
+        elif node.outpost_kind is not None:
+            project = (
+                state.construction_projects.get(node.construction_project_id)
+                if node.construction_project_id
+                else None
+            )
+            if project is None or project.status != ConstructionStatus.COMPLETED:
+                overlay_pip = {
+                    "layer": "outpost_layer",
+                    "severity": "info",
+                    "label": "outpost in construction",
+                }
+        elif node_power_required > 0:
+            overlay_pip = {
+                "layer": "power_layer",
+                "severity": "info",
+                "label": "power draw",
+            }
         is_buffer = node.kind in BUFFER_NODE_KINDS
         if is_buffer:
             buffer_fill_pct: float | None = round(used / capacity, 3)
@@ -275,6 +329,9 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "loader_summary": loader_summary_payload,
                 "power_plants": sorted(power_plants_by_node.get(node.id, [])),
                 "construction_project_id": node.construction_project_id,
+                "outpost_kind": node.outpost_kind.value if node.outpost_kind else None,
+                "power_required": node_power_required,
+                "overlay_pip": overlay_pip,
                 "layout": _node_layout(node),
             }
         )
@@ -480,6 +537,9 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "fuel_input": mission.fuel_input,
                 "power_input": mission.power_input,
                 "expected_yield": mission.expected_yield,
+                "reserved_power": mission.reserved_power,
+                "fuel_consumed": mission.fuel_consumed,
+                "projected_yield": mission.expected_yield,
             }
             for mission in sorted(state.mining_missions.values(), key=lambda item: item.id)
         ],
@@ -500,4 +560,49 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             }
             for project in sorted(state.construction_projects.values(), key=lambda item: item.id)
         ],
+        "outposts": _outposts_payload(state),
     }
+
+
+def _outposts_payload(state: GameState) -> list[dict[str, object]]:
+    """Render top-level outposts: pending, active, and completed (promoted)."""
+
+    payload: list[dict[str, object]] = []
+    for node in sorted(state.nodes.values(), key=lambda item: item.id):
+        if node.outpost_kind is None:
+            continue
+        project = (
+            state.construction_projects.get(node.construction_project_id)
+            if node.construction_project_id
+            else None
+        )
+        required = project.required_cargo if project else {}
+        delivered = project.delivered_cargo if project else {}
+        remaining = project.remaining_cargo if project else {}
+        required_total = sum(int(v) for v in required.values())
+        delivered_total = sum(int(v) for v in delivered.values())
+        progress_fraction = (
+            delivered_total / required_total if required_total > 0 else 1.0
+        )
+        top_needs = [
+            {"cargo": cargo.value if hasattr(cargo, "value") else str(cargo), "units": int(units)}
+            for cargo, units in sorted(
+                remaining.items(), key=lambda item: (-int(item[1]), str(item[0]))
+            )[:3]
+            if int(units) > 0
+        ]
+        payload.append(
+            {
+                "id": node.id,
+                "kind": node.kind.value,
+                "outpost_kind": node.outpost_kind.value,
+                "construction_status": project.status.value if project else "completed",
+                "required_cargo": _cargo_map(required),
+                "delivered_cargo": _cargo_map(delivered),
+                "remaining_cargo": _cargo_map(remaining),
+                "progress_fraction": progress_fraction,
+                "top_needs": top_needs,
+                "world_id": node.world_id,
+            }
+        )
+    return payload
