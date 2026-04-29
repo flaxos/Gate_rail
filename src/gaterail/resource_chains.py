@@ -56,6 +56,8 @@ def apply_resource_extraction(state: GameState) -> dict[str, dict[str, int]]:
 
     produced_by_node: dict[str, dict[str, int]] = {}
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         production: dict[str, int] = dict(node.resource_production)
         if node.resource_deposit_id is not None:
             deposit = state.resource_deposits[node.resource_deposit_id]
@@ -77,6 +79,8 @@ def apply_resource_distribution(state: GameState) -> dict[str, dict[str, dict[st
 
     distribution: dict[str, dict[str, dict[str, int]]] = {}
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         if node.total_resource_inventory() <= 0:
             continue
         budget = node.effective_outbound_rate()
@@ -188,6 +192,8 @@ def apply_resource_recipes(state: GameState) -> dict[str, object]:
     blocked_by_node: dict[str, dict[str, int]] = {}
 
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         recipe = node.resource_recipe
         if recipe is None:
             continue

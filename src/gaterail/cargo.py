@@ -22,12 +22,16 @@ class CargoType(StrEnum):
     METAL = "metal"
     PARTS = "parts"
     ELECTRONICS = "electronics"
+    URANIUM = "uranium"
     CONSTRUCTION_MATERIALS = "construction_materials"
     CONSUMER_GOODS = "consumer_goods"
     MEDICAL_SUPPLIES = "medical_supplies"
     RESEARCH_EQUIPMENT = "research_equipment"
     REACTOR_PARTS = "reactor_parts"
     GATE_COMPONENTS = "gate_components"
+
+
+from gaterail.models import TrainConsist
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +123,12 @@ CARGO_METADATA: dict[CargoType, CargoMetadata] = {
         preferred_origin="Core",
         preferred_destination="Frontier",
     ),
+    CargoType.URANIUM: CargoMetadata(
+        priority=96,
+        base_unit_revenue=48.0,
+        preferred_origin="Frontier",
+        preferred_destination="Core",
+    ),
     CargoType.CONSTRUCTION_MATERIALS: CargoMetadata(
         priority=82,
         base_unit_revenue=14.0,
@@ -158,7 +168,27 @@ CARGO_METADATA: dict[CargoType, CargoMetadata] = {
 }
 
 
+CARGO_CONSIST_MAP: dict[CargoType, TrainConsist] = {
+    CargoType.ORE: TrainConsist.BULK_HOPPER,
+    CargoType.STONE: TrainConsist.BULK_HOPPER,
+    CargoType.CARBON_FEEDSTOCK: TrainConsist.BULK_HOPPER,
+    CargoType.WATER: TrainConsist.LIQUID_TANKER,
+    CargoType.FUEL: TrainConsist.LIQUID_TANKER,
+    CargoType.COOLANT: TrainConsist.LIQUID_TANKER,
+    CargoType.ELECTRONICS: TrainConsist.PROTECTED,
+    CargoType.RESEARCH_EQUIPMENT: TrainConsist.PROTECTED,
+    CargoType.REACTOR_PARTS: TrainConsist.PROTECTED,
+    CargoType.GATE_COMPONENTS: TrainConsist.PROTECTED,
+}
+
+
 def metadata_for(cargo_type: CargoType) -> CargoMetadata:
     """Return static metadata for ``cargo_type``."""
 
     return CARGO_METADATA[cargo_type]
+
+
+def required_consist_for(cargo_type: CargoType) -> TrainConsist:
+    """Return the required TrainConsist for a given cargo, or GENERAL if none."""
+
+    return CARGO_CONSIST_MAP.get(cargo_type, TrainConsist.GENERAL)

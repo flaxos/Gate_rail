@@ -266,6 +266,10 @@ Implemented slice 19:
 - added resource-backed gate support that reduces effective gate power draw when a support node has required resource-chain output.
 - added a `sprint19` scenario where `gate_frontier_outer` stays underpowered until gate components are fabricated.
 - persisted and snapshotted support requirements, support shortages, base/effective power draw, and resource bonuses.
+- implemented the R19 rail sidecar first slice: backend stop/path signals, one-link protected blocks, dispatch-time signal-block queueing before cargo load, JSON build/preview commands, save/load, snapshots, freight queue reasons, traffic alerts, and text reports.
+
+Power-generation placement:
+- implemented the Sprint 19B / Sprint 20A backend foundation before full space extraction: node-attached power plants, resource input consumption, generated-power rollups, missing-input blockers, and gate evaluation that uses generated capacity.
 
 ## Sprint 20: Space Extraction and Outpost Logistics
 
@@ -292,6 +296,10 @@ Deliverables:
 - component boxes, ports, internal cargo-flow arrows, and blocked-flow readouts.
 - build-preview UI for loaders, unloaders, buffers, smelters, refineries, fabricators, semiconductor lines, power modules, and gate interfaces.
 - overlays or inspectors for resource availability, processing blockers, power blockers, and outpost construction needs.
+- grid-snap affordances for local node and gate-hub placement previews.
+- a text-first resource relationship atlas for ores, parts, processing nodes, power, gates, and remote sites.
+- internal wiring logic that moves cargo between specific facility ports and exposes port buffers in snapshots.
+- a Local Region wiring tool that previews backend-owned internal connections and renders visual facility flow.
 - local rail planning UI for curved alignments, waypoint edits, branches, signals, protected blocks, vacuum-tube portals, and consist/cargo compatibility.
 
 Exit criteria:

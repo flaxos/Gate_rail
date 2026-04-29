@@ -5,10 +5,10 @@ from __future__ import annotations
 from gaterail.economy import BUFFER_NODE_KINDS
 from gaterail.facilities import facility_summary
 from gaterail.gate import preview_gate_power
-from gaterail.models import Contract, ContractKind, GameState, LinkMode
+from gaterail.models import Contract, ContractKind, FacilityBlockReason, GameState, LinkMode
 from gaterail.resource_chains import resource_branch_pressure
 from gaterail.resources import resource_catalog_payload, resource_deposit_to_dict
-from gaterail.traffic import effective_link_capacity
+from gaterail.traffic import active_signals_for_link, build_signal_report, effective_link_capacity
 
 
 SNAPSHOT_VERSION = 1
@@ -38,6 +38,42 @@ def _resource_map(mapping: object) -> dict[str, int]:
         str(resource_id): int(units)
         for resource_id, units in sorted(mapping.items())
         if int(units) > 0
+    }
+
+
+def _plain_json_value(value: object) -> object:
+    """Convert enum-like values inside diagnostic payloads to JSON-safe values."""
+
+    if isinstance(value, dict):
+        return {
+            str(key.value if hasattr(key, "value") else key): _plain_json_value(item)
+            for key, item in sorted(
+                value.items(),
+                key=lambda pair: str(pair[0].value if hasattr(pair[0], "value") else pair[0]),
+            )
+        }
+    if isinstance(value, list):
+        return [_plain_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_plain_json_value(item) for item in value]
+    if hasattr(value, "value"):
+        return value.value
+    return value
+
+
+def _facility_block_entry_payload(entry: object) -> dict[str, object]:
+    """Return a stable snapshot payload for one facility block entry."""
+
+    if not isinstance(entry, dict):
+        return {}
+    reason = entry.get("reason")
+    reason_value = reason.value if isinstance(reason, FacilityBlockReason) else str(reason)
+    return {
+        "node": str(entry.get("node", "")),
+        "component": str(entry.get("component", "")),
+        "kind": str(entry.get("kind", "")),
+        "reason": reason_value,
+        "detail": _plain_json_value(entry.get("detail", {})),
     }
 
 
@@ -84,6 +120,13 @@ def render_snapshot(state: GameState) -> dict[str, object]:
     """Return a compact, stable JSON snapshot for render clients."""
 
     gate_statuses = state.gate_statuses if state.gate_statuses else preview_gate_power(state)
+    signal_report = build_signal_report(state)
+    rail_blocks = signal_report.get("blocks", {})
+    if not isinstance(rail_blocks, dict):
+        rail_blocks = {}
+    power_plants_by_node: dict[str, list[str]] = {}
+    for plant in state.power_plants.values():
+        power_plants_by_node.setdefault(plant.node_id, []).append(plant.id)
     world_ids = sorted(state.worlds)
     world_index = {world_id: index for index, world_id in enumerate(world_ids)}
 
@@ -106,6 +149,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "specialization": world.specialization,
                 "power": {
                     "available": world.power_available,
+                    "generated": world.power_generated_this_tick,
                     "used": world.power_used,
                     "gate_used": world.gate_power_used,
                     "margin": world.power_margin,
@@ -162,6 +206,20 @@ def render_snapshot(state: GameState) -> dict[str, object]:
         else:
             facility_payload = facility_summary(node.facility)
         facility_blocked_payload = list(state.facility_blocked.get(node.id, []))
+        facility_block_entries_payload = [
+            payload
+            for payload in (
+                _facility_block_entry_payload(entry)
+                for entry in state.facility_block_entries
+                if isinstance(entry, dict) and entry.get("node") == node.id
+            )
+            if payload
+        ]
+        loader_summary_payload = {
+            "effective_loader_rate": int(node.effective_outbound_rate()),
+            "effective_unloader_rate": int(node.effective_inbound_rate()),
+            "platform_queue_depth": int(state.platform_queue_depth_this_tick.get(node.id, 0)),
+        }
         is_buffer = node.kind in BUFFER_NODE_KINDS
         if is_buffer:
             buffer_fill_pct: float | None = round(used / capacity, 3)
@@ -213,6 +271,10 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "resource_deposit_id": node.resource_deposit_id,
                 "facility": facility_payload,
                 "facility_blocked": facility_blocked_payload,
+                "facility_block_entries": facility_block_entries_payload,
+                "loader_summary": loader_summary_payload,
+                "power_plants": sorted(power_plants_by_node.get(node.id, [])),
+                "construction_project_id": node.construction_project_id,
                 "layout": _node_layout(node),
             }
         )
@@ -221,6 +283,8 @@ def render_snapshot(state: GameState) -> dict[str, object]:
     for link in sorted(state.links.values(), key=lambda item: item.id):
         capacity, disruptions = effective_link_capacity(state, link)
         gate_status = gate_statuses.get(link.id)
+        link_signals = active_signals_for_link(state, link.id)
+        block_payload = rail_blocks.get(link.id)
         if gate_status is None or gate_status.support_id is None:
             gate_support_payload: dict[str, object] | None = None
         else:
@@ -268,6 +332,8 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "utilisation": utilisation,
                 "trains_on_link": trains_on_link,
                 "alignment": _track_alignment(link),
+                "signals": [signal.id for signal in link_signals],
+                "rail_block": block_payload,
             }
         )
 
@@ -279,6 +345,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             "status": train.status.value,
             "destination": train.destination,
             "capacity": train.capacity,
+            "consist": train.consist.value,
             "cargo": None if train.cargo_type is None else train.cargo_type.value,
             "cargo_units": train.cargo_units,
             "remaining_ticks": train.remaining_ticks,
@@ -358,6 +425,64 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             for deposit in sorted(state.resource_deposits.values(), key=lambda item: item.id)
         ],
         "resource_branch_pressure": resource_branch_pressure(state),
+        "facility_blocked_entries": [
+            payload
+            for payload in (
+                _facility_block_entry_payload(entry)
+                for entry in state.facility_block_entries
+            )
+            if payload
+        ],
+        "track_signals": [
+            {"id": signal_id, **payload}
+            for signal_id, payload in sorted(signal_report["signals"].items())
+        ],
+        "rail_blocks": [
+            block
+            for _, block in sorted(rail_blocks.items())
+        ],
+        "power_generation": {
+            world_id: int(power)
+            for world_id, power in sorted(state.power_generation_this_tick.items())
+        },
+        "power_plants": [
+            {
+                "id": plant.id,
+                "node_id": plant.node_id,
+                "world_id": state.nodes[plant.node_id].world_id,
+                "kind": plant.kind.value,
+                "inputs": _resource_map(plant.inputs),
+                "power_output": plant.power_output,
+                "active": plant.active,
+                "missing": _resource_map(state.power_plant_blocked.get(plant.id, {})),
+            }
+            for plant in sorted(state.power_plants.values(), key=lambda item: item.id)
+        ],
+        "space_sites": [
+            {
+                "id": site.id,
+                "name": site.name,
+                "resource_id": site.resource_id,
+                "travel_ticks": site.travel_ticks,
+                "base_yield": site.base_yield,
+                "discovered": site.discovered,
+            }
+            for site in sorted(state.space_sites.values(), key=lambda item: item.id)
+        ],
+        "mining_missions": [
+            {
+                "id": mission.id,
+                "site_id": mission.site_id,
+                "launch_node_id": mission.launch_node_id,
+                "return_node_id": mission.return_node_id,
+                "status": mission.status.value,
+                "ticks_remaining": mission.ticks_remaining,
+                "fuel_input": mission.fuel_input,
+                "power_input": mission.power_input,
+                "expected_yield": mission.expected_yield,
+            }
+            for mission in sorted(state.mining_missions.values(), key=lambda item: item.id)
+        ],
         "worlds": worlds,
         "nodes": nodes,
         "links": links,
@@ -365,4 +490,14 @@ def render_snapshot(state: GameState) -> dict[str, object]:
         "schedules": schedules,
         "orders": orders,
         "contracts": contracts,
+        "construction_projects": [
+            {
+                "id": project.id,
+                "target_node_id": project.target_node_id,
+                "required_cargo": _cargo_map(project.required_cargo),
+                "delivered_cargo": _cargo_map(project.delivered_cargo),
+                "status": project.status.value,
+            }
+            for project in sorted(state.construction_projects.values(), key=lambda item: item.id)
+        ],
     }

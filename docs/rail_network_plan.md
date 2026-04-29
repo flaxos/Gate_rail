@@ -152,6 +152,8 @@ Pair with Sprint 19 power and gate energy.
 - Report signal blockers in freight and traffic outputs.
 - Keep the first UI simple: place signal, inspect protected block, see why a train waits.
 
+Status: first backend slice implemented after Sprint 19. `TrackSignal` stores stop/path signal metadata on rail-link endpoints, active signals protect the whole link as one block, freight dispatch queues before loading when a protected block is occupied, and save/load, snapshots, CLI reports, traffic alerts, and JSON commands expose signal/block state. Junction path reservation, multi-link block definitions, signal UI, and richer path-signal behavior remain future slices.
+
 ### Rail Slice R20: Consists and Cargo Wagons
 
 Pair with Sprint 20 space extraction.

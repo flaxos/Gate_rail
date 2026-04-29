@@ -7,6 +7,7 @@ from gaterail.gate import preview_gate_power
 from gaterail.models import Contract, ContractKind, GameState, LinkMode
 from gaterail.resource_chains import resource_branch_pressure
 from gaterail.resources import resource_definition
+from gaterail.traffic import build_signal_report
 from gaterail.transport import shortest_route
 
 
@@ -68,6 +69,28 @@ def _format_resource_map(mapping: object) -> str:
     if not isinstance(mapping, dict) or not mapping:
         return "none"
     return ", ".join(f"{resource} {units}" for resource, units in mapping.items())
+
+
+def _format_cargo_map(mapping: object) -> str:
+    """Format a cargo map for terminal reports."""
+
+    if not isinstance(mapping, dict) or not mapping:
+        return "none"
+    return ", ".join(
+        f"{getattr(cargo, 'value', cargo)} {units}"
+        for cargo, units in sorted(
+            mapping.items(),
+            key=lambda item: str(getattr(item[0], "value", item[0])),
+        )
+    )
+
+
+def _format_string_list(value: object) -> str:
+    """Format a JSON-style list of ids for terminal reports."""
+
+    if not isinstance(value, list) or not value:
+        return "-"
+    return ", ".join(str(item) for item in value)
 
 
 def _format_node_resource_rollup(label: str, rollup: object) -> str:
@@ -169,6 +192,29 @@ def _format_resource_deposit_summary(state: GameState) -> str:
     return "; ".join(parts)
 
 
+def _block_reason_value(reason: object) -> str:
+    """Return a stable blocked-reason value for plain-text reports."""
+
+    return reason.value if hasattr(reason, "value") else str(reason)
+
+
+def _facility_block_reasons_by_component(state: GameState) -> dict[tuple[str, str], list[str]]:
+    """Group facility block reasons by node/component pair."""
+
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for entry in state.facility_block_entries:
+        if not isinstance(entry, dict):
+            continue
+        node_id = str(entry.get("node", ""))
+        component_id = str(entry.get("component", ""))
+        if not node_id or not component_id:
+            continue
+        grouped.setdefault((node_id, component_id), []).append(
+            _block_reason_value(entry.get("reason"))
+        )
+    return grouped
+
+
 def format_state_summary(state: GameState) -> str:
     """Format a compact scenario summary."""
 
@@ -226,6 +272,21 @@ def format_state_summary(state: GameState) -> str:
             for disruption in state.disruptions.values()
         ]
         lines.append("Disruptions: " + "; ".join(disruption_lines))
+    if state.power_plants:
+        plant_lines = []
+        for plant in sorted(state.power_plants.values(), key=lambda item: item.id):
+            node = state.nodes[plant.node_id]
+            plant_lines.append(
+                f"{plant.id} {plant.kind.value} at {node.id} "
+                f"output {plant.power_output} inputs {_format_resource_map(plant.inputs)}"
+            )
+        lines.append("Power Plants: " + "; ".join(plant_lines))
+    if state.track_signals:
+        signal_lines = [
+            f"{signal.id} {signal.kind.value} {signal.link_id}"
+            for signal in sorted(state.track_signals.values(), key=lambda item: item.id)
+        ]
+        lines.append("Signals: " + "; ".join(signal_lines))
     if state.contracts:
         contract_lines: list[str] = []
         for contract in sorted(state.contracts.values(), key=lambda item: item.id):
@@ -402,6 +463,126 @@ def format_scenario_inspection(state: GameState, sections: ReportSections = None
             ]
         )
 
+    if _section_enabled(sections, "facilities"):
+        block_reasons = _facility_block_reasons_by_component(state)
+        facility_rows: list[tuple[object, ...]] = []
+        for node in sorted(state.nodes.values(), key=lambda item: item.id):
+            if node.facility is None:
+                continue
+            for component in sorted(node.facility.components.values(), key=lambda item: item.id):
+                reasons = block_reasons.get((node.id, component.id), [])
+                facility_rows.append(
+                    (
+                        node.id,
+                        component.id,
+                        component.kind.value,
+                        len(component.ports),
+                        component.power_required,
+                        component.power_provided,
+                        component.train_capacity,
+                        component.concurrent_loading_limit,
+                        component.stored_charge,
+                        _format_cargo_map(component.inputs),
+                        _format_cargo_map(component.outputs),
+                        ", ".join(reasons) if reasons else "-",
+                    )
+                )
+        lines.extend(
+            [
+                "",
+                "Facility Components",
+                _format_table(
+                    (
+                        "Node",
+                        "Component",
+                        "Kind",
+                        "Ports",
+                        "power_required",
+                        "power_provided",
+                        "train_capacity",
+                        "load_limit",
+                        "stored_charge",
+                        "Inputs",
+                        "Outputs",
+                        "Blocked",
+                    ),
+                    facility_rows,
+                ),
+            ]
+        )
+
+    if _section_enabled(sections, "signals"):
+        signal_rows = [
+            (
+                signal.id,
+                signal.kind.value,
+                signal.link_id,
+                signal.node_id or "-",
+                "yes" if signal.active else "no",
+            )
+            for signal in sorted(state.track_signals.values(), key=lambda item: item.id)
+        ]
+        signal_report = build_signal_report(state)
+        block_rows = [
+            (
+                block.get("block", link_id),
+                _format_string_list(block.get("signal_ids")),
+                _format_string_list(block.get("occupiers")),
+                block.get("reserved_by") or "-",
+            )
+            for link_id, block in signal_report["blocks"].items()
+            if isinstance(block, dict)
+        ]
+        lines.extend(
+            [
+                "",
+                "Track Signals",
+                _format_table(("Signal", "Kind", "Link", "Node", "Active"), signal_rows),
+                "",
+                "Rail Blocks",
+                _format_table(("Block", "Signals", "Occupiers", "Reserved By"), block_rows),
+            ]
+        )
+
+    if _section_enabled(sections, "power"):
+        power_rows = [
+            (
+                world.id,
+                world.name,
+                world.power_available,
+                world.power_generated_this_tick,
+                world.power_used,
+                world.gate_power_used,
+                world.power_margin,
+            )
+            for world in sorted(state.worlds.values(), key=lambda item: item.id)
+        ]
+        plant_rows = [
+            (
+                plant.id,
+                plant.kind.value,
+                plant.node_id,
+                state.nodes[plant.node_id].world_id,
+                _format_resource_map(plant.inputs),
+                plant.power_output,
+                "yes" if plant.active else "no",
+            )
+            for plant in sorted(state.power_plants.values(), key=lambda item: item.id)
+        ]
+        lines.extend(
+            [
+                "",
+                "World Power",
+                _format_table(
+                    ("World", "Name", "Static", "Generated", "Used", "Gate Used", "Margin"),
+                    power_rows,
+                ),
+                "",
+                "Power Plants",
+                _format_table(("Plant", "Kind", "Node", "World", "Inputs", "Output", "Active"), plant_rows),
+            ]
+        )
+
     if _section_enabled(sections, "finance"):
         finance = state.finance.snapshot()
         lines.extend(
@@ -482,10 +663,14 @@ def format_tick_report(report: dict[str, object], sections: ReportSections = Non
         lines.append(_format_node_rollup("Consumed", report.get("consumed")))
     if _section_enabled(sections, "economy"):
         lines.append(_format_economy_rollup(report.get("economy")))
+    if _section_enabled(sections, "power"):
+        lines.append(_format_power_generation_rollup(report.get("power_generation")))
     if _section_enabled(sections, "gates"):
         lines.append(_format_gate_rollup(report.get("gates")))
     if _section_enabled(sections, "traffic"):
         lines.append(_format_traffic_rollup(report.get("traffic")))
+    if _section_enabled(sections, "signals"):
+        lines.append(_format_signal_rollup(report.get("signals")))
     if _section_enabled(sections, "freight"):
         lines.append(_format_freight_rollup(report.get("freight")))
     if _section_enabled(sections, "contracts"):
@@ -584,6 +769,43 @@ def _format_gate_rollup(gates: object) -> str:
     return "Gates: " + ("; ".join(parts) if parts else "none")
 
 
+def _format_power_generation_rollup(power_generation: object) -> str:
+    """Format generated power and plant blockers."""
+
+    if not isinstance(power_generation, dict):
+        return "Power: none"
+    segments: list[str] = []
+    generated = power_generation.get("generated")
+    if isinstance(generated, dict) and generated:
+        parts = [f"{world} +{power}" for world, power in generated.items()]
+        segments.append("generated " + ", ".join(parts))
+
+    consumed = power_generation.get("consumed")
+    if isinstance(consumed, dict) and consumed:
+        parts = [
+            f"{plant} ({_format_resource_map(inputs)})"
+            for plant, inputs in consumed.items()
+            if isinstance(inputs, dict)
+        ]
+        if parts:
+            segments.append("consumed " + "; ".join(parts))
+
+    blocked = power_generation.get("blocked")
+    if isinstance(blocked, list) and blocked:
+        parts = []
+        for event in blocked[:4]:
+            if not isinstance(event, dict):
+                continue
+            parts.append(
+                f"{event.get('plant', '?')}: {event.get('reason', 'blocked')} "
+                f"({_format_resource_map(event.get('missing'))})"
+            )
+        if parts:
+            segments.append("blocked " + "; ".join(parts))
+
+    return "Power: " + (" | ".join(segments) if segments else "none")
+
+
 def _format_traffic_rollup(traffic: object) -> str:
     """Format congestion and disruption telemetry."""
 
@@ -604,6 +826,42 @@ def _format_traffic_rollup(traffic: object) -> str:
         reason = alert.get("reason", "capacity pressure")
         parts.append(f"{severity} {link} {used}/{capacity} {reason}")
     return "Traffic: " + ("; ".join(parts) if parts else "nominal")
+
+
+def _format_signal_rollup(signals: object) -> str:
+    """Format signal-block occupancy and blockers."""
+
+    if not isinstance(signals, dict):
+        return "Signals: none"
+    blocked = signals.get("blocked")
+    if isinstance(blocked, list) and blocked:
+        parts = [
+            f"{event.get('train_id', 'unknown')} on {event.get('link', 'unknown')}: "
+            f"{event.get('reason', 'blocked')}"
+            for event in blocked
+            if isinstance(event, dict)
+        ]
+        if parts:
+            return "Signals: blocked " + "; ".join(parts)
+
+    blocks = signals.get("blocks")
+    if not isinstance(blocks, dict) or not blocks:
+        return "Signals: none"
+    occupied_parts: list[str] = []
+    clear_count = 0
+    for link_id, block in blocks.items():
+        if not isinstance(block, dict):
+            continue
+        occupiers = block.get("occupiers")
+        if isinstance(occupiers, list) and occupiers:
+            occupied_parts.append(
+                f"{link_id} occupied by {', '.join(str(item) for item in occupiers)}"
+            )
+        else:
+            clear_count += 1
+    if occupied_parts:
+        return "Signals: " + "; ".join(occupied_parts)
+    return f"Signals: {clear_count} clear block{'s' if clear_count != 1 else ''}"
 
 
 def _format_economy_rollup(economy: object) -> str:

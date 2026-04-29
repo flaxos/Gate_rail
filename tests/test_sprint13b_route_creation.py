@@ -69,6 +69,7 @@ def test_preview_purchase_train_returns_cost_without_mutating_state() -> None:
         "name": "Frontier Shuttle",
         "node_id": "frontier_gate",
         "capacity": 8,
+        "consist": "general",
     }
     assert "frontier_shuttle" not in state.trains
     assert state.finance.cash == starting_cash

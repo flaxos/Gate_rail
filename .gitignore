@@ -11,5 +11,6 @@ godot/imported/
 *.uid
 .codex
 .codex/
+.claude-octopus/
 gate-rail/
 patch_commands.py

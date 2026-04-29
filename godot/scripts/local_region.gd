@@ -8,6 +8,7 @@ const STATUSBAR_HEIGHT := 44.0
 const CANVAS_PADDING := 10.0
 const GRID_MICRO := 24.0
 const GRID_MAJOR := 120.0
+const SNAP_CELL_HALF := GRID_MICRO * 0.5
 
 const COLOR_BG_0 := Color("#0b1522")
 const COLOR_BG_1 := Color("#12233b")
@@ -31,6 +32,7 @@ const TOOL_SELECT := "select"
 const TOOL_PAN := "pan"
 const TOOL_RAIL := "rail"
 const TOOL_NODE := "node"
+const TOOL_WIRE := "wire"
 const TOOL_GATE := "gate"
 const TOOL_TRAIN := "train"
 const TOOL_DEMOLISH := "demolish"
@@ -41,6 +43,7 @@ const TOOLS: Array = [
 	{"id": TOOL_PAN, "label": "Pan", "key": "H", "group": "cursor"},
 	{"id": TOOL_RAIL, "label": "Lay Rail", "key": "R", "group": "build"},
 	{"id": TOOL_NODE, "label": "Place Node", "key": "N", "group": "build"},
+	{"id": TOOL_WIRE, "label": "Wire Ports", "key": "C", "group": "build"},
 	{"id": TOOL_GATE, "label": "Gate Hub", "key": "G", "group": "build"},
 	{"id": TOOL_TRAIN, "label": "Purchase Train", "key": "T", "group": "build"},
 	{"id": TOOL_DEMOLISH, "label": "Demolish", "key": "X", "group": "destroy"},
@@ -97,6 +100,20 @@ var _gate_hub_node_id: String = ""
 
 var _canvas_rect: Rect2 = Rect2()
 
+# Layout-coord transform (recomputed each rebuild): screen = canvas_center + (layout - bbox_center) * scale
+var _layout_bbox_center: Vector2 = Vector2.ZERO
+var _layout_spread_scale: float = 1.0
+
+# View pan + zoom state applied to world content via draw_set_transform.
+var _view_offset: Vector2 = Vector2.ZERO
+var _view_scale: float = 1.0
+var _panning: bool = false
+var _pan_button: int = -1
+const PAN_KEY_STEP: float = 32.0
+const ZOOM_MIN: float = 0.4
+const ZOOM_MAX: float = 2.5
+const ZOOM_STEP: float = 1.1
+
 # Build-tool state
 var _build_node_kind: String = "depot"
 var _rail_origin_id: String = ""
@@ -124,6 +141,14 @@ var _pending_route_tuning_cargo: String = ""
 # Inspection state (TOOL_SELECT)
 var _selected_local_kind: String = ""
 var _selected_local_id: String = ""
+
+# Facility drill-in / internal wiring state
+var _facility_component_boxes: Dictionary = {}
+var _facility_port_hitboxes: Dictionary = {}
+var _facility_port_centers: Dictionary = {}
+var _wire_dragging: bool = false
+var _wire_source_endpoint: Dictionary = {}
+var _wire_mouse_pos: Vector2 = Vector2.ZERO
 
 const ALL_CARGO_TYPES: Array = [
 	"food",
@@ -384,10 +409,34 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
 	var key := event as InputEventKey
-	if not key.pressed or key.echo:
+	if not key.pressed:
 		return
-	if key.keycode == KEY_ESCAPE:
+	if key.keycode == KEY_ESCAPE and not key.echo:
 		_cancel_all("preview cancelled")
+		get_viewport().set_input_as_handled()
+		return
+	var pan_delta := Vector2.ZERO
+	match key.keycode:
+		KEY_LEFT, KEY_A:
+			pan_delta = Vector2(PAN_KEY_STEP, 0)
+		KEY_RIGHT, KEY_D:
+			pan_delta = Vector2(-PAN_KEY_STEP, 0)
+		KEY_UP, KEY_W:
+			pan_delta = Vector2(0, PAN_KEY_STEP)
+		KEY_DOWN, KEY_S:
+			pan_delta = Vector2(0, -PAN_KEY_STEP)
+		KEY_HOME:
+			if _view_offset != Vector2.ZERO or not is_equal_approx(_view_scale, 1.0):
+				_view_offset = Vector2.ZERO
+				_view_scale = 1.0
+				if _canvas_panel != null:
+					_canvas_panel.queue_redraw()
+				get_viewport().set_input_as_handled()
+			return
+	if pan_delta != Vector2.ZERO:
+		_view_offset += pan_delta
+		if _canvas_panel != null:
+			_canvas_panel.queue_redraw()
 		get_viewport().set_input_as_handled()
 
 
@@ -395,7 +444,8 @@ func _cancel_all(reason: String = "") -> void:
 	var had_state := not (_pending_build_command.is_empty() and _last_preview_result.is_empty()
 		and _pending_preview_kind.is_empty() and _rail_origin_id.is_empty()
 		and _route_train_id.is_empty() and _selected_local_id.is_empty()
-		and _pending_route_dest_id.is_empty() and _pending_route_tuning_train_id.is_empty())
+		and _pending_route_dest_id.is_empty() and _pending_route_tuning_train_id.is_empty()
+		and _wire_source_endpoint.is_empty())
 	_pending_build_command = {}
 	_pending_preview_kind = ""
 	_pending_preview_target_id = ""
@@ -405,6 +455,7 @@ func _cancel_all(reason: String = "") -> void:
 	_route_origin_id = ""
 	_pending_route_dest_id = ""
 	_clear_route_tuning_state()
+	_clear_wire_builder()
 	_selected_local_kind = ""
 	_selected_local_id = ""
 	if _cargo_kind_popup != null and _cargo_kind_popup.visible:
@@ -421,38 +472,109 @@ func _cancel_all(reason: String = "") -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _canvas_rect.size.x <= 0 or _canvas_rect.size.y <= 0:
+		return
+
+	if event is InputEventMouseMotion:
+		if _wire_dragging:
+			var wire_motion := event as InputEventMouseMotion
+			_wire_mouse_pos = wire_motion.position - _canvas_rect.position
+			if _canvas_panel != null:
+				_canvas_panel.queue_redraw()
+			get_viewport().set_input_as_handled()
+			return
+		if _panning:
+			var motion := event as InputEventMouseMotion
+			_view_offset += motion.relative
+			if _canvas_panel != null:
+				_canvas_panel.queue_redraw()
+			get_viewport().set_input_as_handled()
+		return
+
 	if not (event is InputEventMouseButton):
 		return
 	var mb := event as InputEventMouseButton
-	if not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
+	var screen_pos := mb.position
+	var local_pos := screen_pos - _canvas_rect.position
+	var inside := local_pos.x >= 0 and local_pos.y >= 0 and local_pos.x <= _canvas_rect.size.x and local_pos.y <= _canvas_rect.size.y
+
+	# Mouse wheel: zoom around the cursor so the point under the pointer
+	# stays under the pointer after the zoom step.
+	if mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		if not inside:
+			return
+		var factor: float = ZOOM_STEP if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / ZOOM_STEP
+		var new_scale := clampf(_view_scale * factor, ZOOM_MIN, ZOOM_MAX)
+		if not is_equal_approx(new_scale, _view_scale):
+			var world_pt := (local_pos - _view_offset) / _view_scale
+			_view_offset = local_pos - world_pt * new_scale
+			_view_scale = new_scale
+			if _canvas_panel != null:
+				_canvas_panel.queue_redraw()
+		get_viewport().set_input_as_handled()
 		return
 
-	# Convert screen position to canvas-local position
-	var screen_pos := mb.position
-	if _canvas_rect.size.x <= 0 or _canvas_rect.size.y <= 0:
+	# Middle mouse button: universal pan regardless of tool.
+	if mb.button_index == MOUSE_BUTTON_MIDDLE:
+		if mb.pressed and inside:
+			_panning = true
+			_pan_button = MOUSE_BUTTON_MIDDLE
+			get_viewport().set_input_as_handled()
+		elif not mb.pressed and _panning and _pan_button == MOUSE_BUTTON_MIDDLE:
+			_panning = false
+			_pan_button = -1
+			get_viewport().set_input_as_handled()
 		return
-	var local_pos := screen_pos - _canvas_rect.position
-	if local_pos.x < 0 or local_pos.y < 0 or local_pos.x > _canvas_rect.size.x or local_pos.y > _canvas_rect.size.y:
+
+	# Pan tool: left-button drag pans the view.
+	if _active_tool == TOOL_PAN and mb.button_index == MOUSE_BUTTON_LEFT:
+		if mb.pressed and inside:
+			_panning = true
+			_pan_button = MOUSE_BUTTON_LEFT
+			get_viewport().set_input_as_handled()
+		elif not mb.pressed and _panning and _pan_button == MOUSE_BUTTON_LEFT:
+			_panning = false
+			_pan_button = -1
+			get_viewport().set_input_as_handled()
 		return
+
+	if _active_tool == TOOL_WIRE and mb.button_index == MOUSE_BUTTON_LEFT:
+		if mb.pressed and inside:
+			var logical_wire_pos := (local_pos - _view_offset) / _view_scale
+			_handle_wire_press(local_pos, logical_wire_pos)
+			get_viewport().set_input_as_handled()
+		elif not mb.pressed and _wire_dragging:
+			_handle_wire_release(local_pos)
+			get_viewport().set_input_as_handled()
+		return
+
+	if not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if not inside:
+		return
+
+	# Convert pointer to logical world coordinates so hit-testing against
+	# _node_positions works at any pan + zoom level.
+	var logical_pos := (local_pos - _view_offset) / _view_scale
 
 	match _active_tool:
 		TOOL_SELECT:
-			_handle_select_click(local_pos)
+			_handle_select_click(logical_pos)
 			get_viewport().set_input_as_handled()
 		TOOL_NODE:
-			_handle_place_node_click(local_pos)
+			_handle_place_node_click(_snap_to_grid(logical_pos))
 			get_viewport().set_input_as_handled()
 		TOOL_RAIL:
-			_handle_rail_click(local_pos)
+			_handle_rail_click(logical_pos)
 			get_viewport().set_input_as_handled()
 		TOOL_GATE:
-			_handle_gate_click(local_pos)
+			_handle_gate_click(logical_pos)
 			get_viewport().set_input_as_handled()
 		TOOL_TRAIN:
-			_handle_train_click(local_pos)
+			_handle_train_click(logical_pos)
 			get_viewport().set_input_as_handled()
 		TOOL_DEMOLISH:
-			_handle_demolish_click(local_pos)
+			_handle_demolish_click(logical_pos)
 			get_viewport().set_input_as_handled()
 
 
@@ -495,13 +617,21 @@ func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 	return p.distance_to(a + seg * t)
 
 
+# --- Grid Snap ---
+func _snap_to_grid(pos: Vector2) -> Vector2:
+	return Vector2(
+		round(pos.x / GRID_MICRO) * GRID_MICRO,
+		round(pos.y / GRID_MICRO) * GRID_MICRO,
+	)
+
+
 # --- Place Node ---
 func _handle_place_node_click(local_pos: Vector2) -> void:
 	if _pending_preview_kind == "node" and not _pending_build_command.is_empty():
 		_send_pending_build("Building %s..." % _pending_build_command.get("kind", "node"), COLOR_AMBER_HOT)
 		return
 	_clear_pending_preview()
-	_pending_node_local_pos = local_pos
+	_pending_node_local_pos = _snap_to_grid(local_pos)
 	_node_kind_popup.position = Vector2i(get_viewport().get_mouse_position())
 	_node_kind_popup.popup()
 
@@ -510,6 +640,7 @@ func _request_node_preview(kind: String, local_pos: Vector2) -> void:
 	if _world_id.is_empty():
 		_set_status_text("Cannot build without a selected world.", COLOR_ERR)
 		return
+	var snapped_pos := _snap_to_grid(local_pos)
 	var node_id := _next_build_id(kind)
 	var node_name := "%s %s" % [_world_id.capitalize(), _kind_display(kind)]
 	var command := {
@@ -518,8 +649,9 @@ func _request_node_preview(kind: String, local_pos: Vector2) -> void:
 		"world_id": _world_id,
 		"kind": kind,
 		"name": node_name,
-		"layout": {"x": local_pos.x, "y": local_pos.y},
+		"layout": _logical_to_layout(snapped_pos),
 	}
+	_pending_node_local_pos = snapped_pos
 	_pending_preview_kind = "node"
 	_pending_preview_target_id = node_id
 	_pending_build_command = {}
@@ -562,6 +694,12 @@ func _clear_route_builder() -> void:
 	_route_origin_id = ""
 	_clear_route_tuning_state()
 	_refresh_construction_hud()
+
+
+func _clear_wire_builder() -> void:
+	_wire_dragging = false
+	_wire_source_endpoint = {}
+	_wire_mouse_pos = Vector2.ZERO
 
 
 
@@ -637,8 +775,9 @@ func _handle_gate_click(local_pos: Vector2) -> void:
 		return
 
 	_clear_pending_preview()
-	_pending_node_local_pos = local_pos
-	_request_node_preview("gate_hub", local_pos)
+	var snapped_pos := _snap_to_grid(local_pos)
+	_pending_node_local_pos = snapped_pos
+	_request_node_preview("gate_hub", snapped_pos)
 
 
 func _request_gate_link_preview(origin_id: String) -> void:
@@ -892,6 +1031,96 @@ func _handle_select_click(local_pos: Vector2) -> void:
 		_canvas_panel.queue_redraw()
 
 
+# --- Internal Wiring ---
+func _facility_port_at(local_pos: Vector2) -> Dictionary:
+	for key in _facility_port_hitboxes.keys():
+		var hit: Dictionary = _facility_port_hitboxes[key]
+		var rect: Rect2 = hit.get("rect", Rect2())
+		if rect.has_point(local_pos):
+			return hit
+	return {}
+
+
+func _handle_wire_press(local_pos: Vector2, logical_pos: Vector2) -> void:
+	var hit := _facility_port_at(local_pos)
+	if hit.is_empty():
+		_handle_select_click(logical_pos)
+		if _selected_local_kind == "node":
+			var node := _node_snapshot(_selected_local_id)
+			var facility = node.get("facility", null)
+			if typeof(facility) == TYPE_DICTIONARY:
+				_set_status_text("WIRE · drag an output port to an input port", COLOR_CYAN)
+			else:
+				_set_status_text("WIRE · selected node has no facility ports", COLOR_AMBER_HOT)
+		return
+	if str(hit.get("direction", "")) != "output":
+		_set_status_text("WIRE · start from an output port", COLOR_AMBER_HOT)
+		return
+	_wire_source_endpoint = hit.duplicate(true)
+	_wire_dragging = true
+	_wire_mouse_pos = local_pos
+	_clear_pending_preview()
+	_set_status_text(
+		"WIRE · %s.%s -> drag to input" % [str(hit.get("component_id", "")), str(hit.get("port_id", ""))],
+		COLOR_CYAN,
+	)
+	if _canvas_panel != null:
+		_canvas_panel.queue_redraw()
+
+
+func _handle_wire_release(local_pos: Vector2) -> void:
+	var source := _wire_source_endpoint.duplicate(true)
+	_clear_wire_builder()
+	if source.is_empty():
+		return
+	var hit := _facility_port_at(local_pos)
+	if hit.is_empty():
+		_set_status_text("WIRE · release on an input port to connect", COLOR_AMBER_HOT)
+		if _canvas_panel != null:
+			_canvas_panel.queue_redraw()
+		return
+	if str(hit.get("direction", "")) != "input":
+		_set_status_text("WIRE · destination must be an input port", COLOR_AMBER_HOT)
+		if _canvas_panel != null:
+			_canvas_panel.queue_redraw()
+		return
+	if str(hit.get("node_id", "")) != str(source.get("node_id", "")):
+		_set_status_text("WIRE · internal wires must stay inside one facility", COLOR_ERR)
+		if _canvas_panel != null:
+			_canvas_panel.queue_redraw()
+		return
+	_request_internal_connection_preview(source, hit)
+
+
+func _request_internal_connection_preview(source: Dictionary, destination: Dictionary) -> void:
+	var node_id := str(source.get("node_id", ""))
+	if node_id.is_empty():
+		_set_status_text("WIRE · no selected facility node", COLOR_ERR)
+		return
+	var connection_id := _next_build_id("wire")
+	var command := {
+		"type": "PreviewBuildInternalConnection",
+		"node_id": node_id,
+		"connection_id": connection_id,
+		"source_component_id": str(source.get("component_id", "")),
+		"source_port_id": str(source.get("port_id", "")),
+		"destination_component_id": str(destination.get("component_id", "")),
+		"destination_port_id": str(destination.get("port_id", "")),
+	}
+	_pending_preview_kind = "internal_connection"
+	_pending_preview_target_id = connection_id
+	_pending_build_command = {}
+	_last_preview_result = {}
+	_set_status_text("PREVIEW · checking internal wire...", COLOR_CYAN)
+	_refresh_construction_hud()
+	GateRailBridge.send_message({
+		"commands": [command],
+		"ticks": 0,
+	})
+	if _canvas_panel != null:
+		_canvas_panel.queue_redraw()
+
+
 # --- Demolish ---
 func _handle_demolish_click(local_pos: Vector2) -> void:
 	var link_id := _hit_link_at(local_pos)
@@ -1076,6 +1305,7 @@ func _tool_glyph(id: String) -> String:
 		TOOL_PAN: return "✥"
 		TOOL_RAIL: return "═"
 		TOOL_NODE: return "▣"
+		TOOL_WIRE: return "~"
 		TOOL_GATE: return "◎"
 		TOOL_TRAIN: return "▬"
 		TOOL_DEMOLISH: return "✕"
@@ -1118,7 +1348,7 @@ func _on_tool_pressed(tool_id: String) -> void:
 	_active_tool = tool_id
 	_rail_origin_id = ""
 	_pending_route_dest_id = ""
-	if tool_id != TOOL_SELECT:
+	if tool_id != TOOL_SELECT and tool_id != TOOL_WIRE:
 		_selected_local_kind = ""
 		_selected_local_id = ""
 	if _cargo_kind_popup != null and _cargo_kind_popup.visible:
@@ -1126,6 +1356,7 @@ func _on_tool_pressed(tool_id: String) -> void:
 	_clear_route_tuning_state()
 	_clear_pending_preview()
 	_clear_route_builder()
+	_clear_wire_builder()
 	for key in _tool_buttons.keys():
 		_apply_tool_button_style(_tool_buttons[key], key == tool_id)
 	_update_status_mode_chip()
@@ -1139,6 +1370,7 @@ func _on_tool_pressed(tool_id: String) -> void:
 func _build_canvas_panel() -> void:
 	_canvas_panel = Control.new()
 	_canvas_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_canvas_panel.clip_contents = true
 	_canvas_panel.draw.connect(_on_canvas_draw)
 	_canvas_layer.add_child(_canvas_panel)
 
@@ -1162,16 +1394,23 @@ func _on_canvas_draw() -> void:
 	var bg_rect := Rect2(Vector2.ZERO, size)
 	_canvas_panel.draw_rect(bg_rect, COLOR_BG_0, true)
 
+	# World content (terrain, zones, grid, links, nodes, trains) pans + zooms
+	# with the camera. Viewport chrome (corner brackets, compass, scale bar,
+	# region label) stays fixed and is drawn after.
+	_canvas_panel.draw_set_transform(_view_offset, 0.0, Vector2.ONE * _view_scale)
 	_draw_terrain(size)
 	_draw_grid(size)
-	_draw_corner_brackets(size)
-	_draw_compass(size)
-	_draw_scalebar(size)
-
 	_draw_links_and_nodes(size)
 	_draw_logistics_overlays(size)
 	_draw_trains(size)
 	_draw_build_preview(size)
+	_draw_snap_cursor(size)
+	_canvas_panel.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	_draw_facility_drill_in(size)
+	_draw_corner_brackets(size)
+	_draw_compass(size)
+	_draw_scalebar(size)
 
 
 func _process(_delta: float) -> void:
@@ -1235,20 +1474,28 @@ func _generate_terrain(canvas_size: Vector2) -> void:
 		seed_val = 42
 	rng.seed = seed_val
 
+	# Cover an extended area around the canvas so pan + zoom-out keeps the
+	# colored terrain in view. Origin shifts negative so the canvas sits
+	# roughly in the middle of the painted region.
+	const TERRAIN_OVERSCAN := 1.0
+	var origin := -canvas_size * TERRAIN_OVERSCAN
+	var terrain_size := canvas_size * (1.0 + 2.0 * TERRAIN_OVERSCAN)
+
 	# Voronoi approximation: place seed centroids then fill grid cells
 	const CELL := 40.0
-	var num_seeds := 14
+	var num_seeds: int = 14 * int(round(1.0 + 2.0 * TERRAIN_OVERSCAN) * round(1.0 + 2.0 * TERRAIN_OVERSCAN))
+	num_seeds = max(48, num_seeds)
 	var seeds_pos: Array = []
 	var seeds_col: Array = []
 	for i in range(num_seeds):
-		seeds_pos.append(Vector2(rng.randf_range(0, canvas_size.x), rng.randf_range(0, canvas_size.y)))
+		seeds_pos.append(Vector2(rng.randf_range(origin.x, origin.x + terrain_size.x), rng.randf_range(origin.y, origin.y + terrain_size.y)))
 		var t := rng.randf()
 		seeds_col.append(base_col.lerp(accent_col, t))
 
-	var cx := 0.0
-	while cx < canvas_size.x:
-		var cy := 0.0
-		while cy < canvas_size.y:
+	var cx := origin.x
+	while cx < origin.x + terrain_size.x:
+		var cy := origin.y
+		while cy < origin.y + terrain_size.y:
 			var cell_center := Vector2(cx + CELL * 0.5, cy + CELL * 0.5)
 			var best_dist := INF
 			var best_col := base_col
@@ -1261,11 +1508,14 @@ func _generate_terrain(canvas_size: Vector2) -> void:
 			cy += CELL
 		cx += CELL
 
-	# Generate zone blobs
-	var zone_types := ["water", "farm", "industry", "hazard", "farm", "water"]
+	# Generate zone blobs spread across the extended terrain area.
+	var zone_types := ["water", "farm", "industry", "hazard", "farm", "water", "industry", "farm", "hazard", "water"]
 	for zt in zone_types:
-		var zpos := Vector2(rng.randf_range(80, canvas_size.x - 80), rng.randf_range(80, canvas_size.y - 80))
-		var zrad := rng.randf_range(60, 140)
+		var zpos := Vector2(
+			rng.randf_range(origin.x + 80, origin.x + terrain_size.x - 80),
+			rng.randf_range(origin.y + 80, origin.y + terrain_size.y - 80),
+		)
+		var zrad := rng.randf_range(60, 160)
 		_terrain_zones.append({"pos": zpos, "radius": zrad, "type": zt, "color": zone_cols.get(zt, Color.TRANSPARENT)})
 
 
@@ -1276,8 +1526,22 @@ func _draw_terrain(size: Vector2) -> void:
 	for patch in _terrain_patches:
 		_canvas_panel.draw_rect(Rect2(patch["pos"], patch["size"]), patch["color"], true)
 
-	# Subtle wash on top for depth
-	_canvas_panel.draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.28), true)
+	# Subtle wash on top for depth — span the extended terrain bounds so the
+	# wash matches wherever terrain patches are visible after pan + zoom.
+	if not _terrain_patches.is_empty():
+		var first: Dictionary = _terrain_patches[0]
+		var wash_min: Vector2 = first["pos"]
+		var wash_max: Vector2 = wash_min + first["size"]
+		for patch in _terrain_patches:
+			var p: Vector2 = patch["pos"]
+			var s: Vector2 = patch["size"]
+			wash_min.x = min(wash_min.x, p.x)
+			wash_min.y = min(wash_min.y, p.y)
+			wash_max.x = max(wash_max.x, p.x + s.x)
+			wash_max.y = max(wash_max.y, p.y + s.y)
+		_canvas_panel.draw_rect(Rect2(wash_min, wash_max - wash_min), Color(0, 0, 0, 0.28), true)
+	else:
+		_canvas_panel.draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.28), true)
 
 	if _show_zone_overlay:
 		var font := ThemeDB.fallback_font
@@ -1439,22 +1703,204 @@ func _draw_train_glyph(pos: Vector2, direction: Vector2, status: String) -> void
 func _draw_grid(size: Vector2) -> void:
 	var micro_color := Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.06)
 	var major_color := Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.11)
-	var x := 0.0
-	while x < size.x:
-		_canvas_panel.draw_line(Vector2(x, 0), Vector2(x, size.y), micro_color, 1.0)
+	# Back-project the viewport rect into logical space so grid lines stay
+	# aligned to world coords through pan + zoom.
+	var inv_scale: float = 1.0 / max(0.001, _view_scale)
+	var min_x: float = -_view_offset.x * inv_scale
+	var max_x: float = (size.x - _view_offset.x) * inv_scale
+	var min_y: float = -_view_offset.y * inv_scale
+	var max_y: float = (size.y - _view_offset.y) * inv_scale
+	var x: float = floor(min_x / GRID_MICRO) * GRID_MICRO
+	while x < max_x:
+		_canvas_panel.draw_line(Vector2(x, min_y), Vector2(x, max_y), micro_color, 1.0)
 		x += GRID_MICRO
-	var y := 0.0
-	while y < size.y:
-		_canvas_panel.draw_line(Vector2(0, y), Vector2(size.x, y), micro_color, 1.0)
+	var y: float = floor(min_y / GRID_MICRO) * GRID_MICRO
+	while y < max_y:
+		_canvas_panel.draw_line(Vector2(min_x, y), Vector2(max_x, y), micro_color, 1.0)
 		y += GRID_MICRO
-	x = 0.0
-	while x < size.x:
-		_canvas_panel.draw_line(Vector2(x, 0), Vector2(x, size.y), major_color, 1.0)
+	x = floor(min_x / GRID_MAJOR) * GRID_MAJOR
+	while x < max_x:
+		_canvas_panel.draw_line(Vector2(x, min_y), Vector2(x, max_y), major_color, 1.0)
 		x += GRID_MAJOR
-	y = 0.0
-	while y < size.y:
-		_canvas_panel.draw_line(Vector2(0, y), Vector2(size.x, y), major_color, 1.0)
+	y = floor(min_y / GRID_MAJOR) * GRID_MAJOR
+	while y < max_y:
+		_canvas_panel.draw_line(Vector2(min_x, y), Vector2(max_x, y), major_color, 1.0)
 		y += GRID_MAJOR
+
+
+func _facility_endpoint_key(node_id: String, component_id: String, port_id: String) -> String:
+	return "%s|%s|%s" % [node_id, component_id, port_id]
+
+
+func _port_label(port: Dictionary) -> String:
+	var cargo := str(port.get("cargo", "all"))
+	if cargo == "<null>" or cargo == "null" or cargo.is_empty():
+		cargo = "all"
+	cargo = cargo.replace("_", " ")
+	var rate := int(port.get("rate", 0))
+	var label := cargo
+	if rate > 0:
+		label += " /%d" % rate
+	var inventory: Dictionary = port.get("inventory", {}) if typeof(port.get("inventory")) == TYPE_DICTIONARY else {}
+	if not inventory.is_empty():
+		label += " [%s]" % _format_top_cargo(inventory, 1)
+	return label
+
+
+func _draw_facility_drill_in(size: Vector2) -> void:
+	_facility_component_boxes.clear()
+	_facility_port_hitboxes.clear()
+	_facility_port_centers.clear()
+	if _selected_local_kind != "node" or _selected_local_id.is_empty():
+		return
+	var node := _node_snapshot(_selected_local_id)
+	if node.is_empty():
+		return
+	var facility: Dictionary = node.get("facility", {}) if typeof(node.get("facility")) == TYPE_DICTIONARY else {}
+	if facility.is_empty():
+		return
+	var components: Array = facility.get("components", []) if typeof(facility.get("components")) == TYPE_ARRAY else []
+	if components.is_empty():
+		return
+
+	var panel_w: float = min(640.0, max(280.0, size.x - 44.0))
+	var panel_h: float = min(300.0, max(170.0, size.y * 0.42))
+	var panel_pos := Vector2(22.0, max(84.0, size.y - panel_h - 18.0))
+	var panel_rect := Rect2(panel_pos, Vector2(panel_w, panel_h))
+	_canvas_panel.draw_rect(panel_rect, Color(COLOR_PANEL_2.r, COLOR_PANEL_2.g, COLOR_PANEL_2.b, 0.94), true)
+	_canvas_panel.draw_rect(panel_rect, COLOR_HAIR_2, false, 1.0)
+
+	var font := ThemeDB.fallback_font
+	_canvas_panel.draw_string(
+		font,
+		panel_pos + Vector2(14, 22),
+		"FACILITY DRILL-IN · %s" % str(node.get("name", _selected_local_id)).to_upper(),
+		HORIZONTAL_ALIGNMENT_LEFT,
+		panel_w - 28,
+		11,
+		COLOR_STEEL_2,
+	)
+	var sub := "select Wire Ports, then drag OUT to IN"
+	if _active_tool == TOOL_WIRE:
+		sub = "drag OUT port to IN port · backend preview required"
+	_canvas_panel.draw_string(font, panel_pos + Vector2(panel_w - 260, 22), sub, HORIZONTAL_ALIGNMENT_RIGHT, 246, 10, COLOR_STEEL)
+
+	var columns: int = max(1, min(3, int(floor((panel_w - 32.0) / 170.0))))
+	var gap := 12.0
+	var box_w: float = (panel_w - 32.0 - gap * float(columns - 1)) / float(columns)
+	var box_h := 88.0
+	var blocked: Array = node.get("facility_blocked", []) if typeof(node.get("facility_blocked")) == TYPE_ARRAY else []
+
+	for i in components.size():
+		var comp = components[i]
+		if typeof(comp) != TYPE_DICTIONARY:
+			continue
+		var component: Dictionary = comp
+		var component_id := str(component.get("id", ""))
+		var col := i % columns
+		var row := int(i / columns)
+		var box_pos := panel_pos + Vector2(16.0 + float(col) * (box_w + gap), 42.0 + float(row) * (box_h + gap))
+		var box_rect := Rect2(box_pos, Vector2(box_w, box_h))
+		_facility_component_boxes[component_id] = box_rect
+		var ports: Array = component.get("ports", []) if typeof(component.get("ports")) == TYPE_ARRAY else []
+		var input_index := 0
+		var output_index := 0
+		for item in ports:
+			if typeof(item) != TYPE_DICTIONARY:
+				continue
+			var port: Dictionary = item
+			var port_id := str(port.get("id", ""))
+			var direction := str(port.get("direction", ""))
+			var port_y := box_pos.y + 34.0
+			var port_x := box_pos.x
+			if direction == "output":
+				port_y += float(output_index) * 16.0
+				port_x = box_pos.x + box_w
+				output_index += 1
+			else:
+				port_y += float(input_index) * 16.0
+				input_index += 1
+			var center := Vector2(port_x, port_y)
+			var key := _facility_endpoint_key(_selected_local_id, component_id, port_id)
+			_facility_port_centers[key] = center
+			_facility_port_hitboxes[key] = {
+				"rect": Rect2(center - Vector2(8, 8), Vector2(16, 16)),
+				"node_id": _selected_local_id,
+				"component_id": component_id,
+				"port_id": port_id,
+				"direction": direction,
+				"cargo": port.get("cargo", null),
+			}
+
+	var connections: Array = facility.get("connections", []) if typeof(facility.get("connections")) == TYPE_ARRAY else []
+	for item in connections:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var connection: Dictionary = item
+		var source_key := _facility_endpoint_key(
+			_selected_local_id,
+			str(connection.get("source_component_id", "")),
+			str(connection.get("source_port_id", "")),
+		)
+		var destination_key := _facility_endpoint_key(
+			_selected_local_id,
+			str(connection.get("destination_component_id", "")),
+			str(connection.get("destination_port_id", "")),
+		)
+		if not _facility_port_centers.has(source_key) or not _facility_port_centers.has(destination_key):
+			continue
+		var a: Vector2 = _facility_port_centers[source_key]
+		var b: Vector2 = _facility_port_centers[destination_key]
+		var mid_x := (a.x + b.x) * 0.5
+		var points := PackedVector2Array([a, Vector2(mid_x, a.y), Vector2(mid_x, b.y), b])
+		_canvas_panel.draw_polyline(points, Color(COLOR_CYAN.r, COLOR_CYAN.g, COLOR_CYAN.b, 0.72), 2.0)
+
+	if _wire_dragging and not _wire_source_endpoint.is_empty():
+		var source_key := _facility_endpoint_key(
+			str(_wire_source_endpoint.get("node_id", "")),
+			str(_wire_source_endpoint.get("component_id", "")),
+			str(_wire_source_endpoint.get("port_id", "")),
+		)
+		if _facility_port_centers.has(source_key):
+			var source_center: Vector2 = _facility_port_centers[source_key]
+			_canvas_panel.draw_line(source_center, _wire_mouse_pos, COLOR_AMBER_HOT, 2.0)
+			_canvas_panel.draw_circle(_wire_mouse_pos, 4.0, COLOR_AMBER_HOT)
+
+	for i in components.size():
+		var comp = components[i]
+		if typeof(comp) != TYPE_DICTIONARY:
+			continue
+		var component: Dictionary = comp
+		var component_id := str(component.get("id", ""))
+		if not _facility_component_boxes.has(component_id):
+			continue
+		var box_rect: Rect2 = _facility_component_boxes[component_id]
+		var is_blocked := component_id in blocked
+		var border := COLOR_ERR if is_blocked else COLOR_HAIR_2
+		_canvas_panel.draw_rect(box_rect, Color(COLOR_BG_1.r, COLOR_BG_1.g, COLOR_BG_1.b, 0.92), true)
+		_canvas_panel.draw_rect(box_rect, border, false, 1.2)
+		_canvas_panel.draw_string(font, box_rect.position + Vector2(10, 18), str(component.get("kind", "component")).replace("_", " ").to_upper(), HORIZONTAL_ALIGNMENT_LEFT, box_w - 20, 10, COLOR_STEEL_2)
+		_canvas_panel.draw_string(font, box_rect.position + Vector2(10, 34), component_id, HORIZONTAL_ALIGNMENT_LEFT, box_w - 20, 11, COLOR_ICE)
+		if is_blocked:
+			_canvas_panel.draw_string(font, box_rect.position + Vector2(10, box_h - 10), "BLOCKED", HORIZONTAL_ALIGNMENT_LEFT, box_w - 20, 9, COLOR_ERR)
+		var ports: Array = component.get("ports", []) if typeof(component.get("ports")) == TYPE_ARRAY else []
+		for item in ports:
+			if typeof(item) != TYPE_DICTIONARY:
+				continue
+			var port: Dictionary = item
+			var key := _facility_endpoint_key(_selected_local_id, component_id, str(port.get("id", "")))
+			if not _facility_port_centers.has(key):
+				continue
+			var center: Vector2 = _facility_port_centers[key]
+			var direction := str(port.get("direction", ""))
+			var port_color := COLOR_CYAN if direction == "output" else COLOR_AMBER_HOT
+			_canvas_panel.draw_circle(center, 5.0, port_color)
+			_canvas_panel.draw_arc(center, 5.0, 0.0, TAU, 16, COLOR_BG_0, 1.0, true)
+			var label_pos := center + Vector2(8, 3)
+			var label_width := box_w * 0.5 - 14.0
+			if direction == "input":
+				label_pos = center + Vector2(-label_width - 8, 3)
+			_canvas_panel.draw_string(font, label_pos, _port_label(port), HORIZONTAL_ALIGNMENT_LEFT, label_width, 9, COLOR_STEEL)
 
 
 func _draw_corner_brackets(size: Vector2) -> void:
@@ -1528,6 +1974,8 @@ func _draw_links_and_nodes(size: Vector2) -> void:
 		var kind_lbl := kind.to_upper().replace("_", " ")
 		_canvas_panel.draw_string(font, pos + Vector2(-50, 44), label, HORIZONTAL_ALIGNMENT_CENTER, 100, 11, COLOR_ICE)
 		_canvas_panel.draw_string(font, pos + Vector2(-50, 58), kind_lbl, HORIZONTAL_ALIGNMENT_CENTER, 100, 10, COLOR_STEEL)
+		if node.get("construction_project_id") != null and str(node.get("construction_project_id")) != "":
+			_canvas_panel.draw_string(font, pos + Vector2(-60, -32), "UNDER CONSTRUCTION", HORIZONTAL_ALIGNMENT_CENTER, 120, 10, COLOR_AMBER_HOT)
 
 
 func _draw_logistics_overlays(_size: Vector2) -> void:
@@ -1782,9 +2230,10 @@ func _draw_build_preview(_size: Vector2) -> void:
 	var origin_pos: Vector2 = _node_positions[origin_id]
 	# Highlight the origin node
 	_canvas_panel.draw_arc(origin_pos, 28.0, 0.0, TAU, 48, line_color, 3.0, true)
-	# Rubber-band line to mouse
+	# Rubber-band line to mouse — mouse must be in the same logical space
+	# as _node_positions because the world transform is applied here.
 	var mouse_screen := get_viewport().get_mouse_position()
-	var mouse_local := mouse_screen - _canvas_rect.position
+	var mouse_local := (mouse_screen - _canvas_rect.position - _view_offset) / _view_scale
 	_canvas_panel.draw_line(origin_pos, mouse_local, Color(line_color.r, line_color.g, line_color.b, 0.5), 3.0)
 	var preview_text := default_text
 	var preview_color := COLOR_AMBER_HOT
@@ -1793,6 +2242,43 @@ func _draw_build_preview(_size: Vector2) -> void:
 		preview_color = COLOR_OK if bool(_last_preview_result.get("ok", false)) else COLOR_ERR
 	var font := ThemeDB.fallback_font
 	_canvas_panel.draw_string(font, mouse_local + Vector2(14, -8), preview_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, preview_color)
+
+
+func _draw_snap_cursor(_size: Vector2) -> void:
+	if _active_tool != TOOL_NODE and _active_tool != TOOL_GATE:
+		return
+	var mouse_screen := get_viewport().get_mouse_position()
+	var mouse_local := (mouse_screen - _canvas_rect.position - _view_offset) / _view_scale
+	var snapped := _snap_to_grid(mouse_local)
+	var cell_rect := Rect2(
+		snapped - Vector2(SNAP_CELL_HALF, SNAP_CELL_HALF),
+		Vector2(GRID_MICRO, GRID_MICRO),
+	)
+	_canvas_panel.draw_rect(cell_rect, Color(COLOR_AMBER_HOT.r, COLOR_AMBER_HOT.g, COLOR_AMBER_HOT.b, 0.08), true)
+	_canvas_panel.draw_rect(cell_rect, Color(COLOR_AMBER_HOT.r, COLOR_AMBER_HOT.g, COLOR_AMBER_HOT.b, 0.42), false, 1.0)
+	var cross_half := 10.0
+	var cross_color := Color(COLOR_AMBER_HOT.r, COLOR_AMBER_HOT.g, COLOR_AMBER_HOT.b, 0.6)
+	_canvas_panel.draw_line(snapped + Vector2(-cross_half, 0), snapped + Vector2(cross_half, 0), cross_color, 1.0)
+	_canvas_panel.draw_line(snapped + Vector2(0, -cross_half), snapped + Vector2(0, cross_half), cross_color, 1.0)
+	# Diamond snap indicator
+	var d := 5.0
+	var diamond := PackedVector2Array([
+		snapped + Vector2(0, -d), snapped + Vector2(d, 0),
+		snapped + Vector2(0, d), snapped + Vector2(-d, 0),
+	])
+	_canvas_panel.draw_polyline(diamond, COLOR_AMBER_HOT, 1.5)
+	_canvas_panel.draw_line(diamond[3], diamond[0], COLOR_AMBER_HOT, 1.5)
+	var layout := _logical_to_layout(snapped)
+	var font := ThemeDB.fallback_font
+	_canvas_panel.draw_string(
+		font,
+		snapped + Vector2(12, -14),
+		"grid %.0f, %.0f" % [float(layout.get("x", 0.0)), float(layout.get("y", 0.0))],
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		10,
+		COLOR_STEEL_2,
+	)
 
 
 func _preview_summary(result: Dictionary) -> String:
@@ -1815,6 +2301,8 @@ func _preview_summary(result: Dictionary) -> String:
 		return "VALID · %d ticks · $%d · click again to build" % [travel_ticks, cost]
 	if result_type == "PreviewPurchaseTrain":
 		return "VALID TRAIN · $%d · click node again" % cost
+	if result_type == "PreviewBuildInternalConnection":
+		return "VALID WIRE · confirm to connect ports"
 	return "VALID · $%d · click again to build" % cost
 
 
@@ -1848,6 +2336,11 @@ func _draw_node_glyph(pos: Vector2, kind: String, is_gate: bool) -> void:
 			_canvas_panel.draw_rect(Rect2(pos + Vector2(-18, 8), Vector2(36, 14)), COLOR_STEEL, false, 1.4)
 			_canvas_panel.draw_line(roof_a, roof_b, COLOR_STEEL, 1.4)
 			_canvas_panel.draw_line(roof_b, roof_c, COLOR_STEEL, 1.4)
+		"spaceport":
+			_canvas_panel.draw_rect(Rect2(pos - Vector2(18, 18), Vector2(36, 36)), Color(0.10, 0.17, 0.27, 1.0), true)
+			_canvas_panel.draw_rect(Rect2(pos - Vector2(18, 18), Vector2(36, 36)), COLOR_STEEL, false, 1.6)
+			_canvas_panel.draw_arc(pos, 26, 0, TAU, 32, COLOR_CYAN, 1.4, false)
+			_canvas_panel.draw_arc(pos, 36, 0, TAU, 48, COLOR_STEEL_2, 1.0, true)
 		"gate_hub":
 			_draw_gate_hub(pos)
 		_:
@@ -1884,24 +2377,62 @@ func _draw_gate_hub(pos: Vector2) -> void:
 func _rebuild_node_positions(size: Vector2) -> void:
 	_node_positions.clear()
 	if _world_nodes.is_empty():
+		_layout_bbox_center = Vector2.ZERO
+		_layout_spread_scale = 1.0
 		return
 	var center := size * 0.5
-	var radius: float = min(size.x, size.y) * 0.32
+	var fallback_radius: float = min(size.x, size.y) * 0.36
 	var count := _world_nodes.size()
+
+	# Collect raw layout points to derive bbox-driven spread.
+	var layout_pts: Dictionary = {}
+	for node in _world_nodes:
+		var layout_data = node.get("layout", null)
+		if typeof(layout_data) == TYPE_DICTIONARY:
+			var nid := str(node.get("id", ""))
+			layout_pts[nid] = Vector2(float(layout_data.get("x", 0.0)), float(layout_data.get("y", 0.0)))
+
+	if layout_pts.is_empty():
+		_layout_bbox_center = Vector2.ZERO
+		_layout_spread_scale = 1.0
+	else:
+		var bbox_min := Vector2(INF, INF)
+		var bbox_max := Vector2(-INF, -INF)
+		for nid in layout_pts:
+			var p: Vector2 = layout_pts[nid]
+			bbox_min.x = min(bbox_min.x, p.x)
+			bbox_min.y = min(bbox_min.y, p.y)
+			bbox_max.x = max(bbox_max.x, p.x)
+			bbox_max.y = max(bbox_max.y, p.y)
+		_layout_bbox_center = (bbox_min + bbox_max) * 0.5
+		var src_extent: float = max(bbox_max.x - bbox_min.x, bbox_max.y - bbox_min.y)
+		var target_extent: float = min(size.x, size.y) * 0.75
+		# Cap the scale so a single isolated node doesn't get blown up to fill the canvas.
+		_layout_spread_scale = clampf(target_extent / max(1.0, src_extent), 1.0, 3.5) if src_extent > 1.0 else 1.0
+
 	var idx := 0
 	for node in _world_nodes:
 		var node_id := str(node.get("id", ""))
-		var layout_data = node.get("layout", null)
-		if typeof(layout_data) == TYPE_DICTIONARY:
-			_node_positions[node_id] = Vector2(float(layout_data.get("x", 0.0)), float(layout_data.get("y", 0.0)))
+		if layout_pts.has(node_id):
+			var raw: Vector2 = layout_pts[node_id]
+			_node_positions[node_id] = center + (raw - _layout_bbox_center) * _layout_spread_scale
 			idx += 1
 			continue
 		var angle: float = -PI / 2.0 + (TAU * float(idx) / float(max(1, count)))
-		var pos := center + Vector2(cos(angle), sin(angle)) * radius
+		var pos := center + Vector2(cos(angle), sin(angle)) * fallback_radius
 		if node_id == _gate_hub_node_id:
-			pos = center + Vector2(radius * 0.72, -radius * 0.05)
+			pos = center + Vector2(fallback_radius * 0.72, -fallback_radius * 0.05)
 		_node_positions[node_id] = pos
 		idx += 1
+
+
+func _logical_to_layout(logical_pos: Vector2) -> Dictionary:
+	# Inverse of the spread transform applied in _rebuild_node_positions, so a
+	# node placed at click point `logical_pos` displays back at the same spot.
+	var center := _canvas_rect.size * 0.5
+	var scale: float = _layout_spread_scale if _layout_spread_scale > 0.0 else 1.0
+	var raw: Vector2 = _layout_bbox_center + (logical_pos - center) / scale
+	return {"x": raw.x, "y": raw.y}
 
 
 # ---------- HUD ----------
@@ -2182,6 +2713,8 @@ func _refresh_construction_hud() -> void:
 		_queue_sub.text = _planner_state_label()
 
 	_add_planner_line("Tool", _active_tool_label(), COLOR_ICE)
+	if _active_tool == TOOL_NODE or _active_tool == TOOL_GATE:
+		_add_planner_line("Snap", "%.0f-unit grid" % GRID_MICRO, COLOR_STEEL_2)
 	if not _route_train_id.is_empty():
 		_add_planner_line("Route Train", _route_train_id, COLOR_CYAN)
 		_add_planner_line("Origin", _node_display_name(_route_origin_id), COLOR_ICE)
@@ -2228,6 +2761,8 @@ func _active_tool_label() -> String:
 			return "Lay Rail"
 		TOOL_NODE:
 			return "Place Node"
+		TOOL_WIRE:
+			return "Wire Ports"
 		TOOL_GATE:
 			return "Gate Hub"
 		TOOL_TRAIN:
@@ -2254,6 +2789,8 @@ func _preview_kind_display(kind: String) -> String:
 			return "Route Schedule"
 		"gate_link":
 			return "Gate Link"
+		"internal_connection":
+			return "Internal Wire"
 		_:
 			return kind.capitalize()
 
@@ -2387,14 +2924,20 @@ func _add_normalized_command_details(command: Dictionary) -> void:
 			_add_planner_line("To", _node_display_name(str(command.get("destination", ""))), COLOR_ICE)
 			_add_planner_line("Cargo", str(command.get("cargo_type", "")).replace("_", " "), COLOR_AMBER_HOT)
 			_add_planner_line("Units", "%d every %d ticks" % [int(command.get("units_per_departure", 0)), int(command.get("interval_ticks", 0))], COLOR_STEEL_2)
+		"BuildInternalConnection":
+			_add_planner_line("Node", _node_display_name(str(command.get("node_id", ""))), COLOR_ICE)
+			_add_planner_line("From", "%s.%s" % [str(command.get("source_component_id", "")), str(command.get("source_port_id", ""))], COLOR_CYAN)
+			_add_planner_line("To", "%s.%s" % [str(command.get("destination_component_id", "")), str(command.get("destination_port_id", ""))], COLOR_CYAN)
 
 
 func _add_idle_planner_guidance() -> void:
 	match _active_tool:
 		TOOL_NODE:
-			_add_planner_note("Click an empty local tile, choose a node type, then confirm after backend preview.", COLOR_STEEL)
+			_add_planner_note("Click an empty grid tile, choose a node type, then confirm after backend preview.", COLOR_STEEL)
+		TOOL_WIRE:
+			_add_planner_note("Select a node with a facility, then drag an output port to an input port in the drill-in panel.", COLOR_STEEL)
 		TOOL_GATE:
-			_add_planner_note("Click empty local tile to preview a gate hub. Click an existing gate hub to preview an interworld gate link.", COLOR_STEEL)
+			_add_planner_note("Click an empty grid tile to preview a gate hub. Click an existing gate hub to preview an interworld gate link.", COLOR_STEEL)
 		TOOL_RAIL:
 			_add_planner_note("Click an origin node, then a destination node. Backend validates same-world rail and cost.", COLOR_STEEL)
 		TOOL_TRAIN:
@@ -2427,6 +2970,25 @@ func _add_node_inspection(node_id: String) -> void:
 	_add_planner_line("Id", str(node.get("id", node_id)), COLOR_STEEL_2)
 	_add_planner_line("Kind", _kind_display(str(node.get("kind", "node"))), COLOR_AMBER_HOT)
 	_add_planner_line("World", str(node.get("world_id", "—")), COLOR_STEEL_2)
+
+	var project_id = node.get("construction_project_id")
+	if project_id != null and str(project_id) != "":
+		_add_planner_line("Status", "Under Construction", COLOR_AMBER_HOT)
+		var projects: Array = _latest_snapshot.get("construction_projects", []) if typeof(_latest_snapshot.get("construction_projects")) == TYPE_ARRAY else []
+		for proj in projects:
+			if typeof(proj) == TYPE_DICTIONARY and str(proj.get("id", "")) == str(project_id):
+				var req: Dictionary = proj.get("required_cargo", {}) if typeof(proj.get("required_cargo")) == TYPE_DICTIONARY else {}
+				var deliv: Dictionary = proj.get("delivered_cargo", {}) if typeof(proj.get("delivered_cargo")) == TYPE_DICTIONARY else {}
+				var ckeys: Array = req.keys()
+				ckeys.sort()
+				for c in ckeys:
+					var r = int(req[c])
+					var d = int(deliv.get(c, 0))
+					var color = COLOR_OK if d >= r else COLOR_AMBER_HOT
+					var ratio = float(d) / float(r) if r > 0 else 1.0
+					_add_progress_bar(str(c).replace("_", " "), ratio, color)
+					_add_planner_note("  %d / %d units delivered" % [d, r], COLOR_STEEL_2)
+
 	var storage: Dictionary = node.get("storage", {}) if typeof(node.get("storage")) == TYPE_DICTIONARY else {}
 	if not storage.is_empty():
 		_add_planner_line("Storage", "%d / %d" % [int(storage.get("used", 0)), int(storage.get("capacity", 0))], COLOR_STEEL_2)
@@ -2462,9 +3024,130 @@ func _add_node_inspection(node_id: String) -> void:
 	var trains_here := _trains_at_node(node_id)
 	if not trains_here.is_empty():
 		_add_planner_line("Trains", ", ".join(trains_here), COLOR_CYAN)
+	var space_sites: Array = _latest_snapshot.get("space_sites", []) if typeof(_latest_snapshot.get("space_sites")) == TYPE_ARRAY else []
+	if not space_sites.is_empty() and str(node.get("kind", "")) == "spaceport":
+		_add_planner_line("Space Sites", "%d discovered" % space_sites.size(), COLOR_ICE)
+		for site in space_sites:
+			if typeof(site) != TYPE_DICTIONARY:
+				continue
+			var site_id := str(site.get("id", ""))
+			var sname := str(site.get("name", ""))
+			var sres := str(site.get("resource_id", "")).replace("_", " ")
+			var dist := int(site.get("travel_ticks", 0))
+			var row := HBoxContainer.new()
+			var lbl := Label.new()
+			lbl.text = "• %s (%s) · %d tk" % [sname, sres, dist]
+			lbl.add_theme_color_override("font_color", COLOR_STEEL)
+			lbl.add_theme_font_size_override("font_size", 10)
+			lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(lbl)
+			var btn := _make_hud_button("Launch", COLOR_CYAN)
+			btn.pressed.connect(func():
+				GateRailBridge.send_message({
+					"commands": [{
+						"type": "DispatchMiningMission",
+						"mission_id": "m_%d" % Time.get_ticks_msec(),
+						"site_id": site_id,
+						"launch_node_id": node_id,
+						"return_node_id": node_id
+					}],
+					"ticks": 0
+				})
+			)
+			row.add_child(btn)
+			_queue_list.add_child(row)
+
+	var missions: Array = _latest_snapshot.get("mining_missions", []) if typeof(_latest_snapshot.get("mining_missions")) == TYPE_ARRAY else []
+	var node_missions: Array = []
+	for mission in missions:
+		if typeof(mission) != TYPE_DICTIONARY:
+			continue
+		if str(mission.get("launch_node_id", "")) == node_id or str(mission.get("return_node_id", "")) == node_id:
+			node_missions.append(mission)
+
+	if not node_missions.is_empty():
+		_add_planner_line("Missions", "%d active" % node_missions.size(), COLOR_CYAN)
+		for mission in node_missions:
+			var mstatus := str(mission.get("status", "unknown")).replace("_", " ")
+			var ms_ticks := int(mission.get("ticks_remaining", 0))
+			_add_planner_note("• %s · %s · %dtk left" % [str(mission.get("id", "")), mstatus, ms_ticks], COLOR_STEEL_2)
+
 	var links_here := _link_ids_touching(node_id)
 	if not links_here.is_empty():
 		_add_planner_line("Links", ", ".join(links_here), COLOR_STEEL_2)
+
+	_add_facility_inspection(node)
+
+
+func _add_facility_inspection(node: Dictionary) -> void:
+	var facility: Dictionary = node.get("facility", {}) if typeof(node.get("facility")) == TYPE_DICTIONARY else {}
+	if facility.is_empty():
+		return
+
+	_add_planner_line("Facility", "Industrial Complex", COLOR_ICE)
+	var power := int(facility.get("power_required", 0))
+	if power > 0:
+		_add_planner_line("  Power Draw", "%d MW" % power, COLOR_AMBER_HOT)
+
+	var storage := int(facility.get("storage_capacity_override", 0))
+	if storage > 0:
+		_add_planner_line("  Storage+", "+%d units" % storage, COLOR_OK)
+
+	var components: Array = facility.get("components", []) if typeof(facility.get("components")) == TYPE_ARRAY else []
+	var blocked: Array = node.get("facility_blocked", []) if typeof(node.get("facility_blocked")) == TYPE_ARRAY else []
+
+	for comp in components:
+		if typeof(comp) != TYPE_DICTIONARY: continue
+		var cid := str(comp.get("id", ""))
+		var kind := str(comp.get("kind", "")).replace("_", " ").capitalize()
+		var is_blocked := cid in blocked
+
+		var color := COLOR_ERR if is_blocked else COLOR_OK
+		_add_planner_line("  • " + kind, cid, color)
+
+		var inputs: Dictionary = comp.get("inputs", {}) if typeof(comp.get("inputs")) == TYPE_DICTIONARY else {}
+		if not inputs.is_empty():
+			var iparts: Array = []
+			for k in inputs.keys():
+				iparts.append("%s %d" % [str(k).replace("_", " "), int(inputs[k])])
+			_add_planner_note("    In: " + ", ".join(iparts), COLOR_STEEL)
+
+		var outputs: Dictionary = comp.get("outputs", {}) if typeof(comp.get("outputs")) == TYPE_DICTIONARY else {}
+		if not outputs.is_empty():
+			var oparts: Array = []
+			for k in outputs.keys():
+				oparts.append("%s %d" % [str(k).replace("_", " "), int(outputs[k])])
+			_add_planner_note("    Out: " + ", ".join(oparts), COLOR_OK)
+
+		var ports: Array = comp.get("ports", []) if typeof(comp.get("ports")) == TYPE_ARRAY else []
+		if not ports.is_empty():
+			var pparts: Array = []
+			for p in ports:
+				if typeof(p) != TYPE_DICTIONARY: continue
+				var pd := "IN" if str(p.get("direction")) == "input" else "OUT"
+				var pc := str(p.get("cargo", "all")).replace("_", " ")
+				var inv: Dictionary = p.get("inventory", {}) if typeof(p.get("inventory")) == TYPE_DICTIONARY else {}
+				var inv_text := ""
+				if not inv.is_empty():
+					inv_text = " [%s]" % _format_top_cargo(inv, 1)
+				pparts.append("%s %s%s" % [pd, pc, inv_text])
+			_add_planner_note("    Ports: " + ", ".join(pparts), COLOR_STEEL_2)
+
+	var connections: Array = facility.get("connections", []) if typeof(facility.get("connections")) == TYPE_ARRAY else []
+	if not connections.is_empty():
+		_add_planner_line("  Wires", "%d internal" % connections.size(), COLOR_CYAN)
+		for connection in connections:
+			if typeof(connection) != TYPE_DICTIONARY:
+				continue
+			_add_planner_note(
+				"    %s.%s -> %s.%s" % [
+					str(connection.get("source_component_id", "")),
+					str(connection.get("source_port_id", "")),
+					str(connection.get("destination_component_id", "")),
+					str(connection.get("destination_port_id", "")),
+				],
+				COLOR_STEEL_2,
+			)
 
 
 func _add_link_inspection(link_id: String) -> void:
@@ -2549,7 +3232,7 @@ func _on_preview_confirm_pressed() -> void:
 	if _pending_build_command.is_empty():
 		return
 	var command_type := str(_pending_build_command.get("type", ""))
-	var color := COLOR_CYAN if command_type in ["PurchaseTrain", "CreateSchedule"] else COLOR_AMBER_HOT
+	var color := COLOR_CYAN if command_type in ["PurchaseTrain", "CreateSchedule", "BuildInternalConnection"] else COLOR_AMBER_HOT
 	_send_pending_build(_pending_commit_status(), color)
 	if command_type == "CreateSchedule":
 		_clear_route_builder()
@@ -2560,6 +3243,7 @@ func _on_preview_confirm_pressed() -> void:
 func _on_preview_cancel_pressed() -> void:
 	_clear_pending_preview()
 	_clear_route_builder()
+	_clear_wire_builder()
 	_set_status_text("%s · preview cancelled" % _active_tool_label().to_upper(), COLOR_STEEL)
 	if _canvas_panel != null:
 		_canvas_panel.queue_redraw()
@@ -2578,6 +3262,13 @@ func _pending_commit_status() -> String:
 			return "Purchasing train at %s..." % str(_pending_build_command.get("node_id", ""))
 		"CreateSchedule":
 			return "Creating schedule %s..." % str(_pending_build_command.get("schedule_id", "route"))
+		"BuildInternalConnection":
+			return "Wiring %s.%s -> %s.%s..." % [
+				str(_pending_build_command.get("source_component_id", "")),
+				str(_pending_build_command.get("source_port_id", "")),
+				str(_pending_build_command.get("destination_component_id", "")),
+				str(_pending_build_command.get("destination_port_id", "")),
+			]
 		_:
 			return "Committing preview..."
 
@@ -2601,6 +3292,35 @@ func _add_planner_line(label_text: String, value_text: String, value_color: Colo
 	value.add_theme_font_size_override("font_size", 10)
 	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(value)
+
+
+func _add_progress_bar(label_text: String, ratio: float, color: Color) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_queue_list.add_child(row)
+
+	var label := Label.new()
+	label.text = label_text
+	label.add_theme_color_override("font_color", COLOR_STEEL)
+	label.add_theme_font_size_override("font_size", 10)
+	label.custom_minimum_size = Vector2(82, 0)
+	row.add_child(label)
+
+	var bar := ProgressBar.new()
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.custom_minimum_size = Vector2(0, 8)
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.value = ratio
+
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = COLOR_BG_1
+	var fg := StyleBoxFlat.new()
+	fg.bg_color = color
+	bar.add_theme_stylebox_override("background", bg)
+	bar.add_theme_stylebox_override("fill", fg)
+	row.add_child(bar)
 
 
 func _add_planner_note(text: String, color: Color) -> void:
@@ -2695,7 +3415,7 @@ func _build_statusbar() -> void:
 	row.add_child(_statusbar_mode_chip)
 
 	var hotkeys := Label.new()
-	hotkeys.text = "  R rail · N node · G gate · X demolish · SHIFT straight · ESC cancel"
+	hotkeys.text = "  R rail · N node · C wire · G gate · X demolish · WASD/arrows pan · MMB drag · wheel zoom · HOME reset · ESC cancel"
 	hotkeys.add_theme_color_override("font_color", COLOR_STEEL)
 	hotkeys.add_theme_font_size_override("font_size", 11)
 	hotkeys.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2739,8 +3459,9 @@ func _update_status_mode_chip() -> void:
 		TOOL_SELECT: text = "SELECT · click to inspect"
 		TOOL_PAN: text = "PAN · drag to move view"
 		TOOL_RAIL: text = "RAIL MODE · drag from source node"; color = COLOR_AMBER_HOT
-		TOOL_NODE: text = "PLACE NODE · click empty tile"; color = COLOR_AMBER_HOT
-		TOOL_GATE: text = "GATE HUB · requires clear platform"; color = COLOR_AMBER_HOT
+		TOOL_NODE: text = "PLACE NODE · 24-unit grid snap"; color = COLOR_AMBER_HOT
+		TOOL_WIRE: text = "WIRE PORTS · drag output to input"; color = COLOR_CYAN
+		TOOL_GATE: text = "GATE HUB · 24-unit grid snap"; color = COLOR_AMBER_HOT
 		TOOL_TRAIN: text = "PURCHASE TRAIN · assign to route"; color = COLOR_CYAN
 		TOOL_DEMOLISH: text = "DEMOLISH · click node or link"; color = COLOR_ERR
 		TOOL_LAYERS: text = "LAYERS · toggle overlays"; color = COLOR_CYAN
@@ -2829,6 +3550,8 @@ func _handle_command_result(result: Dictionary) -> void:
 			_handle_preview_result(result, "train")
 		"PreviewCreateSchedule":
 			_handle_preview_result(result, "schedule")
+		"PreviewBuildInternalConnection":
+			_handle_preview_result(result, "internal_connection")
 		"BuildNode", "BuildLink":
 			var ok := bool(result.get("ok", false))
 			if ok:
@@ -2849,6 +3572,11 @@ func _handle_command_result(result: Dictionary) -> void:
 				_clear_pending_preview()
 				_clear_route_builder()
 				_set_status_text("ROUTE · %s" % str(result.get("message", "schedule created")), COLOR_OK)
+		"BuildInternalConnection":
+			if bool(result.get("ok", false)):
+				_clear_pending_preview()
+				_clear_wire_builder()
+				_set_status_text("WIRE · %s" % str(result.get("message", "ports connected")), COLOR_OK)
 
 
 func _handle_preview_result(result: Dictionary, preview_kind: String) -> void:

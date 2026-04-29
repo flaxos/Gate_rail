@@ -721,9 +721,48 @@ Slice 19 completed state:
 - 5 new tests in `tests/test_sprint19_gate_power_resources.py` cover resource-gated power recovery, support persistence/snapshots, CLI report text, non-gate validation, and unknown resource validation.
 - Full pytest suite passes 213 tests after the Sprint 19 resource-backed gate-power slice.
 
+Sprint 19B / 20A power-generation foundation completed state:
+- `PowerPlantKind` and `PowerPlant` add backend-owned thermal/fission/fusion generation metadata attached to a logistics node, with resource inputs, output, active state, and validation for node ownership and resource ids.
+- `WorldState.power_generated_this_tick` separates generated power from static `power_available`, and `base_power_margin` now includes generated power before gate reservations.
+- `power.apply_power_plants()` runs before `gate_power`, consumes required resource inputs, records missing-input blockers, and adds generated power to the owning world for the current tick.
+- The `sprint19b` / `power_generation` scenario adds a carbon-fed thermal plant that raises Brink Frontier's effective power enough to run `gate_frontier_outer`.
+- Save/load, snapshots, scenario inspection, tick reports, and CLI `--report power` now expose power plants, generated power, input consumption, and plant blockers.
+- 5 new tests in `tests/test_sprint19b_power_generation.py` cover generated power gating, missing-input blockers, persistence/snapshots, validation, and CLI power/gate reporting.
+- Full pytest suite passes 224 tests after the power-generation foundation slice.
+
+R19 rail sidecar first-slice completed state:
+- `TrackSignalKind` and `TrackSignal` add backend-owned stop/path signal metadata on rail-link endpoints, with validation that signals only protect rail links and optional signal nodes are link endpoints.
+- Active signals now turn a rail link into a protected block. Freight dispatch checks those blocks inside the existing route-capacity reservation path before loading cargo, so blocked trains queue without consuming inventory.
+- The first block model is intentionally conservative: one signaled link is one block, and in-transit trains keep that block occupied until arrival. Junction/path routing depth remains a future slice.
+- `BuildTrackSignal` and `PreviewBuildTrackSignal` expose signal placement through the JSON command surface, and demolition refuses links that still own track signals.
+- Save/load, render snapshots, scenario inspection, tick reports, traffic alerts, and freight queued events now expose signal ids, protected blocks, occupiers, reservations, and signal-block reasons.
+- 6 new tests in `tests/test_sprint19_signals_blocks.py` cover signaled block queueing, unchanged unsignaled capacity behavior, in-transit occupancy, command/persistence/snapshot contracts, text reporting, and non-rail validation.
+- Full pytest suite passes 219 tests after the R19 signal/block sidecar slice.
+
+Sprint 21C map/wiki foundation completed state:
+- `godot/scripts/local_region.gd` now makes node and gate-hub placement snap explicit in the 2D local map: empty gate-hub placement uses the snapped coordinate, the snap cursor highlights the active 24-unit grid cell, and the build planner/status chip show the grid rule.
+- `docs/resource_relationship_atlas.md` adds a text-first relationship atlas for raw sources, processors, assemblers, power plants, gate support, gate links, spaceports, and remote extraction sites. This replaces the requested HTML page to respect the repository rule against browser interfaces.
+- The atlas is hand-authored for this slice and marks a later CLI-generated catalog as the natural follow-up.
+
+Sprint 21D internal wiring completed state:
+- Facility components now own per-port cargo buffers, and internal connections move cargo from source output ports or shared facility stock into specific destination input ports before factory processing.
+- Factory blocks with input ports consume from those wired port buffers; legacy factory blocks without ports still use node inventory directly.
+- Factory output ports can buffer produced cargo and push it through downstream internal connections in the same tick, while full output ports block the component without consuming inputs.
+- Save/load and render snapshots include port inventory, so the client can show where cargo is stuck inside a facility.
+- The Godot Local Region adds a Wire Ports tool and a selected-node facility drill-in panel that renders components, ports, existing internal wires, drag-to-connect preview lines, port inventories, and blocked components.
+- 4 new tests in `tests/test_sprint21d_internal_wiring.py` cover wired input transfer, output transfer, full-output blockers, persistence, and snapshot exposure.
+- Full pytest suite passes 230 tests after the 21D internal-wiring slice.
+
 ## Current next step
 
-Sprint 20 should add remote extraction and outpost logistics:
+Sprint 21 should continue the 2D facility and industry diagnostic pass now that remote extraction, signal/block, and power-generation foundations have enough backend state to inspect:
+- deepen node drill-in cards for facility components, resource recipes, power plants, gate support, space sites, and active mining missions
+- add backend-preview UI for facility components without duplicating simulation rules in Godot
+- add local rail planning tools for curved alignments, waypoint edits, branches, signals, protected blocks, vacuum-tube portals, and cargo/consist compatibility
+- add overlays that connect resource-chain blockers, plant fuel blockers, gate power blockers, construction needs, and branch-pressure warnings
+- convert the hand-authored relationship atlas into a CLI-generated report once the catalog and scenario relationships stabilize
+
+Sprint 20 remote extraction and outpost logistics remains the backend dependency stack for this UI work:
 - add remote resource sites such as asteroid fields, moons, debris fields, gas pockets, or anomalies, with resource ids, yield metadata, travel time, and discovery state
 - add fixed-tick mining missions that require launch/return nodes, travel time, fuel or power inputs, and deterministic returned resources
 - add orbital or collection-station nodes/projects that connect returned resources to the rail/gate industry chain

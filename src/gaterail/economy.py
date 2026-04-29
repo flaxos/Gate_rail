@@ -351,6 +351,8 @@ def apply_node_production(state: GameState) -> dict[str, dict[CargoType, int]]:
 
     produced: dict[str, dict[CargoType, int]] = {}
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         for cargo_type, units in sorted(node.production.items(), key=lambda item: item[0].value):
             accepted = node.add_inventory(cargo_type, units)
             if accepted > 0:
@@ -371,6 +373,8 @@ def apply_node_recipes(state: GameState) -> dict[str, object]:
     blocked_by_node: dict[str, dict[CargoType, int]] = {}
 
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         recipe = node.recipe
         if recipe is None:
             continue
@@ -416,6 +420,8 @@ def apply_node_demand(state: GameState) -> DemandResult:
     consumed: dict[str, dict[CargoType, int]] = {}
     shortages: dict[str, dict[CargoType, int]] = {}
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         for cargo_type, required in sorted(node.demand.items(), key=lambda item: item[0].value):
             if required <= 0:
                 continue
@@ -465,6 +471,8 @@ def apply_buffer_distribution(state: GameState) -> dict[str, dict[str, dict[Carg
 
     distribution: dict[str, dict[str, dict[CargoType, int]]] = {}
     for node_id, node in sorted(state.nodes.items()):
+        if node.construction_project_id is not None:
+            continue
         if node.kind not in BUFFER_NODE_KINDS:
             continue
         if node.transfer_limit_per_tick <= 0:

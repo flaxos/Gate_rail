@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from gaterail.cargo import CargoType
+from gaterail.construction import apply_construction_projects
 from gaterail.contracts import advance_contracts
 from gaterail.economy import (
     apply_buffer_distribution,
@@ -14,11 +15,12 @@ from gaterail.economy import (
     apply_specialized_production,
     update_transfer_saturation_streaks,
 )
-from gaterail.facilities import apply_facility_components
+from gaterail.facilities import apply_facility_components, apply_facility_power
 from gaterail.freight import advance_freight
 from gaterail.gate import evaluate_gate_power
 from gaterail.models import GameState, GatePowerStatus, LinkMode
 from gaterail.operations import build_monthly_report
+from gaterail.power import apply_power_plants
 from gaterail.progression import apply_world_progression
 from gaterail.resource_chains import (
     apply_resource_distribution,
@@ -27,7 +29,8 @@ from gaterail.resource_chains import (
     resource_branch_pressure,
 )
 from gaterail.scenarios import DEFAULT_SCENARIO, load_scenario
-from gaterail.traffic import build_traffic_report, reset_traffic_usage
+from gaterail.space import advance_mining_missions
+from gaterail.traffic import build_signal_report, build_traffic_report, reset_traffic_usage
 
 
 def _plain_cargo_map(mapping: dict[CargoType, int]) -> dict[str, int]:
@@ -132,6 +135,15 @@ class TickSimulation:
         resource_recipes_result = apply_resource_recipes(self.state)
         phase_order.append("resource_recipes")
 
+        space_missions_result = advance_mining_missions(self.state)
+        phase_order.append("space_missions")
+
+        construction_result = apply_construction_projects(self.state)
+        phase_order.append("construction_projects")
+
+        facility_power_result = apply_facility_power(self.state)
+        phase_order.append("facility_power")
+
         facilities_result = apply_facility_components(self.state)
         phase_order.append("facility_components")
 
@@ -140,6 +152,9 @@ class TickSimulation:
 
         economy_result = apply_specialized_production(self.state)
         phase_order.append("specialized_production")
+
+        power_generation_result = apply_power_plants(self.state)
+        phase_order.append("power_generation")
 
         gate_result = evaluate_gate_power(self.state)
         gate_power_cost = sum(status.power_required for status in gate_result.values() if status.powered) * 0.5
@@ -160,6 +175,9 @@ class TickSimulation:
 
         traffic_result = build_traffic_report(self.state)
         phase_order.append("traffic_report")
+
+        signal_result = build_signal_report(self.state)
+        phase_order.append("signal_report")
 
         progression_result = apply_world_progression(self.state)
         phase_order.append("world_progression")
@@ -186,10 +204,15 @@ class TickSimulation:
                 "recipes": resource_recipes_result,
                 "branch_pressure": resource_branch_pressure(self.state),
             },
+            "space_missions": space_missions_result,
+            "construction_projects": construction_result,
+            "facility_power": facility_power_result,
             "facilities": facilities_result,
             "economy": economy_result,
+            "power_generation": power_generation_result,
             "gates": _plain_gate_status_map(gate_result),
             "traffic": traffic_result,
+            "signals": signal_result,
             "freight": freight_result,
             "contracts": contracts_result,
             "progression": progression_result,
@@ -204,6 +227,7 @@ class TickSimulation:
                 "unpowered_gate_links": sum(1 for status in gate_result.values() if not status.powered),
                 "trains": len(self.state.trains),
                 "orders": len(self.state.orders),
+                "generated_power": sum(world.power_generated_this_tick for world in self.state.worlds.values()),
                 "gate_power_required": sum(
                     status.power_required for status in gate_result.values() if status.powered
                 ),

@@ -23,7 +23,7 @@ def test_cli_lists_scenarios_and_marks_sprint8_default() -> None:
 
     text = output.getvalue()
     assert result == 0
-    assert "sprint8 default: Playability Pass" in text
+    assert "sprint20 default:" in text
     assert "aliases: playtest, benchmark, balanced" in text
 
 

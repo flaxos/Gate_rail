@@ -38,6 +38,102 @@ def _block_train(events: FreightReport, train: FreightTrain, reason: str) -> Non
     events["blocked"].append({"train": train.name, "reason": reason})
 
 
+def _reset_empty_blocked_trains(state: GameState) -> None:
+    """Let empty blocked trains retry dispatch checks on a later tick."""
+
+    for train in state.trains.values():
+        if train.status == TrainStatus.BLOCKED and train.cargo_units <= 0:
+            train.status = TrainStatus.IDLE
+            train.blocked_reason = None
+
+
+def _platform_limit_for_node(state: GameState, node_id: str) -> int | None:
+    """Return the active platform concurrency limit for a node, if any."""
+
+    facility = state.nodes[node_id].facility
+    if facility is None:
+        return None
+    return facility.platform_concurrent_loading_limit()
+
+
+def _platform_has_room(state: GameState, node_id: str) -> bool:
+    """Return whether a node has platform room for another load/unload operation."""
+
+    limit = _platform_limit_for_node(state, node_id)
+    if limit is None:
+        return True
+    return int(state.platform_loading_this_tick.get(node_id, 0)) < limit
+
+
+def _reserve_platform_slot(state: GameState, node_id: str) -> None:
+    """Record one load/unload operation against platform concurrency."""
+
+    if _platform_limit_for_node(state, node_id) is None:
+        return
+    state.platform_loading_this_tick[node_id] = int(state.platform_loading_this_tick.get(node_id, 0)) + 1
+
+
+def _block_for_platform_capacity(
+    state: GameState,
+    events: FreightReport,
+    train: FreightTrain,
+    *,
+    node_id: str,
+    direction: str,
+) -> None:
+    """Block a train because all facility platform slots are occupied this tick."""
+
+    train.status = TrainStatus.BLOCKED
+    train.blocked_reason = "platform_capacity"
+    state.platform_queue_depth_this_tick[node_id] = int(
+        state.platform_queue_depth_this_tick.get(node_id, 0)
+    ) + 1
+    event = {
+        "node": node_id,
+        "train": train.name,
+        "reason": "platform_capacity",
+        "direction": direction,
+    }
+    events["freight_blocked"].append(event)
+    events["blocked"].append({"train": train.name, "reason": "platform_capacity"})
+
+
+def _remaining_loader_capacity(state: GameState, node_id: str) -> tuple[int, int]:
+    """Return total and remaining loader capacity for a node this tick."""
+
+    node = state.nodes[node_id]
+    total = max(0, node.effective_outbound_rate())
+    if node.facility is None or node.facility.loader_rate_override() is None:
+        return total, total
+    used = int(state.freight_loader_used_this_tick.get(node_id, 0))
+    return total, max(0, total - used)
+
+
+def _remaining_unloader_capacity(state: GameState, node_id: str) -> tuple[int, int]:
+    """Return total and remaining unloader capacity for a node this tick."""
+
+    node = state.nodes[node_id]
+    total = max(0, node.effective_inbound_rate())
+    if node.facility is None or node.facility.unloader_rate_override() is None:
+        return total, total
+    used = int(state.freight_unloader_used_this_tick.get(node_id, 0))
+    return total, max(0, total - used)
+
+
+def _uses_loader_budget(state: GameState, node_id: str) -> bool:
+    """Return whether loader capacity should be shared across the tick."""
+
+    node = state.nodes[node_id]
+    return node.facility is not None and node.facility.loader_rate_override() is not None
+
+
+def _uses_unloader_budget(state: GameState, node_id: str) -> bool:
+    """Return whether unloader capacity should be shared across the tick."""
+
+    node = state.nodes[node_id]
+    return node.facility is not None and node.facility.unloader_rate_override() is not None
+
+
 def _finish_order_if_complete(order: FreightOrder) -> None:
     """Deactivate one-shot orders when their requested volume has arrived."""
 
@@ -62,13 +158,34 @@ def _attempt_unload(state: GameState, events: FreightReport, train: FreightTrain
         return
 
     destination = state.nodes[train.node_id]
-    transfer_limit = max(0, destination.effective_inbound_rate())
-    attempted = min(train.cargo_units, transfer_limit)
+    if not _platform_has_room(state, destination.id):
+        _block_for_platform_capacity(
+            state,
+            events,
+            train,
+            node_id=destination.id,
+            direction="unload",
+        )
+        return
+
+    _effective_unloader_rate, remaining_unloader_rate = _remaining_unloader_capacity(
+        state,
+        destination.id,
+    )
+    attempted = min(train.cargo_units, remaining_unloader_rate)
+    if attempted <= 0:
+        _block_train(events, train, f"unload limit reached at {destination.id}")
+        return
     accepted = destination.add_inventory(train.cargo_type, attempted)
     if accepted <= 0:
         _block_train(events, train, f"storage full at {destination.id}")
         return
 
+    if _uses_unloader_budget(state, destination.id):
+        state.freight_unloader_used_this_tick[destination.id] = (
+            int(state.freight_unloader_used_this_tick.get(destination.id, 0)) + accepted
+        )
+    _reserve_platform_slot(state, destination.id)
     record_transfer(state, destination.id, accepted)
     train.cargo_units -= accepted
     order_id = train.order_id
@@ -179,19 +296,40 @@ def _dispatch_trip(
         return False
 
     origin = state.nodes[origin_id]
-    load_limit = max(0, origin.effective_outbound_rate())
-    planned_units = min(train.capacity, requested_units, load_limit, origin.stock(cargo_type))
-    if planned_units <= 0:
-        events["blocked"].append(
-            {
-                "train": train.name,
-                "order": service_id,
-                "reason": f"no {cargo_type.value} at {origin.id}",
-            }
+    if not _platform_has_room(state, origin_id):
+        _block_for_platform_capacity(
+            state,
+            events,
+            train,
+            node_id=origin_id,
+            direction="load",
         )
         return False
 
-    reservation = reserve_route_capacity(state, route.link_ids)
+    effective_loader_rate, remaining_loader_rate = _remaining_loader_capacity(state, origin_id)
+    uncapped_units = min(train.capacity, requested_units, origin.stock(cargo_type))
+    planned_units = min(uncapped_units, remaining_loader_rate)
+    if planned_units <= 0:
+        reason = (
+            f"loader capacity reached at {origin.id}"
+            if uncapped_units > 0
+            else f"no {cargo_type.value} at {origin.id}"
+        )
+        events["blocked"].append({"train": train.name, "order": service_id, "reason": reason})
+        if uncapped_units > 0:
+            train.status = TrainStatus.BLOCKED
+            train.blocked_reason = "loader_capacity"
+            events["freight_blocked"].append(
+                {
+                    "node": origin_id,
+                    "train": train.name,
+                    "reason": "loader_capacity",
+                    "direction": "load",
+                }
+            )
+        return False
+
+    reservation = reserve_route_capacity(state, route.link_ids, train_id=train.id)
     if not reservation.reserved:
         reason = reservation.reason or "route capacity unavailable"
         event = {
@@ -214,6 +352,22 @@ def _dispatch_trip(
 
     loaded = origin.remove_inventory(cargo_type, planned_units)
     record_transfer(state, origin.id, loaded)
+    if _uses_loader_budget(state, origin_id):
+        state.freight_loader_used_this_tick[origin_id] = (
+            int(state.freight_loader_used_this_tick.get(origin_id, 0)) + loaded
+        )
+    _reserve_platform_slot(state, origin_id)
+    if _uses_loader_budget(state, origin_id) and loaded < uncapped_units and loaded == remaining_loader_rate:
+        events["loader_capped"].append(
+            {
+                "node": origin_id,
+                "train": train.name,
+                "cargo": cargo_type.value,
+                "requested_units": requested_units,
+                "loaded_units": loaded,
+                "effective_loader_rate": effective_loader_rate,
+            }
+        )
 
     train.status = TrainStatus.IN_TRANSIT
     train.cargo_type = cargo_type
@@ -297,12 +451,19 @@ def _dispatch_ready_schedules(state: GameState, events: FreightReport) -> None:
 def advance_freight(state: GameState) -> FreightReport:
     """Advance all train movement and dispatch ready freight orders."""
 
+    _reset_empty_blocked_trains(state)
+    state.platform_loading_this_tick = {}
+    state.platform_queue_depth_this_tick = {}
+    state.freight_loader_used_this_tick = {}
+    state.freight_unloader_used_this_tick = {}
     events: FreightReport = {
         "dispatches": [],
         "in_transit": [],
         "deliveries": [],
         "blocked": [],
         "queued": [],
+        "loader_capped": [],
+        "freight_blocked": [],
         "trains": [],
     }
     _advance_active_trains(state, events)
