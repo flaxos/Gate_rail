@@ -7,13 +7,17 @@ const UI_MARGIN := 16.0
 const UI_GAP := 14.0
 const LEFT_PANEL_WIDTH := 560.0
 const RIGHT_PANEL_WIDTH := 500.0
-const CONTROL_PANEL_HEIGHT := 320.0
+const CONTROL_PANEL_HEIGHT := 392.0
 const ALERT_STRIP_HEIGHT := 46.0
 const MIN_CENTER_MAP_WIDTH := 360.0
 const MAP_INSET := Vector2(92, 96)
 const MAX_ALERT_HISTORY := 8
 const MAX_ALERT_MESSAGE_LENGTH := 86
-const AUTO_STEP_INTERVAL := 0.75
+const PLAYTEST_SCENARIOS := [
+	"early_build",
+	"sprint20",
+	"industrial_expansion",
+]
 const TRAIN_PICK_RADIUS := 18.0
 const NODE_PICK_RADIUS := 18.0
 const WORLD_PICK_RADIUS := 52.0
@@ -68,6 +72,8 @@ var _hud_cash_value: Label
 var _hud_reputation_value: Label
 var _bridge_status_value: Label
 var _bridge_source_value: Label
+var _save_path_edit: LineEdit
+var _scenario_select: OptionButton
 var _schedule_filter: LineEdit
 var _schedule_sort: OptionButton
 var _error_label: Label
@@ -88,7 +94,6 @@ var _dispatch_cargo: OptionButton
 var _dispatch_units: SpinBox
 var _dispatch_priority: SpinBox
 var _alert_history: Array = []
-var _auto_step_timer: Timer
 var _auto_running := false
 var _auto_step_pending := false
 var _bridge_running := false
@@ -108,11 +113,11 @@ func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color(0.055, 0.075, 0.08, 1.0))
 	_load_placeholder_assets()
 	_build_ui()
-	_build_auto_step_timer()
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
 	GateRailBridge.snapshot_received.connect(_on_snapshot_received)
 	GateRailBridge.bridge_error.connect(_on_bridge_error)
 	GateRailBridge.bridge_status_changed.connect(_on_bridge_status_changed)
+	GateRailBridge.auto_run_changed.connect(_on_bridge_auto_run_changed)
 
 	var fixture := GateRailBridge.load_fixture_snapshot()
 	if not fixture.is_empty():
@@ -227,6 +232,46 @@ func _build_control_panel(ui: CanvasLayer) -> void:
 	_set_button_icon(_play_button, "ui_play.svg")
 	_play_button.pressed.connect(_on_play_pause_pressed)
 	row.add_child(_play_button)
+
+	var scenario_row := HBoxContainer.new()
+	scenario_row.add_theme_constant_override("separation", 8)
+	box.add_child(scenario_row)
+
+	var scenario_label := Label.new()
+	scenario_label.text = "Scenario"
+	scenario_label.custom_minimum_size = Vector2(66, 0)
+	scenario_row.add_child(scenario_label)
+
+	_scenario_select = OptionButton.new()
+	_scenario_select.custom_minimum_size = Vector2(190, 0)
+	for scenario_id in PLAYTEST_SCENARIOS:
+		_scenario_select.add_item(str(scenario_id))
+	scenario_row.add_child(_scenario_select)
+
+	var load_scenario_button := Button.new()
+	load_scenario_button.text = "Load Scenario"
+	load_scenario_button.pressed.connect(_on_load_scenario_pressed)
+	scenario_row.add_child(load_scenario_button)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 8)
+	box.add_child(save_row)
+
+	_save_path_edit = LineEdit.new()
+	_save_path_edit.text = GateRailBridge.last_save_path
+	_save_path_edit.placeholder_text = "save slot or path"
+	_save_path_edit.custom_minimum_size = Vector2(244, 0)
+	save_row.add_child(_save_path_edit)
+
+	var save_button := Button.new()
+	save_button.text = "Save Game"
+	save_button.pressed.connect(_on_save_game_pressed)
+	save_row.add_child(save_button)
+
+	var load_button := Button.new()
+	load_button.text = "Load Game"
+	load_button.pressed.connect(_on_load_game_pressed)
+	save_row.add_child(load_button)
 
 	_error_label = Label.new()
 	_error_label.text = "Fixture snapshot loaded until live bridge responds."
@@ -406,14 +451,6 @@ func _build_alert_strip(ui: CanvasLayer) -> void:
 	_rebuild_alert_strip()
 
 
-func _build_auto_step_timer() -> void:
-	_auto_step_timer = Timer.new()
-	_auto_step_timer.wait_time = AUTO_STEP_INTERVAL
-	_auto_step_timer.one_shot = false
-	_auto_step_timer.timeout.connect(_on_auto_step_timeout)
-	add_child(_auto_step_timer)
-
-
 func _on_viewport_size_changed() -> void:
 	_layout_ui()
 	_rebuild_positions()
@@ -539,7 +576,8 @@ func _add_spin_row(
 
 func _on_snapshot_received(next_snapshot: Dictionary) -> void:
 	snapshot = next_snapshot
-	_auto_step_pending = false
+	_auto_running = GateRailBridge.is_auto_running()
+	_auto_step_pending = GateRailBridge.is_auto_step_pending()
 	_ingest_bridge_command_results()
 	_rebuild_positions()
 	_update_hud()
@@ -559,11 +597,8 @@ func _on_snapshot_received(next_snapshot: Dictionary) -> void:
 func _on_bridge_error(message: String) -> void:
 	_error_label.text = "Bridge: %s" % message
 	_auto_step_pending = false
-	if _auto_running:
-		_auto_running = false
-		if _auto_step_timer != null:
-			_auto_step_timer.stop()
-		_update_play_controls()
+	_auto_running = GateRailBridge.is_auto_running()
+	_update_play_controls()
 	_push_alert("bridge_error", message)
 
 
@@ -572,6 +607,13 @@ func _on_bridge_status_changed(running: bool) -> void:
 	_update_bridge_label()
 	if running:
 		_error_label.text = "Bridge running; waiting for snapshot..."
+
+
+func _on_bridge_auto_run_changed(running: bool) -> void:
+	_auto_running = running
+	_auto_step_pending = GateRailBridge.is_auto_step_pending()
+	_error_label.text = "Auto-run started." if running else "Auto-run paused."
+	_update_play_controls()
 
 
 func _request_live_snapshot() -> void:
@@ -586,40 +628,131 @@ func _on_step_pressed() -> void:
 
 
 func _on_play_pause_pressed() -> void:
-	_auto_running = not _auto_running
-	_auto_step_pending = false
-	if _auto_running:
-		_error_label.text = "Auto-run started."
-		if _auto_step_timer != null:
-			_auto_step_timer.start()
-	else:
-		_error_label.text = "Auto-run paused."
-		if _auto_step_timer != null:
-			_auto_step_timer.stop()
+	GateRailBridge.set_auto_running(not GateRailBridge.is_auto_running())
+	_auto_running = GateRailBridge.is_auto_running()
+	_auto_step_pending = GateRailBridge.is_auto_step_pending()
 	_update_play_controls()
-
-
-func _on_auto_step_timeout() -> void:
-	if not _auto_running or _auto_step_pending:
-		return
-	_error_label.text = "Auto-running tick %s..." % [int(snapshot.get("tick", 0)) + 1]
-	if GateRailBridge.step_ticks(1):
-		_auto_step_pending = true
-	else:
-		_auto_running = false
-		_auto_step_pending = false
-		if _auto_step_timer != null:
-			_auto_step_timer.stop()
-		_update_play_controls()
 
 
 func _on_refresh_pressed() -> void:
 	_request_live_snapshot()
 
 
+func _save_path_text() -> String:
+	var path := GateRailBridge.last_save_path
+	if _save_path_edit != null:
+		path = _save_path_edit.text.strip_edges()
+	path = GateRailBridge.normalize_save_path(path)
+	if _save_path_edit != null:
+		_save_path_edit.text = path
+	return path
+
+
+func _on_save_game_pressed() -> void:
+	var path := _save_path_text()
+	_error_label.text = "Saving game to %s..." % path
+	GateRailBridge.save_game(path, 0)
+
+
+func _on_load_game_pressed() -> void:
+	var path := _save_path_text()
+	GateRailBridge.set_auto_running(false)
+	_error_label.text = "Loading game from %s..." % path
+	GateRailBridge.load_game(path, 0)
+
+
+func _on_load_scenario_pressed() -> void:
+	var scenario_id := _selected_option_text(_scenario_select)
+	if scenario_id.is_empty():
+		_error_label.text = "Choose a scenario first."
+		return
+	GateRailBridge.set_auto_running(false)
+	_error_label.text = "Loading scenario %s..." % scenario_id
+	GateRailBridge.load_scenario(scenario_id, 0)
+
+
 func _on_schedule_toggle_pressed(schedule_id: String, enabled: bool) -> void:
 	_error_label.text = "Setting %s to %s..." % [schedule_id, "enabled" if enabled else "disabled"]
 	GateRailBridge.set_schedule_enabled(schedule_id, enabled, 1)
+
+
+func _on_schedule_preview_edit_pressed(
+	schedule: Dictionary,
+	cargo_option: OptionButton,
+	units_spin: SpinBox,
+	interval_spin: SpinBox,
+	stops_edit: LineEdit,
+	active_check: CheckBox
+) -> void:
+	var schedule_id := str(schedule.get("id", ""))
+	if schedule_id.is_empty():
+		return
+	_error_label.text = "Previewing schedule edit for %s..." % schedule_id
+	GateRailBridge.preview_update_schedule(
+		schedule_id,
+		_schedule_edit_payload(schedule, cargo_option, units_spin, interval_spin, stops_edit, active_check),
+		0,
+	)
+
+
+func _on_schedule_apply_edit_pressed(
+	schedule: Dictionary,
+	cargo_option: OptionButton,
+	units_spin: SpinBox,
+	interval_spin: SpinBox,
+	stops_edit: LineEdit,
+	active_check: CheckBox
+) -> void:
+	var schedule_id := str(schedule.get("id", ""))
+	if schedule_id.is_empty():
+		return
+	_error_label.text = "Applying schedule edit for %s..." % schedule_id
+	GateRailBridge.update_schedule(
+		schedule_id,
+		_schedule_edit_payload(schedule, cargo_option, units_spin, interval_spin, stops_edit, active_check),
+		0,
+	)
+
+
+func _on_schedule_delete_pressed(schedule_id: String) -> void:
+	if schedule_id.is_empty():
+		return
+	_error_label.text = "Sending DeleteSchedule for %s..." % schedule_id
+	GateRailBridge.delete_schedule(schedule_id, 0)
+
+
+func _schedule_edit_payload(
+	schedule: Dictionary,
+	cargo_option: OptionButton,
+	units_spin: SpinBox,
+	interval_spin: SpinBox,
+	stops_edit: LineEdit,
+	active_check: CheckBox
+) -> Dictionary:
+	var next_departure := int(schedule.get("next_departure_tick", int(snapshot.get("tick", 0)) + 1))
+	next_departure = max(next_departure, int(snapshot.get("tick", 0)) + 1)
+	return {
+		"train_id": str(schedule.get("train_id", "")),
+		"origin": str(schedule.get("origin", "")),
+		"destination": str(schedule.get("destination", "")),
+		"cargo_type": _selected_option_text(cargo_option),
+		"units_per_departure": int(units_spin.value),
+		"interval_ticks": int(interval_spin.value),
+		"next_departure_tick": next_departure,
+		"priority": int(schedule.get("priority", 100)),
+		"active": active_check.button_pressed,
+		"return_to_origin": _flag(schedule.get("return_to_origin", true), true),
+		"stops": _parse_stop_list(stops_edit.text),
+	}
+
+
+func _parse_stop_list(text: String) -> Array:
+	var stops: Array = []
+	for raw_part in text.split(",", false):
+		var stop_id := str(raw_part).strip_edges()
+		if not stop_id.is_empty():
+			stops.append(stop_id)
+	return stops
 
 
 func _on_dispatch_pressed() -> void:
@@ -847,7 +980,7 @@ func _update_play_controls() -> void:
 		var pending_text := " | waiting for snapshot" if _auto_step_pending else ""
 		_run_status_label.text = "Auto-run %s | %ss cadence%s" % [
 			state_text,
-			AUTO_STEP_INTERVAL,
+			GateRailBridge.auto_step_interval,
 			pending_text
 		]
 
@@ -876,6 +1009,12 @@ func _bridge_message() -> String:
 	if not snapshot.has("bridge"):
 		return "Fixture snapshot loaded; waiting for live bridge."
 	var bridge: Dictionary = snapshot.get("bridge", {})
+	if bridge.has("loaded_scenario"):
+		return "Loaded scenario %s." % bridge.get("loaded_scenario", "")
+	if bridge.has("loaded_path"):
+		return "Loaded game from %s." % bridge.get("loaded_path", "")
+	if bridge.has("saved_path"):
+		return "Saved game to %s." % bridge.get("saved_path", "")
 	var results := _array(bridge.get("command_results", []))
 	if results.is_empty():
 		return "Live snapshot loaded; stepped %s tick(s)." % bridge.get("stepped_ticks", 0)
@@ -901,8 +1040,10 @@ func _ingest_bridge_command_results() -> void:
 		if signature == _last_command_signature:
 			continue
 		_last_command_signature = signature
-		var kind := "command_ok" if bool(command_result.get("ok", false)) else "command_error"
+		var kind := "command_ok" if _flag(command_result.get("ok", false)) else "command_error"
 		_push_alert(kind, str(command_result.get("message", "command result")))
+		for route_alert in _route_debug_alerts(command_result):
+			_push_alert(str(route_alert.get("kind", kind)), str(route_alert.get("message", "")))
 
 
 func _push_alert(kind: String, message: String) -> void:
@@ -942,6 +1083,34 @@ func _rebuild_alert_strip() -> void:
 		}))
 
 
+func _route_debug_alerts(command_result: Dictionary) -> Array:
+	var alerts: Array = []
+	var command_type := str(command_result.get("type", ""))
+	if not (command_type in ["PreviewCreateSchedule", "CreateSchedule", "PreviewUpdateSchedule", "UpdateSchedule"]):
+		return alerts
+	for item in _array(command_result.get("route_segments", [])):
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var segment: Dictionary = item
+		if _flag(segment.get("ok", false), false):
+			continue
+		var from_node := str(segment.get("from_node_id", "?"))
+		var to_node := str(segment.get("to_node_id", "?"))
+		alerts.append({
+			"kind": "command_error",
+			"message": "%s -> %s: %s" % [from_node, to_node, str(segment.get("reason", "blocked"))],
+		})
+		for blocked_item in _array(segment.get("blocked_links", [])):
+			if typeof(blocked_item) != TYPE_DICTIONARY:
+				continue
+			var blocked: Dictionary = blocked_item
+			alerts.append({
+				"kind": "command_error",
+				"message": "%s: %s" % [str(blocked.get("link_id", "link")), str(blocked.get("reason", "blocked"))],
+			})
+	return alerts
+
+
 func _current_link_alerts() -> Array:
 	var alerts: Array = []
 	for link in _array(snapshot.get("links", [])):
@@ -949,7 +1118,7 @@ func _current_link_alerts() -> Array:
 			continue
 		var link_data: Dictionary = link
 		var link_id := str(link_data.get("id", "?"))
-		if bool(link_data.get("disrupted", false)):
+		if _flag(link_data.get("disrupted", false)):
 			var reasons := _array(link_data.get("disruption_reasons", []))
 			var reason_text := "disrupted"
 			if not reasons.is_empty():
@@ -962,7 +1131,7 @@ func _current_link_alerts() -> Array:
 		var capacity := int(link_data.get("capacity", 0))
 		var base_capacity := int(link_data.get("base_capacity", capacity))
 		var slots_used := int(link_data.get("slots_used", 0))
-		if capacity <= 0 and bool(link_data.get("active", true)):
+		if capacity <= 0 and _flag(link_data.get("active", true), true):
 			alerts.append({
 				"kind": "congestion",
 				"message": "%s: no effective capacity" % link_id,
@@ -1068,6 +1237,27 @@ func _join_values(values: Array, separator: String) -> String:
 	return separator.join(parts)
 
 
+func _flag(value: Variant, default_value: bool = false) -> bool:
+	match typeof(value):
+		TYPE_BOOL:
+			return value
+		TYPE_INT, TYPE_FLOAT:
+			return value != 0
+		TYPE_STRING:
+			return str(value).to_lower() in ["true", "1", "yes", "on"]
+		TYPE_NIL:
+			return default_value
+		_:
+			return default_value
+
+
+func _schedule_route_label(schedule: Dictionary) -> String:
+	var stop_ids := _array(schedule.get("route_stop_ids", []))
+	if stop_ids.size() >= 2:
+		return _join_values(stop_ids, " \u2192 ")
+	return "%s \u2192 %s" % [schedule.get("origin", "?"), schedule.get("destination", "?")]
+
+
 func _rebuild_schedule_list() -> void:
 	if _schedule_list == null:
 		return
@@ -1091,7 +1281,8 @@ func _rebuild_schedule_list() -> void:
 		var s_orig = str(schedule.get("origin", "")).to_lower()
 		var s_dest = str(schedule.get("destination", "")).to_lower()
 		var s_cargo = str(schedule.get("cargo", "")).to_lower()
-		if filter_text.is_empty() or filter_text in s_id or filter_text in s_orig or filter_text in s_dest or filter_text in s_cargo:
+		var s_route = _schedule_route_label(schedule).to_lower()
+		if filter_text.is_empty() or filter_text in s_id or filter_text in s_orig or filter_text in s_dest or filter_text in s_cargo or filter_text in s_route:
 			filtered_schedules.append(schedule)
 
 	if sort_mode == 0:
@@ -1112,12 +1303,16 @@ func _build_schedule_row(schedule: Dictionary) -> Control:
 	style.set_corner_radius_all(4)
 	panel.add_theme_stylebox_override("panel", style)
 
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	panel.add_child(box)
+
 	var row := HBoxContainer.new()
 	row.custom_minimum_size = Vector2(500, 32)
 	row.add_theme_constant_override("separation", 8)
-	panel.add_child(row)
+	box.add_child(row)
 
-	var enabled := bool(schedule.get("active", false))
+	var enabled := _flag(schedule.get("active", false))
 	var status_label := Label.new()
 	status_label.custom_minimum_size = Vector2(36, 0)
 	status_label.text = "ON" if enabled else "OFF"
@@ -1139,7 +1334,8 @@ func _build_schedule_row(schedule: Dictionary) -> Control:
 
 	var route_label := Label.new()
 	route_label.custom_minimum_size = Vector2(170, 0)
-	route_label.text = "%s \u2192 %s" % [schedule.get("origin", "?"), schedule.get("destination", "?")]
+	route_label.text = _schedule_route_label(schedule)
+	route_label.tooltip_text = route_label.text
 	route_label.clip_text = true
 	row.add_child(route_label)
 
@@ -1160,6 +1356,70 @@ func _build_schedule_row(schedule: Dictionary) -> Control:
 	_set_button_icon(toggle_button, "ui_schedule_off.svg" if enabled else "ui_schedule_on.svg")
 	toggle_button.pressed.connect(_on_schedule_toggle_pressed.bind(str(schedule.get("id", "")), not enabled))
 	row.add_child(toggle_button)
+
+	var edit_row := HBoxContainer.new()
+	edit_row.custom_minimum_size = Vector2(500, 32)
+	edit_row.add_theme_constant_override("separation", 6)
+	box.add_child(edit_row)
+
+	var active_check := CheckBox.new()
+	active_check.tooltip_text = "Schedule active"
+	active_check.button_pressed = enabled
+	edit_row.add_child(active_check)
+
+	var cargo_option := OptionButton.new()
+	cargo_option.custom_minimum_size = Vector2(102, 0)
+	for cargo_id in _cargo_ids():
+		cargo_option.add_item(str(cargo_id))
+	_select_option_text(cargo_option, str(schedule.get("cargo", "")))
+	edit_row.add_child(cargo_option)
+
+	var units_spin := SpinBox.new()
+	units_spin.min_value = 1
+	units_spin.max_value = 999
+	units_spin.step = 1
+	units_spin.rounded = true
+	units_spin.value = int(schedule.get("units_per_departure", 1))
+	units_spin.custom_minimum_size = Vector2(76, 0)
+	units_spin.tooltip_text = "Units per departure"
+	edit_row.add_child(units_spin)
+
+	var interval_spin := SpinBox.new()
+	interval_spin.min_value = 1
+	interval_spin.max_value = 999
+	interval_spin.step = 1
+	interval_spin.rounded = true
+	interval_spin.value = int(schedule.get("interval_ticks", 1))
+	interval_spin.custom_minimum_size = Vector2(76, 0)
+	interval_spin.tooltip_text = "Interval ticks"
+	edit_row.add_child(interval_spin)
+
+	var stops_edit := LineEdit.new()
+	stops_edit.placeholder_text = "stops"
+	stops_edit.text = ",".join(_string_list(_array(schedule.get("stops", []))))
+	stops_edit.tooltip_text = "Comma-separated intermediate stop node ids"
+	stops_edit.custom_minimum_size = Vector2(96, 0)
+	edit_row.add_child(stops_edit)
+
+	var preview_button := Button.new()
+	preview_button.text = "Preview"
+	preview_button.pressed.connect(func():
+		_on_schedule_preview_edit_pressed(schedule, cargo_option, units_spin, interval_spin, stops_edit, active_check)
+	)
+	edit_row.add_child(preview_button)
+
+	var apply_button := Button.new()
+	apply_button.text = "Apply"
+	apply_button.pressed.connect(func():
+		_on_schedule_apply_edit_pressed(schedule, cargo_option, units_spin, interval_spin, stops_edit, active_check)
+	)
+	edit_row.add_child(apply_button)
+
+	var delete_button := Button.new()
+	delete_button.text = "Delete"
+	_set_button_icon(delete_button, "ui_cancel.svg")
+	delete_button.pressed.connect(_on_schedule_delete_pressed.bind(str(schedule.get("id", ""))))
+	edit_row.add_child(delete_button)
 
 	return panel
 
@@ -1211,7 +1471,7 @@ func _rebuild_order_list() -> void:
 
 	var active_orders: Array = []
 	for order in _array(snapshot.get("orders", [])):
-		if typeof(order) == TYPE_DICTIONARY and bool(order.get("active", false)):
+		if typeof(order) == TYPE_DICTIONARY and _flag(order.get("active", false)):
 			active_orders.append(order)
 
 	if active_orders.is_empty():
@@ -1313,6 +1573,22 @@ func _selected_option_text(option: OptionButton) -> String:
 	if option == null or option.item_count <= 0 or option.selected < 0:
 		return ""
 	return option.get_item_text(option.selected)
+
+
+func _select_option_text(option: OptionButton, text: String) -> void:
+	if option == null:
+		return
+	for index in range(option.item_count):
+		if option.get_item_text(index) == text:
+			option.select(index)
+			return
+
+
+func _string_list(values: Array) -> Array:
+	var output: Array = []
+	for value in values:
+		output.append(str(value))
+	return output
 
 
 func _dictionary_keys(value: Variant) -> Array:
@@ -1571,7 +1847,7 @@ func _draw() -> void:
 		var color := Color(0.36, 0.56, 0.72)
 		if link.get("mode", "") == "gate":
 			color = Color(0.98, 0.68, 0.25)
-		if bool(link.get("disrupted", false)):
+		if _flag(link.get("disrupted", false)):
 			color = Color(0.95, 0.25, 0.18)
 		elif int(link.get("capacity", 0)) < int(link.get("base_capacity", 0)):
 			color = Color(0.96, 0.82, 0.30)
@@ -1586,6 +1862,8 @@ func _draw() -> void:
 			link.get("base_capacity", 0)
 		]
 		draw_string(font, midpoint + Vector2(6, -7), link_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.84, 0.90, 0.88))
+
+	_draw_cargo_flows()
 
 	for world in _array(snapshot.get("worlds", [])):
 		var world_id := str(world.get("id", ""))
@@ -1616,12 +1894,7 @@ func _draw() -> void:
 	for train in _array(snapshot.get("trains", [])):
 		var point := _train_position(train)
 		if str(train.get("status", "")) == "in_transit":
-			var route_nodes := _array(train.get("route_node_ids", []))
-			if route_nodes.size() >= 2:
-				var origin_node := str(route_nodes[0])
-				var destination_node := str(route_nodes[route_nodes.size() - 1])
-				if node_positions.has(origin_node) and node_positions.has(destination_node):
-					draw_line(node_positions[origin_node], node_positions[destination_node], Color(0.72, 0.92, 0.95, 0.45), 2.0)
+			_draw_train_route_path(train)
 		if not _draw_texture_centered(_train_asset(train), point, Vector2(30, 30)):
 			draw_rect(Rect2(point - Vector2(6, 6), Vector2(12, 12)), Color(0.95, 0.95, 0.72))
 		var train_id := str(train.get("id", ""))
@@ -1629,6 +1902,80 @@ func _draw() -> void:
 		draw_string(font, point + Vector2(16, -12), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.96, 0.96, 0.80))
 		if _selected_kind == "train" and _selected_id == train_id:
 			draw_arc(point, 20.0, 0.0, TAU, 48, Color(1.0, 0.86, 0.32), 4.0)
+
+
+func _draw_cargo_flows() -> void:
+	var font := ThemeDB.fallback_font
+	var flow_index := 0
+	for flow in _array(snapshot.get("cargo_flows", [])):
+		if typeof(flow) != TYPE_DICTIONARY:
+			continue
+		var route_nodes := _array(flow.get("route_node_ids", []))
+		if route_nodes.size() < 2:
+			continue
+		var cargo := str(flow.get("cargo", ""))
+		var base_color := _cargo_flow_color(cargo)
+		var in_transit := int(flow.get("in_transit_units", 0))
+		var units := int(flow.get("units_per_departure", 0))
+		var width: float = 2.0 + clampf(float(max(in_transit, units)) / 12.0, 0.0, 3.0)
+		var alpha := 0.30 if _flag(flow.get("active", true), true) else 0.12
+		if in_transit > 0:
+			alpha = 0.56
+		var color := Color(base_color.r, base_color.g, base_color.b, alpha)
+		var marker_color := Color(base_color.r, base_color.g, base_color.b, min(0.88, alpha + 0.24))
+		var label_drawn := false
+		var offset := float(flow_index % 4) * 2.5
+		flow_index += 1
+		for index in range(route_nodes.size() - 1):
+			var from_node := str(route_nodes[index])
+			var to_node := str(route_nodes[index + 1])
+			if not node_positions.has(from_node) or not node_positions.has(to_node):
+				continue
+			var a: Vector2 = node_positions[from_node]
+			var b: Vector2 = node_positions[to_node]
+			var dir := (b - a).normalized()
+			var perp := Vector2(-dir.y, dir.x) * offset
+			draw_line(a + perp, b + perp, color, width)
+			draw_circle(a.lerp(b, 0.5) + perp, 3.2, marker_color)
+			if not label_drawn:
+				var label := "%s %s/%s" % [cargo.replace("_", " ").capitalize(), in_transit, units]
+				draw_string(font, a.lerp(b, 0.5) + perp + Vector2(5, 13), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, marker_color)
+				label_drawn = true
+
+
+func _draw_train_route_path(train: Dictionary) -> void:
+	var route_nodes := _array(train.get("route_node_ids", []))
+	if route_nodes.size() < 2:
+		return
+	var route_color := Color(0.72, 0.92, 0.95, 0.38)
+	var route_hot := Color(0.95, 0.98, 0.78, 0.58)
+	for index in range(route_nodes.size() - 1):
+		var from_node := str(route_nodes[index])
+		var to_node := str(route_nodes[index + 1])
+		if not node_positions.has(from_node) or not node_positions.has(to_node):
+			continue
+		var a: Vector2 = node_positions[from_node]
+		var b: Vector2 = node_positions[to_node]
+		draw_line(a, b, route_color, 2.0)
+		draw_circle(a.lerp(b, 0.5), 2.5, route_hot)
+
+
+func _cargo_flow_color(cargo: String) -> Color:
+	match cargo:
+		"food":
+			return Color(0.42, 0.86, 0.42)
+		"ore", "stone", "metal":
+			return Color(0.74, 0.78, 0.82)
+		"construction_materials", "parts", "machinery":
+			return Color(0.98, 0.68, 0.25)
+		"medical_supplies", "research_equipment":
+			return Color(0.50, 0.84, 1.0)
+		"water", "fuel":
+			return Color(0.38, 0.62, 0.95)
+		"electronics", "consumer_goods":
+			return Color(0.86, 0.64, 0.94)
+		_:
+			return Color(0.82, 0.88, 0.78)
 
 
 func _array(value: Variant) -> Array:

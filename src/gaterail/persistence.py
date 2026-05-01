@@ -352,6 +352,10 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "resource_deposit_id": node.resource_deposit_id,
         "facility": _facility_to_dict(node.facility),
         "construction_project_id": node.construction_project_id,
+        "stock_targets": _cargo_map_to_dict(node.stock_targets),
+        "buffer_priority": node.buffer_priority,
+        "push_logic": node.push_logic,
+        "pull_logic": node.pull_logic,
     }
 
 
@@ -383,6 +387,10 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         ),
         facility=_facility_from_dict(data.get("facility")),
         construction_project_id=data.get("construction_project_id"),
+        stock_targets=_cargo_map_from_dict(data.get("stock_targets", {})),
+        buffer_priority=int(data.get("buffer_priority", 0)),
+        push_logic=bool(data.get("push_logic", True)),
+        pull_logic=bool(data.get("pull_logic", True)),
     )
 
 
@@ -753,6 +761,7 @@ def _schedule_to_dict(schedule: FreightSchedule) -> dict[str, object]:
         "train_id": schedule.train_id,
         "origin": schedule.origin,
         "destination": schedule.destination,
+        "stops": list(schedule.stops),
         "cargo_type": schedule.cargo_type.value,
         "units_per_departure": schedule.units_per_departure,
         "interval_ticks": schedule.interval_ticks,
@@ -774,6 +783,7 @@ def _schedule_from_dict(data: dict[str, Any]) -> FreightSchedule:
         train_id=str(data["train_id"]),
         origin=str(data["origin"]),
         destination=str(data["destination"]),
+        stops=tuple(str(item) for item in data.get("stops", [])),
         cargo_type=CargoType(str(data["cargo_type"])),
         units_per_departure=int(data["units_per_departure"]),
         interval_ticks=int(data["interval_ticks"]),
@@ -1210,6 +1220,8 @@ def load_simulation(path: str | Path) -> TickSimulation:
     """Read a simulation save file."""
 
     source = Path(path)
+    if not source.exists():
+        raise ValueError(f"save file not found: {source}")
     data = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("save file root must be an object")

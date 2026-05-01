@@ -104,13 +104,13 @@ List the built-in playtest scenarios:
 gaterail --list-scenarios
 ```
 
-Inspect the current default Sprint 8 playtest setup without advancing time:
+Inspect the current default playtest setup without advancing time:
 
 ```bash
 gaterail --inspect --report schedules,stockpiles
 ```
 
-Run the fixed-tick Sprint 8 playability scenario after installing the package:
+Run the current default fixed-tick playtest scenario after installing the package:
 
 ```bash
 gaterail --ticks 30
@@ -128,6 +128,13 @@ Filter reports during focused playtests:
 gaterail --ticks 30 --report traffic,finance
 ```
 
+Start from the Sprint 26 test presets:
+
+```bash
+gaterail --scenario early_build --inspect --report schedules,stockpiles
+gaterail --scenario industrial_expansion --ticks 20 --report traffic,resources,power,schedules
+```
+
 Save and resume a deterministic playtest:
 
 ```bash
@@ -139,6 +146,14 @@ Run the Stage 2 JSON bridge contract from a source checkout:
 
 ```bash
 printf '{"ticks":1}\n' | PYTHONPATH=src python3 -m gaterail.main --stdio
+```
+
+Save, load, or swap scenarios through the bridge:
+
+```bash
+printf '{"ticks":3,"save_path":"saves/bridge_playtest.json"}\n{"load_path":"saves/bridge_playtest.json","ticks":0}\n' \
+  | PYTHONPATH=src python3 -m gaterail.main --stdio
+printf '{"scenario":"industrial_expansion","ticks":0}\n' | PYTHONPATH=src python3 -m gaterail.main --stdio
 ```
 
 Send a player command through the bridge:
@@ -156,7 +171,7 @@ godot --path godot
 
 The Godot scaffold has two scenes that share the `GateRailBridge` autoload:
 
-- `scenes/main.tscn` (Galaxy Map) — draws the fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. Exposes bridge status, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, auto-run, map entity inspection, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
+- `scenes/main.tscn` (Galaxy Map) — draws the fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. Exposes bridge status, save/load, scenario reset, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, auto-run, map entity inspection, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
 - `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, gate-hub, same-world rail, interworld gate-link, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; route creation lets the player tune cargo, units per departure, and interval before preview. The right HUD Build Planner shows preview context, gate handoff route warnings, and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The `LAYERS` toggle renders backend-owned supply, demand, inventory, shortage, recipe-blocked, and transfer-pressure overlays. The **Galaxy Map** button returns to `main.tscn`.
 
 Run the test suite:

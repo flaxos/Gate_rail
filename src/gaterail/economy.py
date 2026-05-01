@@ -451,12 +451,14 @@ def _buffer_neighbours(state: GameState, node: NetworkNode) -> list[NetworkNode]
 
 
 def _effective_pull_demand(node: NetworkNode) -> dict[CargoType, int]:
-    """Combine declared demand with recipe inputs to define a node's pull-rate."""
+    """Combine declared demand with recipe inputs and stock targets to define a node's pull-rate."""
 
     combined: dict[CargoType, int] = dict(node.demand)
     if node.recipe is not None:
         for cargo_type, units in node.recipe.inputs.items():
             combined[cargo_type] = combined.get(cargo_type, 0) + units
+    for cargo_type, units in node.stock_targets.items():
+        combined[cargo_type] = max(combined.get(cargo_type, 0), units)
     return combined
 
 
@@ -470,48 +472,108 @@ def apply_buffer_distribution(state: GameState) -> dict[str, dict[str, dict[Carg
     """
 
     distribution: dict[str, dict[str, dict[CargoType, int]]] = {}
-    for node_id, node in sorted(state.nodes.items()):
+
+    buffer_nodes: list[NetworkNode] = []
+    for node in state.nodes.values():
         if node.construction_project_id is not None:
             continue
-        if node.kind not in BUFFER_NODE_KINDS:
-            continue
+        if node.kind in BUFFER_NODE_KINDS:
+            buffer_nodes.append(node)
+
+    buffer_nodes.sort(key=lambda n: (-n.buffer_priority, n.id))
+
+    for node in buffer_nodes:
         if node.transfer_limit_per_tick <= 0:
             continue
-        budget = node.effective_outbound_rate()
-        if budget <= 0 or node.total_inventory() <= 0:
-            continue
-        for neighbour in _buffer_neighbours(state, node):
-            if budget <= 0:
-                break
-            effective_demand = _effective_pull_demand(neighbour)
-            for cargo_type, required in sorted(effective_demand.items(), key=lambda item: item[0].value):
+
+        # PULL logic
+        if node.pull_logic:
+            budget = node.effective_inbound_rate()
+            if budget > 0 and node.total_inventory() < node.effective_storage_capacity():
+                for neighbour in _buffer_neighbours(state, node):
+                    if budget <= 0:
+                        break
+                    effective_demand = _effective_pull_demand(node)
+                    for cargo_type, required in sorted(effective_demand.items(), key=lambda item: item[0].value):
+                        if budget <= 0:
+                            break
+                        if required <= 0:
+                            continue
+                        deficit = required - node.stock(cargo_type)
+                        if deficit <= 0:
+                            continue
+
+                        available = neighbour.stock(cargo_type)
+                        if neighbour.kind in BUFFER_NODE_KINDS:
+                            if neighbour.buffer_priority >= node.buffer_priority:
+                                available -= neighbour.stock_targets.get(cargo_type, 0)
+                        if available <= 0:
+                            continue
+
+                        pull = min(deficit, available, budget)
+                        if pull <= 0:
+                            continue
+
+                        removed = neighbour.remove_inventory(cargo_type, pull)
+                        if removed <= 0:
+                            continue
+
+                        accepted = node.add_inventory(cargo_type, removed)
+                        if accepted < removed:
+                            neighbour.add_inventory(cargo_type, removed - accepted)
+                        if accepted <= 0:
+                            continue
+
+                        budget -= accepted
+                        record_transfer(state, neighbour.id, accepted)
+                        record_transfer(state, node.id, accepted)
+                        per_neighbour = distribution.setdefault(neighbour.id, {})
+                        per_node = per_neighbour.setdefault(node.id, {})
+                        per_node[cargo_type] = per_node.get(cargo_type, 0) + accepted
+
+        # PUSH logic
+        if node.push_logic:
+            budget = node.effective_outbound_rate()
+            if budget <= 0 or node.total_inventory() <= 0:
+                continue
+            for neighbour in _buffer_neighbours(state, node):
                 if budget <= 0:
                     break
-                if required <= 0:
-                    continue
-                deficit = required - neighbour.stock(cargo_type)
-                if deficit <= 0:
-                    continue
-                available = node.stock(cargo_type)
-                if available <= 0:
-                    continue
-                push = min(deficit, available, budget)
-                if push <= 0:
-                    continue
-                removed = node.remove_inventory(cargo_type, push)
-                if removed <= 0:
-                    continue
-                accepted = neighbour.add_inventory(cargo_type, removed)
-                if accepted < removed:
-                    # Neighbour storage was full; return the unaccepted units.
-                    node.add_inventory(cargo_type, removed - accepted)
-                if accepted <= 0:
-                    continue
-                budget -= accepted
-                record_transfer(state, node.id, accepted)
-                record_transfer(state, neighbour.id, accepted)
-                per_node = distribution.setdefault(node_id, {})
-                per_neighbour = per_node.setdefault(neighbour.id, {})
-                per_neighbour[cargo_type] = per_neighbour.get(cargo_type, 0) + accepted
+                effective_demand = _effective_pull_demand(neighbour)
+                for cargo_type, required in sorted(effective_demand.items(), key=lambda item: item[0].value):
+                    if budget <= 0:
+                        break
+                    if required <= 0:
+                        continue
+                    deficit = required - neighbour.stock(cargo_type)
+                    if deficit <= 0:
+                        continue
+
+                    available = node.stock(cargo_type)
+                    available -= node.stock_targets.get(cargo_type, 0)
+                    if available <= 0:
+                        continue
+
+                    push = min(deficit, available, budget)
+                    if push <= 0:
+                        continue
+
+                    removed = node.remove_inventory(cargo_type, push)
+                    if removed <= 0:
+                        continue
+
+                    accepted = neighbour.add_inventory(cargo_type, removed)
+                    if accepted < removed:
+                        node.add_inventory(cargo_type, removed - accepted)
+                    if accepted <= 0:
+                        continue
+
+                    budget -= accepted
+                    record_transfer(state, node.id, accepted)
+                    record_transfer(state, neighbour.id, accepted)
+                    per_node = distribution.setdefault(node.id, {})
+                    per_neighbour = per_node.setdefault(neighbour.id, {})
+                    per_neighbour[cargo_type] = per_neighbour.get(cargo_type, 0) + accepted
+
     state.buffer_distribution = distribution
     return distribution

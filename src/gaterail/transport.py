@@ -79,3 +79,48 @@ def shortest_route(
                 ),
             )
     return None
+
+
+def route_through_stops(
+    state: GameState,
+    origin: str,
+    stops: tuple[str, ...],
+    destination: str,
+    allowed_modes: set[LinkMode] | None = None,
+    require_operational: bool = True,
+) -> Route | None:
+    """Resolve a route that must pass through each stop in order."""
+
+    stop_ids = (origin, *stops, destination)
+    if len(stop_ids) < 2:
+        return None
+
+    node_ids: tuple[str, ...] = ()
+    link_ids: tuple[str, ...] = ()
+    travel_ticks = 0
+    gate_power_required = 0
+
+    for index in range(len(stop_ids) - 1):
+        segment = shortest_route(
+            state,
+            stop_ids[index],
+            stop_ids[index + 1],
+            allowed_modes=allowed_modes,
+            require_operational=require_operational,
+        )
+        if segment is None:
+            return None
+        if index == 0:
+            node_ids = segment.node_ids
+        else:
+            node_ids += segment.node_ids[1:]
+        link_ids += segment.link_ids
+        travel_ticks += segment.travel_ticks
+        gate_power_required += segment.gate_power_required
+
+    return Route(
+        node_ids=node_ids,
+        link_ids=link_ids,
+        travel_ticks=travel_ticks,
+        gate_power_required=gate_power_required,
+    )

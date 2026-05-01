@@ -17,9 +17,11 @@ from gaterail.models import (
 from gaterail.resource_chains import resource_branch_pressure
 from gaterail.resources import resource_catalog_payload, resource_deposit_to_dict
 from gaterail.traffic import active_signals_for_link, build_signal_report, effective_link_capacity
+from gaterail.transport import route_through_stops
 
 
 SNAPSHOT_VERSION = 1
+SCHEDULE_ORDER_PREFIX = "schedule:"
 
 
 def _cargo_map(mapping: object) -> dict[str, int]:
@@ -110,6 +112,24 @@ def _track_alignment(link: object) -> list[dict[str, float]]:
     ]
 
 
+def _reverse_link_id_for(state: GameState, link: object) -> str | None:
+    """Return an existing link that supports reverse traversal for ``link``."""
+
+    origin = getattr(link, "origin", None)
+    destination = getattr(link, "destination", None)
+    mode = getattr(link, "mode", None)
+    link_id = getattr(link, "id", None)
+    endpoints = {origin, destination}
+    for candidate in sorted(state.links.values(), key=lambda item: item.id):
+        if candidate.id == link_id or candidate.mode != mode:
+            continue
+        if candidate.bidirectional and {candidate.origin, candidate.destination} == endpoints:
+            return candidate.id
+        if candidate.origin == destination and candidate.destination == origin:
+            return candidate.id
+    return None
+
+
 def _contract_progress(contract: Contract) -> tuple[str, str, int]:
     """Return render labels and current progress for a contract."""
 
@@ -122,6 +142,57 @@ def _contract_progress(contract: Contract) -> tuple[str, str, int]:
     if contract.kind == ContractKind.GATE_RECOVERY:
         return "powered", f"link:{contract.target_link_id}", contract.progress
     return "unknown", "unknown", contract.progress
+
+
+def _cargo_flow_payloads(state: GameState) -> list[dict[str, object]]:
+    """Return route-level cargo flow visualisation payloads."""
+
+    in_transit_by_schedule: dict[str, int] = {}
+    train_count_by_schedule: dict[str, int] = {}
+    for train in state.trains.values():
+        order_id = train.order_id or ""
+        if not order_id.startswith(SCHEDULE_ORDER_PREFIX):
+            continue
+        schedule_id = order_id.removeprefix(SCHEDULE_ORDER_PREFIX)
+        in_transit_by_schedule[schedule_id] = (
+            in_transit_by_schedule.get(schedule_id, 0) + int(train.cargo_units)
+        )
+        train_count_by_schedule[schedule_id] = train_count_by_schedule.get(schedule_id, 0) + 1
+
+    flows: list[dict[str, object]] = []
+    for schedule in sorted(state.schedules.values(), key=lambda item: item.id):
+        route = route_through_stops(
+            state,
+            schedule.origin,
+            schedule.stops,
+            schedule.destination,
+            require_operational=False,
+        )
+        route_stop_ids = [schedule.origin, *schedule.stops, schedule.destination]
+        flows.append(
+            {
+                "id": f"{SCHEDULE_ORDER_PREFIX}{schedule.id}",
+                "service_type": "schedule",
+                "schedule_id": schedule.id,
+                "train_id": schedule.train_id,
+                "active": schedule.active,
+                "cargo": schedule.cargo_type.value,
+                "route_stop_ids": route_stop_ids,
+                "route_node_ids": [] if route is None else list(route.node_ids),
+                "route_link_ids": [] if route is None else list(route.link_ids),
+                "route_travel_ticks": 0 if route is None else route.travel_ticks,
+                "route_valid": route is not None,
+                "units_per_departure": schedule.units_per_departure,
+                "interval_ticks": schedule.interval_ticks,
+                "next_departure_tick": schedule.next_departure_tick,
+                "delivered_units": schedule.delivered_units,
+                "in_transit_units": in_transit_by_schedule.get(schedule.id, 0),
+                "trips_dispatched": schedule.trips_dispatched,
+                "trips_completed": schedule.trips_completed,
+                "trains_in_transit": train_count_by_schedule.get(schedule.id, 0),
+            }
+        )
+    return flows
 
 
 def render_snapshot(state: GameState) -> dict[str, object]:
@@ -361,6 +432,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             }
         trains_on_link = trains_per_link.get(link.id, 0)
         utilisation = round(trains_on_link / max(1, link.capacity_per_tick), 3)
+        reverse_link_id = _reverse_link_id_for(state, link)
         links.append(
             {
                 "id": link.id,
@@ -372,6 +444,11 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "base_capacity": link.capacity_per_tick,
                 "active": link.active,
                 "bidirectional": link.bidirectional,
+                "directional": not link.bidirectional,
+                "source_node_id": link.origin,
+                "exit_node_id": link.destination,
+                "reverse_available": link.bidirectional or reverse_link_id is not None,
+                "reverse_link_id": reverse_link_id,
                 "power_required": link.power_required,
                 "effective_power_required": (
                     link.power_required if gate_status is None else gate_status.power_required
@@ -420,11 +497,15 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             "train_id": schedule.train_id,
             "origin": schedule.origin,
             "destination": schedule.destination,
+            "stops": list(schedule.stops),
+            "route_stop_ids": [schedule.origin, *schedule.stops, schedule.destination],
             "cargo": schedule.cargo_type.value,
             "units_per_departure": schedule.units_per_departure,
             "interval_ticks": schedule.interval_ticks,
             "next_departure_tick": schedule.next_departure_tick,
+            "priority": schedule.priority,
             "active": schedule.active,
+            "return_to_origin": schedule.return_to_origin,
             "trips_dispatched": schedule.trips_dispatched,
             "trips_completed": schedule.trips_completed,
             "delivered_units": schedule.delivered_units,
@@ -548,6 +629,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
         "links": links,
         "trains": trains,
         "schedules": schedules,
+        "cargo_flows": _cargo_flow_payloads(state),
         "orders": orders,
         "contracts": contracts,
         "construction_projects": [

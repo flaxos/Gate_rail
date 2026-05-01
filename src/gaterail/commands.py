@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any, Literal, TypeAlias
 
-from gaterail.cargo import CargoType, required_consist_for
+from gaterail.cargo import CargoType, consist_can_carry, required_consist_for
 from gaterail.construction import (
     DEFAULT_GATE_CAPACITY_PER_TICK,
     DEFAULT_GATE_POWER_REQUIRED,
@@ -57,9 +57,9 @@ from gaterail.models import (
     TrackSignalKind,
     TrainConsist,
 )
-from gaterail.space import mission_return_capacity
+from gaterail.space import mission_fuel_required, mission_power_required, mission_return_capacity
 from gaterail.traffic import effective_link_capacity
-from gaterail.transport import shortest_route
+from gaterail.transport import route_through_stops, shortest_route
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +228,7 @@ class CreateSchedule:
     priority: int = 100
     active: bool = True
     return_to_origin: bool = True
+    stops: tuple[str, ...] = ()
     type: Literal["CreateSchedule"] = "CreateSchedule"
 
 
@@ -246,7 +247,62 @@ class PreviewCreateSchedule:
     priority: int = 100
     active: bool = True
     return_to_origin: bool = True
+    stops: tuple[str, ...] = ()
     type: Literal["PreviewCreateSchedule"] = "PreviewCreateSchedule"
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateSchedule:
+    """Edit an existing recurring freight schedule."""
+
+    schedule_id: str
+    train_id: str | None = None
+    origin: str | None = None
+    destination: str | None = None
+    cargo_type: CargoType | None = None
+    units_per_departure: int | None = None
+    interval_ticks: int | None = None
+    next_departure_tick: int | None = None
+    priority: int | None = None
+    active: bool | None = None
+    return_to_origin: bool | None = None
+    stops: tuple[str, ...] | None = None
+    type: Literal["UpdateSchedule"] = "UpdateSchedule"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewUpdateSchedule:
+    """Preview editing an existing recurring freight schedule."""
+
+    schedule_id: str
+    train_id: str | None = None
+    origin: str | None = None
+    destination: str | None = None
+    cargo_type: CargoType | None = None
+    units_per_departure: int | None = None
+    interval_ticks: int | None = None
+    next_departure_tick: int | None = None
+    priority: int | None = None
+    active: bool | None = None
+    return_to_origin: bool | None = None
+    stops: tuple[str, ...] | None = None
+    type: Literal["PreviewUpdateSchedule"] = "PreviewUpdateSchedule"
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteSchedule:
+    """Delete an existing recurring freight schedule."""
+
+    schedule_id: str
+    type: Literal["DeleteSchedule"] = "DeleteSchedule"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewDeleteSchedule:
+    """Preview deleting an existing recurring freight schedule."""
+
+    schedule_id: str
+    type: Literal["PreviewDeleteSchedule"] = "PreviewDeleteSchedule"
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,6 +502,10 @@ PlayerCommand: TypeAlias = (
     | PreviewPurchaseTrain
     | CreateSchedule
     | PreviewCreateSchedule
+    | UpdateSchedule
+    | PreviewUpdateSchedule
+    | DeleteSchedule
+    | PreviewDeleteSchedule
     | UpgradeNode
     | BuildFacilityComponent
     | PreviewBuildFacilityComponent
@@ -519,6 +579,57 @@ def _alignment_fields(data: dict[str, Any]) -> tuple[TrackPoint, ...]:
     if not isinstance(raw_alignment, (list, tuple)):
         raise ValueError("alignment must be a list of points")
     return tuple(_track_point_from_payload(point) for point in raw_alignment)
+
+
+def _node_id_tuple(value: object) -> tuple[str, ...]:
+    """Return a stable tuple of node ids from JSON-like input."""
+
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value)
+    raise ValueError("schedule stops must be a string or list of strings")
+
+
+def _optional_node_id_tuple(data: dict[str, Any]) -> tuple[str, ...] | None:
+    """Return optional schedule stops, preserving absent as no change."""
+
+    for key in ("stops", "stop_ids", "waypoint_node_ids"):
+        if key in data:
+            return _node_id_tuple(data.get(key))
+    return None
+
+
+def _optional_bool_field(data: dict[str, Any], key: str) -> bool | None:
+    """Return an optional boolean command field."""
+
+    if key not in data:
+        return None
+    return bool(data[key])
+
+
+def _optional_cargo_field(data: dict[str, Any]) -> CargoType | None:
+    """Return an optional cargo type command field."""
+
+    if "cargo_type" not in data and "cargo" not in data:
+        return None
+    raw = data.get("cargo_type", data.get("cargo"))
+    if raw is None:
+        return None
+    return CargoType(str(raw))
+
+
+def _optional_str_field(data: dict[str, Any], key: str) -> str | None:
+    """Return an optional string command field."""
+
+    if key not in data:
+        return None
+    raw = data[key]
+    if raw is None:
+        return None
+    return str(raw)
 
 
 def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
@@ -620,7 +731,40 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             priority=int(data.get("priority", 100)),
             active=bool(data.get("active", True)),
             return_to_origin=bool(data.get("return_to_origin", True)),
+            stops=_node_id_tuple(data.get("stops", data.get("stop_ids", data.get("waypoint_node_ids")))),
         )
+    if command_type in {"UpdateSchedule", "PreviewUpdateSchedule"}:
+        schedule_command = UpdateSchedule if command_type == "UpdateSchedule" else PreviewUpdateSchedule
+        return schedule_command(
+            schedule_id=str(data["schedule_id"]),
+            train_id=_optional_str_field(data, "train_id"),
+            origin=_optional_str_field(data, "origin"),
+            destination=_optional_str_field(data, "destination"),
+            cargo_type=_optional_cargo_field(data),
+            units_per_departure=(
+                None
+                if "units_per_departure" not in data
+                else _optional_int(data.get("units_per_departure"))
+            ),
+            interval_ticks=(
+                None
+                if "interval_ticks" not in data
+                else _optional_int(data.get("interval_ticks"))
+            ),
+            next_departure_tick=(
+                None
+                if "next_departure_tick" not in data
+                else _optional_int(data.get("next_departure_tick"))
+            ),
+            priority=None if "priority" not in data else _optional_int(data.get("priority")),
+            active=_optional_bool_field(data, "active"),
+            return_to_origin=_optional_bool_field(data, "return_to_origin"),
+            stops=_optional_node_id_tuple(data),
+        )
+    if command_type == "DeleteSchedule":
+        return DeleteSchedule(schedule_id=str(data["schedule_id"]))
+    if command_type == "PreviewDeleteSchedule":
+        return PreviewDeleteSchedule(schedule_id=str(data["schedule_id"]))
     if command_type == "UpgradeNode":
         return UpgradeNode(
             node_id=str(data["node_id"]),
@@ -778,12 +922,45 @@ def command_result(
     return result
 
 
-def _duplicate_link_between(state: object, origin: str, destination: str, mode: LinkMode) -> str | None:
+def _duplicate_link_between(
+    state: object,
+    origin: str,
+    destination: str,
+    mode: LinkMode,
+    *,
+    bidirectional: bool,
+) -> str | None:
     """Return an existing link id with the same mode and endpoints."""
 
-    endpoints = {origin, destination}
     for link in state.links.values():
-        if link.mode == mode and {link.origin, link.destination} == endpoints:
+        if link.mode != mode:
+            continue
+        same_direction = link.origin == origin and link.destination == destination
+        reverse_direction = link.origin == destination and link.destination == origin
+        if same_direction:
+            return link.id
+        if reverse_direction and (link.bidirectional or bidirectional):
+            return link.id
+    return None
+
+
+def _reverse_link_id_for(
+    state: object,
+    origin: str,
+    destination: str,
+    mode: LinkMode,
+    *,
+    ignored_link_id: str | None = None,
+) -> str | None:
+    """Return an existing link that supports the reverse direction."""
+
+    endpoints = {origin, destination}
+    for link in sorted(state.links.values(), key=lambda item: item.id):
+        if link.id == ignored_link_id or link.mode != mode:
+            continue
+        if link.bidirectional and {link.origin, link.destination} == endpoints:
+            return link.id
+        if link.origin == destination and link.destination == origin:
             return link.id
     return None
 
@@ -978,6 +1155,7 @@ def _validate_build_link(
         command.origin,
         command.destination,
         command.mode,
+        bidirectional=command.bidirectional,
     )
     if duplicate_link_id is not None:
         raise ValueError(f"duplicate link endpoints: {duplicate_link_id}")
@@ -1087,7 +1265,19 @@ def _gate_preview_payload(
     )
     power_available = max(0, power_world.base_power_margin - allocated_power)
     power_shortfall = max(0, power_required - power_available)
+    reverse_link_id = _reverse_link_id_for(
+        state,
+        command.origin,
+        command.destination,
+        command.mode,
+        ignored_link_id=command.link_id,
+    )
     return {
+        "source_node_id": command.origin,
+        "exit_node_id": command.destination,
+        "directional": not command.bidirectional,
+        "reverse_available": command.bidirectional or reverse_link_id is not None,
+        "reverse_link_id": reverse_link_id,
         "origin_world_id": origin_world_id,
         "origin_world_name": origin_world.name,
         "destination_world_id": destination_world_id,
@@ -1112,6 +1302,10 @@ def _validate_purchase_train(state: object, command: PurchaseTrain | PreviewPurc
         raise ValueError("train name cannot be empty")
     if command.capacity <= 0:
         raise ValueError("train capacity must be positive")
+    try:
+        TrainConsist(command.consist)
+    except ValueError as exc:
+        raise ValueError(f"unknown train consist: {command.consist}") from exc
     return train_purchase_cost(command.capacity)
 
 
@@ -1124,7 +1318,7 @@ def _train_purchase_payload(command: PurchaseTrain | PreviewPurchaseTrain) -> di
         "name": command.name,
         "node_id": command.node_id,
         "capacity": command.capacity,
-        "consist": command.consist,
+        "consist": TrainConsist(command.consist).value,
     }
 
 
@@ -1136,13 +1330,47 @@ def _effective_next_departure_tick(state: object, command: CreateSchedule | Prev
     return command.next_departure_tick
 
 
-def _validate_create_schedule(
+def _effective_update_next_departure_tick(state: object, schedule: FreightSchedule, explicit_tick: int | None) -> int:
+    """Return a safe next departure tick for an edited schedule."""
+
+    if explicit_tick is not None:
+        return explicit_tick
+    return max(int(schedule.next_departure_tick), int(state.tick) + 1)
+
+
+def _schedule_route_stop_ids(command: CreateSchedule | PreviewCreateSchedule) -> tuple[str, ...]:
+    """Return the exact required stop sequence for a schedule command."""
+
+    return (command.origin, *command.stops, command.destination)
+
+
+def _validate_schedule_stops(state: object, command: CreateSchedule | PreviewCreateSchedule) -> None:
+    """Validate intermediate schedule stops without requiring a route yet."""
+
+    for stop_id in command.stops:
+        if stop_id not in state.nodes:
+            raise ValueError(f"unknown schedule stop: {stop_id}")
+    stop_ids = _schedule_route_stop_ids(command)
+    for index in range(len(stop_ids) - 1):
+        if stop_ids[index] == stop_ids[index + 1]:
+            raise ValueError(f"schedule stop sequence repeats node: {stop_ids[index]}")
+
+
+def _validate_schedule_fields(
     state: object,
     command: CreateSchedule | PreviewCreateSchedule,
+    *,
+    existing_schedule_id: str | None = None,
 ) -> tuple[int, object]:
-    """Validate a recurring schedule and resolve its current route."""
+    """Validate a recurring schedule payload and resolve its current route."""
 
-    if command.schedule_id in state.schedules:
+    if existing_schedule_id is None and command.schedule_id in state.schedules:
+        raise ValueError(f"duplicate schedule id: {command.schedule_id}")
+    if (
+        existing_schedule_id is not None
+        and command.schedule_id != existing_schedule_id
+        and command.schedule_id in state.schedules
+    ):
         raise ValueError(f"duplicate schedule id: {command.schedule_id}")
     if command.train_id not in state.trains:
         raise ValueError(f"unknown schedule train: {command.train_id}")
@@ -1152,6 +1380,7 @@ def _validate_create_schedule(
         raise ValueError(f"unknown schedule destination: {command.destination}")
     if command.origin == command.destination:
         raise ValueError("schedule origin and destination must be different")
+    _validate_schedule_stops(state, command)
     if command.units_per_departure <= 0:
         raise ValueError("schedule units_per_departure must be positive")
     if command.interval_ticks <= 0:
@@ -1164,17 +1393,29 @@ def _validate_create_schedule(
     if command.units_per_departure > train.capacity:
         raise ValueError("schedule units_per_departure cannot exceed train capacity")
     required_consist = required_consist_for(command.cargo_type)
-    if train.consist != required_consist and required_consist != "general":
-        raise ValueError(f"schedule cargo {command.cargo_type.value} requires {required_consist.value} consist, train is {train.consist.value}")
+    if not consist_can_carry(train.consist, command.cargo_type):
+        raise ValueError(
+            f"schedule cargo {command.cargo_type.value} requires "
+            f"{required_consist.value} consist, train is {train.consist.value}"
+        )
     next_departure_tick = _effective_next_departure_tick(state, command)
     if next_departure_tick <= state.tick:
         raise ValueError("schedule next_departure_tick must be in the future")
-    route = shortest_route(state, command.origin, command.destination)
+    route = route_through_stops(state, command.origin, command.stops, command.destination)
     if route is None:
-        raise ValueError(f"no route {command.origin}->{command.destination}")
+        raise ValueError(f"no route {'->'.join(_schedule_route_stop_ids(command))}")
     if route.travel_ticks <= 0:
         raise ValueError("schedule route must have positive travel time")
     return next_departure_tick, route
+
+
+def _validate_create_schedule(
+    state: object,
+    command: CreateSchedule | PreviewCreateSchedule,
+) -> tuple[int, object]:
+    """Validate a recurring schedule and resolve its current route."""
+
+    return _validate_schedule_fields(state, command)
 
 
 def _schedule_payload(
@@ -1197,7 +1438,107 @@ def _schedule_payload(
         "priority": command.priority,
         "active": command.active,
         "return_to_origin": command.return_to_origin,
+        "stops": list(command.stops),
     }
+
+
+def _schedule_update_draft(
+    state: object,
+    command: UpdateSchedule | PreviewUpdateSchedule,
+    schedule: FreightSchedule,
+) -> PreviewCreateSchedule:
+    """Merge a partial schedule edit with the existing schedule."""
+
+    return PreviewCreateSchedule(
+        schedule_id=schedule.id,
+        train_id=schedule.train_id if command.train_id is None else command.train_id,
+        origin=schedule.origin if command.origin is None else command.origin,
+        destination=schedule.destination if command.destination is None else command.destination,
+        cargo_type=schedule.cargo_type if command.cargo_type is None else command.cargo_type,
+        units_per_departure=(
+            schedule.units_per_departure
+            if command.units_per_departure is None
+            else command.units_per_departure
+        ),
+        interval_ticks=schedule.interval_ticks if command.interval_ticks is None else command.interval_ticks,
+        next_departure_tick=_effective_update_next_departure_tick(
+            state,
+            schedule,
+            command.next_departure_tick,
+        ),
+        priority=schedule.priority if command.priority is None else command.priority,
+        active=schedule.active if command.active is None else command.active,
+        return_to_origin=(
+            schedule.return_to_origin
+            if command.return_to_origin is None
+            else command.return_to_origin
+        ),
+        stops=schedule.stops if command.stops is None else command.stops,
+    )
+
+
+def _schedule_update_payload(
+    command: UpdateSchedule | PreviewUpdateSchedule,
+    draft: PreviewCreateSchedule,
+    *,
+    next_departure_tick: int,
+) -> dict[str, object]:
+    """Return a normalized UpdateSchedule command payload."""
+
+    payload = _schedule_payload(draft, next_departure_tick=next_departure_tick)
+    payload["type"] = "UpdateSchedule"
+    payload["schedule_id"] = command.schedule_id
+    return payload
+
+
+def _schedule_active_trip_train(state: object, schedule_id: str) -> FreightTrain | None:
+    """Return a train currently running one schedule trip, if any."""
+
+    service_id = f"schedule:{schedule_id}"
+    for train in state.trains.values():
+        if train.order_id == service_id and not train.idle:
+            return train
+    return None
+
+
+def _validate_update_schedule(
+    state: object,
+    command: UpdateSchedule | PreviewUpdateSchedule,
+) -> tuple[FreightSchedule, PreviewCreateSchedule, int, object]:
+    """Validate an existing schedule edit and resolve its route."""
+
+    schedule = state.schedules.get(command.schedule_id)
+    if schedule is None:
+        raise ValueError(f"unknown schedule: {command.schedule_id}")
+    if _schedule_active_trip_train(state, command.schedule_id) is not None:
+        raise ValueError("schedule_in_active_trip")
+    draft = _schedule_update_draft(state, command, schedule)
+    next_departure_tick, route = _validate_schedule_fields(
+        state,
+        draft,
+        existing_schedule_id=schedule.id,
+    )
+    return schedule, draft, next_departure_tick, route
+
+
+def _schedule_delete_payload(command: DeleteSchedule | PreviewDeleteSchedule) -> dict[str, object]:
+    """Return a normalized DeleteSchedule command payload."""
+
+    return {"type": "DeleteSchedule", "schedule_id": command.schedule_id}
+
+
+def _validate_delete_schedule(
+    state: object,
+    command: DeleteSchedule | PreviewDeleteSchedule,
+) -> FreightSchedule:
+    """Validate deleting a schedule without orphaning an active train trip."""
+
+    schedule = state.schedules.get(command.schedule_id)
+    if schedule is None:
+        raise ValueError(f"unknown schedule: {command.schedule_id}")
+    if _schedule_active_trip_train(state, command.schedule_id) is not None:
+        raise ValueError("schedule_in_active_trip")
+    return schedule
 
 
 def _used_slots_for_route_context(state: object, link: NetworkLink, gate_status: object | None) -> int:
@@ -1272,6 +1613,10 @@ def _route_context_payload(state: object, route: object) -> dict[str, object]:
             "link_id": link.id,
             "from_node_id": from_node_id,
             "to_node_id": to_node_id,
+            "source_node_id": link.origin,
+            "exit_node_id": link.destination,
+            "directional": not link.bidirectional,
+            "traversal_direction": "forward" if from_node_id == link.origin else "reverse",
             "from_world_id": from_world.id,
             "from_world_name": from_world.name,
             "to_world_id": to_world.id,
@@ -1299,33 +1644,195 @@ def _route_context_payload(state: object, route: object) -> dict[str, object]:
     }
 
 
-def _structural_route_context_for_failed_schedule(
-    state: object,
-    command: PreviewCreateSchedule,
-) -> dict[str, object]:
-    """Return route context for previews blocked by gate power/capacity state."""
+def _blocked_links_for_route_debug(state: object, route: object) -> list[dict[str, object]]:
+    """Return player-facing link blockers for a structurally valid route."""
 
-    if command.origin not in state.nodes or command.destination not in state.nodes:
-        return {}
-    if command.origin == command.destination:
-        return {}
-    route = shortest_route(
-        state,
-        command.origin,
-        command.destination,
-        require_operational=False,
-    )
-    if route is None or route.travel_ticks <= 0:
-        return {}
-    context = _route_context_payload(state, route)
-    if not context["gate_handoffs"]:
-        return {}
-    return {
-        "route_travel_ticks": route.travel_ticks,
-        "route_node_ids": list(route.node_ids),
-        "route_link_ids": list(route.link_ids),
-        **context,
+    blocked: list[dict[str, object]] = []
+    for link_id in route.link_ids:
+        link = state.links[link_id]
+        status = state.gate_statuses.get(link.id)
+        if not link.active:
+            blocked.append(
+                {
+                    "link_id": link.id,
+                    "mode": link.mode.value,
+                    "severity": "blocked",
+                    "reason": f"link {link.id} inactive",
+                }
+            )
+            continue
+        if link.mode == LinkMode.GATE and not state.link_operational(link):
+            blocked.append(
+                {
+                    "link_id": link.id,
+                    "mode": link.mode.value,
+                    "severity": "blocked",
+                    "reason": f"gate {link.id} unpowered",
+                }
+            )
+            continue
+        capacity, disruptions = effective_link_capacity(state, link)
+        used = _used_slots_for_route_context(state, link, status)
+        if disruptions and capacity <= 0:
+            blocked.append(
+                {
+                    "link_id": link.id,
+                    "mode": link.mode.value,
+                    "severity": "blocked",
+                    "reason": f"link {link.id} disrupted: {', '.join(item.reason for item in disruptions)}",
+                }
+            )
+        elif capacity > 0 and used >= capacity:
+            reason = f"gate slots full on {link.id}" if link.mode == LinkMode.GATE else f"traffic capacity full on {link.id}"
+            blocked.append(
+                {
+                    "link_id": link.id,
+                    "mode": link.mode.value,
+                    "severity": "blocked",
+                    "reason": reason,
+                }
+            )
+    return blocked
+
+
+def _route_segments_debug(state: object, stop_ids: tuple[str, ...]) -> list[dict[str, object]]:
+    """Return per-segment route status for schedule previews."""
+
+    segments: list[dict[str, object]] = []
+    for index in range(len(stop_ids) - 1):
+        from_node_id = stop_ids[index]
+        to_node_id = stop_ids[index + 1]
+        if from_node_id not in state.nodes:
+            segments.append(
+                {
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "ok": False,
+                    "reason": f"unknown node {from_node_id}",
+                    "travel_ticks": 0,
+                    "node_ids": [],
+                    "link_ids": [],
+                    "blocked_links": [],
+                }
+            )
+            continue
+        if to_node_id not in state.nodes:
+            segments.append(
+                {
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "ok": False,
+                    "reason": f"unknown node {to_node_id}",
+                    "travel_ticks": 0,
+                    "node_ids": [],
+                    "link_ids": [],
+                    "blocked_links": [],
+                }
+            )
+            continue
+
+        route = shortest_route(state, from_node_id, to_node_id)
+        if route is not None:
+            segments.append(
+                {
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "ok": True,
+                    "reason": None,
+                    "travel_ticks": route.travel_ticks,
+                    "node_ids": list(route.node_ids),
+                    "link_ids": list(route.link_ids),
+                    "blocked_links": [],
+                }
+            )
+            continue
+
+        structural_route = shortest_route(
+            state,
+            from_node_id,
+            to_node_id,
+            require_operational=False,
+        )
+        if structural_route is None:
+            segments.append(
+                {
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "ok": False,
+                    "reason": f"no route {from_node_id}->{to_node_id}",
+                    "travel_ticks": 0,
+                    "node_ids": [],
+                    "link_ids": [],
+                    "blocked_links": [],
+                }
+            )
+            continue
+
+        segments.append(
+            {
+                "from_node_id": from_node_id,
+                "to_node_id": to_node_id,
+                "ok": False,
+                "reason": f"no operational route {from_node_id}->{to_node_id}",
+                "travel_ticks": structural_route.travel_ticks,
+                "node_ids": list(structural_route.node_ids),
+                "link_ids": list(structural_route.link_ids),
+                "blocked_links": _blocked_links_for_route_debug(state, structural_route),
+            }
+        )
+    return segments
+
+
+def _schedule_validation_errors(reason: str) -> list[dict[str, object]]:
+    """Return structured validation reasons for route tooling."""
+
+    code = "invalid_schedule"
+    if reason.startswith("unknown schedule stop: "):
+        code = "unknown_stop"
+    elif reason.startswith("unknown schedule: "):
+        code = "unknown_schedule"
+    elif reason.startswith("no route "):
+        code = "invalid_path"
+    elif reason == "schedule_in_active_trip":
+        code = "active_trip"
+    elif " requires " in reason and " consist" in reason and "train is " in reason:
+        code = "incompatible_consist"
+    return [{"code": code, "reason": reason}]
+
+
+def _schedule_route_debug_payload(
+    state: object,
+    command: CreateSchedule | PreviewCreateSchedule,
+    reason: str | None = None,
+) -> dict[str, object]:
+    """Return route stops, segments, and validation details for a schedule command."""
+
+    stop_ids = _schedule_route_stop_ids(command)
+    payload: dict[str, object] = {
+        "route_stop_ids": list(stop_ids),
+        "route_segments": _route_segments_debug(state, stop_ids),
     }
+    if reason is not None:
+        payload["validation_errors"] = _schedule_validation_errors(reason)
+
+    if all(node_id in state.nodes for node_id in stop_ids):
+        structural_route = route_through_stops(
+            state,
+            command.origin,
+            command.stops,
+            command.destination,
+            require_operational=False,
+        )
+        if structural_route is not None and structural_route.travel_ticks > 0:
+            payload.update(
+                {
+                    "route_travel_ticks": structural_route.travel_ticks,
+                    "route_node_ids": list(structural_route.node_ids),
+                    "route_link_ids": list(structural_route.link_ids),
+                    **_route_context_payload(state, structural_route),
+                }
+            )
+    return payload
 
 
 def _preview_error(command_type: str, target_id: str, exc: ValueError) -> dict[str, object]:
@@ -1605,8 +2112,8 @@ def _validate_mining_mission(
             ),
             {},
         )
-    fuel_input = max(0, int(command.fuel_input))
-    power_input = max(0, int(command.power_input))
+    fuel_input = max(mission_fuel_required(site), max(0, int(command.fuel_input)))
+    power_input = max(mission_power_required(site), max(0, int(command.power_input)))
     fuel_available = launch_node.stock(CargoType.FUEL)
     power_available = max(0, int(launch_world.base_power_margin))
     normalized_command = {
@@ -2735,6 +3242,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
                 reason=reason,
                 cost=cost,
                 capacity=command.capacity,
+                consist=TrainConsist(command.consist).value,
                 normalized_command=normalized_command,
             )
         return command_result(
@@ -2744,6 +3252,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             message=f"valid train preview for {cost:.0f}",
             cost=cost,
             capacity=command.capacity,
+            consist=TrainConsist(command.consist).value,
             normalized_command=normalized_command,
         )
 
@@ -2767,6 +3276,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             message=f"purchased train {command.train_id} for {cost:.0f}",
             cost=cost,
             capacity=command.capacity,
+            consist=train.consist.value,
         )
 
     if isinstance(command, PreviewCreateSchedule):
@@ -2774,10 +3284,13 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             next_departure_tick, route = _validate_create_schedule(state, command)
         except ValueError as exc:
             result = _preview_error(command.type, command.schedule_id, exc)
-            result.update(_structural_route_context_for_failed_schedule(state, command))
+            result.update(_schedule_route_debug_payload(state, command, str(exc)))
             return result
         normalized_command = _schedule_payload(command, next_departure_tick=next_departure_tick)
         route_context = _route_context_payload(state, route)
+        train = state.trains[command.train_id]
+        required_consist = required_consist_for(command.cargo_type)
+        route_debug = _schedule_route_debug_payload(state, command)
         return command_result(
             command.type,
             ok=True,
@@ -2787,6 +3300,10 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             route_travel_ticks=route.travel_ticks,
             route_node_ids=list(route.node_ids),
             route_link_ids=list(route.link_ids),
+            route_stop_ids=route_debug["route_stop_ids"],
+            route_segments=route_debug["route_segments"],
+            required_consist=required_consist.value,
+            train_consist=train.consist.value,
             normalized_command=normalized_command,
             **route_context,
         )
@@ -2805,9 +3322,13 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             priority=command.priority,
             active=command.active,
             return_to_origin=command.return_to_origin,
+            stops=command.stops,
         )
         state.add_schedule(schedule)
         route_context = _route_context_payload(state, route)
+        train = state.trains[command.train_id]
+        required_consist = required_consist_for(command.cargo_type)
+        route_debug = _schedule_route_debug_payload(state, command)
         return command_result(
             command.type,
             ok=True,
@@ -2817,7 +3338,148 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             route_travel_ticks=route.travel_ticks,
             route_node_ids=list(route.node_ids),
             route_link_ids=list(route.link_ids),
+            route_stop_ids=route_debug["route_stop_ids"],
+            route_segments=route_debug["route_segments"],
+            required_consist=required_consist.value,
+            train_consist=train.consist.value,
             **route_context,
+        )
+
+    if isinstance(command, PreviewUpdateSchedule):
+        try:
+            schedule, draft, next_departure_tick, route = _validate_update_schedule(state, command)
+        except ValueError as exc:
+            result = _preview_error(command.type, command.schedule_id, exc)
+            schedule = state.schedules.get(command.schedule_id)
+            if schedule is not None:
+                draft = _schedule_update_draft(state, command, schedule)
+                result.update(_schedule_route_debug_payload(state, draft, str(exc)))
+            else:
+                result["validation_errors"] = _schedule_validation_errors(str(exc))
+            return result
+        normalized_command = _schedule_update_payload(
+            command,
+            draft,
+            next_departure_tick=next_departure_tick,
+        )
+        route_context = _route_context_payload(state, route)
+        train = state.trains[draft.train_id]
+        required_consist = required_consist_for(draft.cargo_type)
+        route_debug = _schedule_route_debug_payload(state, draft)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.schedule_id,
+            message=f"valid schedule update preview over {route.travel_ticks} ticks",
+            next_departure_tick=next_departure_tick,
+            route_travel_ticks=route.travel_ticks,
+            route_node_ids=list(route.node_ids),
+            route_link_ids=list(route.link_ids),
+            route_stop_ids=route_debug["route_stop_ids"],
+            route_segments=route_debug["route_segments"],
+            required_consist=required_consist.value,
+            train_consist=train.consist.value,
+            current_schedule={
+                "id": schedule.id,
+                "train_id": schedule.train_id,
+                "origin": schedule.origin,
+                "destination": schedule.destination,
+                "stops": list(schedule.stops),
+                "cargo_type": schedule.cargo_type.value,
+                "units_per_departure": schedule.units_per_departure,
+                "interval_ticks": schedule.interval_ticks,
+                "next_departure_tick": schedule.next_departure_tick,
+                "priority": schedule.priority,
+                "active": schedule.active,
+                "return_to_origin": schedule.return_to_origin,
+            },
+            normalized_command=normalized_command,
+            **route_context,
+        )
+
+    if isinstance(command, UpdateSchedule):
+        schedule, draft, next_departure_tick, route = _validate_update_schedule(state, command)
+        schedule.train_id = draft.train_id
+        schedule.origin = draft.origin
+        schedule.destination = draft.destination
+        schedule.stops = draft.stops
+        schedule.cargo_type = draft.cargo_type
+        schedule.units_per_departure = draft.units_per_departure
+        schedule.interval_ticks = draft.interval_ticks
+        schedule.next_departure_tick = next_departure_tick
+        schedule.priority = draft.priority
+        schedule.active = draft.active
+        schedule.return_to_origin = draft.return_to_origin
+        route_context = _route_context_payload(state, route)
+        train = state.trains[draft.train_id]
+        required_consist = required_consist_for(draft.cargo_type)
+        route_debug = _schedule_route_debug_payload(state, draft)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.schedule_id,
+            message=f"updated schedule {command.schedule_id}",
+            next_departure_tick=next_departure_tick,
+            route_travel_ticks=route.travel_ticks,
+            route_node_ids=list(route.node_ids),
+            route_link_ids=list(route.link_ids),
+            route_stop_ids=route_debug["route_stop_ids"],
+            route_segments=route_debug["route_segments"],
+            required_consist=required_consist.value,
+            train_consist=train.consist.value,
+            **route_context,
+        )
+
+    if isinstance(command, PreviewDeleteSchedule):
+        try:
+            schedule = _validate_delete_schedule(state, command)
+        except ValueError as exc:
+            reason = str(exc)
+            return command_result(
+                command.type,
+                ok=False,
+                target_id=command.schedule_id,
+                message=(
+                    f"cannot delete schedule {command.schedule_id}; active trip in progress"
+                    if reason == "schedule_in_active_trip"
+                    else reason
+                ),
+                reason=reason,
+                validation_errors=_schedule_validation_errors(reason),
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.schedule_id,
+            message=f"valid delete preview for schedule {command.schedule_id}",
+            schedule={
+                "id": schedule.id,
+                "train_id": schedule.train_id,
+                "origin": schedule.origin,
+                "destination": schedule.destination,
+                "stops": list(schedule.stops),
+                "cargo_type": schedule.cargo_type.value,
+                "units_per_departure": schedule.units_per_departure,
+                "interval_ticks": schedule.interval_ticks,
+                "next_departure_tick": schedule.next_departure_tick,
+                "priority": schedule.priority,
+                "active": schedule.active,
+                "return_to_origin": schedule.return_to_origin,
+                "delivered_units": schedule.delivered_units,
+                "trips_dispatched": schedule.trips_dispatched,
+                "trips_completed": schedule.trips_completed,
+            },
+            normalized_command=_schedule_delete_payload(command),
+        )
+
+    if isinstance(command, DeleteSchedule):
+        _validate_delete_schedule(state, command)
+        del state.schedules[command.schedule_id]
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.schedule_id,
+            message=f"deleted schedule {command.schedule_id}",
         )
 
     if isinstance(command, PreviewBuildFacilityComponent):

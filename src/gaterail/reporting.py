@@ -33,6 +33,12 @@ def _section_enabled(sections: ReportSections, section: str) -> bool:
     return sections is None or section in sections
 
 
+def _schedule_route_label(schedule: object) -> str:
+    """Return the exact configured stop sequence for a freight schedule."""
+
+    return "->".join([schedule.origin, *schedule.stops, schedule.destination])
+
+
 def _format_node_rollup(label: str, rollup: object) -> str:
     """Format a node-to-cargo report map."""
 
@@ -260,7 +266,7 @@ def format_state_summary(state: GameState) -> str:
         lines.append("Orders: " + "; ".join(order_lines))
     if state.schedules:
         schedule_lines = [
-            f"{schedule.id} {schedule.cargo_type.value} {schedule.origin}->{schedule.destination} "
+            f"{schedule.id} {schedule.cargo_type.value} {_schedule_route_label(schedule)} "
             f"{schedule.units_per_departure} units every {schedule.interval_ticks} ticks"
             for schedule in state.schedules.values()
         ]
@@ -347,7 +353,7 @@ def format_scenario_inspection(state: GameState, sections: ReportSections = None
             (
                 schedule.id,
                 schedule.train_id,
-                f"{schedule.origin}->{schedule.destination}",
+                _schedule_route_label(schedule),
                 schedule.cargo_type.value,
                 schedule.units_per_departure,
                 schedule.interval_ticks,

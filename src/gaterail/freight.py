@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from gaterail.cargo import CargoType, metadata_for
+from gaterail.cargo import CargoType, consist_can_carry, metadata_for, required_consist_for
 from gaterail.economy import record_transfer
 from gaterail.models import FreightOrder, FreightSchedule, FreightTrain, GameState, TrainStatus
 from gaterail.traffic import reserve_route_capacity
-from gaterail.transport import shortest_route
+from gaterail.transport import route_through_stops
 
 
 FreightReport = dict[str, list[dict[str, object]]]
@@ -269,6 +269,7 @@ def _dispatch_trip(
     cargo_type: CargoType,
     requested_units: int,
     service_id: str,
+    stops: tuple[str, ...] = (),
 ) -> bool:
     """Load and dispatch one train trip."""
 
@@ -284,13 +285,31 @@ def _dispatch_trip(
         )
         return False
 
-    route = shortest_route(state, origin_id, destination_id)
-    if route is None:
+    if not consist_can_carry(train.consist, cargo_type):
+        required_consist = required_consist_for(cargo_type)
+        reason = (
+            f"cargo {cargo_type.value} requires {required_consist.value} consist, "
+            f"train is {train.consist.value}"
+        )
         events["blocked"].append(
             {
                 "train": train.name,
                 "order": service_id,
-                "reason": f"no route {origin_id}->{destination_id}",
+                "reason": reason,
+            }
+        )
+        train.status = TrainStatus.BLOCKED
+        train.blocked_reason = "incompatible_consist"
+        return False
+
+    route = route_through_stops(state, origin_id, stops, destination_id)
+    if route is None:
+        route_stop_ids = (origin_id, *stops, destination_id)
+        events["blocked"].append(
+            {
+                "train": train.name,
+                "order": service_id,
+                "reason": f"no route {'->'.join(route_stop_ids)}",
             }
         )
         return False
@@ -387,6 +406,7 @@ def _dispatch_trip(
             "cargo": cargo_type.value,
             "units": loaded,
             "travel_ticks": route.travel_ticks,
+            "route_stop_ids": [origin_id, *stops, destination_id],
             "links": list(route.link_ids),
             "order": service_id,
         }
@@ -435,6 +455,7 @@ def _dispatch_schedule(state: GameState, events: FreightReport, schedule: Freigh
         cargo_type=schedule.cargo_type,
         requested_units=schedule.units_per_departure,
         service_id=f"{SCHEDULE_ORDER_PREFIX}{schedule.id}",
+        stops=schedule.stops,
     )
     if dispatched:
         schedule.trips_dispatched += 1

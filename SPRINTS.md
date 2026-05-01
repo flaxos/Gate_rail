@@ -20,9 +20,10 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 10 is complete: the Godot bridge/client scaffold renders live snapshots, controls schedules/orders, displays finance/contracts, wires placeholder assets, and surfaces alerts.
 - Sprint 11 is complete: the Godot client can auto-run the backend, inspect map entities, highlight selected objects, and show clearer link/train operational state.
 - Sprint 12 hardening is complete: backend construction commands are immediate, validated, and test-covered for same-world rail/node expansion; delayed construction queues are deferred until build-time simulation is worth modeling.
-- Sprint 13 is underway in the Local Region scene only. Slices 13A through 13D are complete: backend-owned previews drive node, rail, train, and route creation, with persisted local-world layout metadata, visible HUD preview context, ESC/tool-switch cancellation, an explicit cargo picker on route creation, and a Select-tool inspector for nodes and links. The galaxy map stays focused on run/inspect/dispatch/navigation.
-- Sprint 14 is in progress. Slices 14A (buffer distribution), 14B (transfer-limit pressure visibility), and 14C (per-node recipes) are complete: depots/warehouses auto-feed neighbouring demand within their per-tick transfer budget, node snapshots expose transfer bottlenecks, and individual industry/extractor nodes can transform inputs into outputs through `NodeRecipe`.
-- Facility, industry, and rail-depth planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, elemental resource chains, power inputs, space extraction, outpost logistics, and richer rail networks exist. Sprints 17-21 now prioritize core industry, curved/branched/signaled rail, and 2D diagnostics before any 3D facility-view spike.
+- Sprint 13 is complete in the Local Region scene: backend-owned previews drive node, rail, train, and route creation, with persisted local-world layout metadata, HUD preview context, cancellation, cargo picking, and Select-tool inspection.
+- Sprint 14 is complete: depots/warehouses move cargo through buffer rules, node snapshots expose transfer bottlenecks, per-node recipes drive local industry, and Local Region overlays make supply/demand/storage/shortage pressure visible.
+- Facility, industry, and rail-depth planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, elemental resource chains, power inputs, space extraction, outpost logistics, and richer rail networks exist.
+- Sprints 16-27 are complete through the current working tree: facility components/internal wiring, resource chains, typed industry, gate power support, power generation, remote extraction/outpost operations, directional gates, train consists, multi-stop schedules, cargo-flow snapshots, schedule edit/delete management, bridge save/load, and early/expanded playtest scenario presets are all covered by backend tests and Godot bridge/UI wiring.
 
 ## Long-term stages
 
@@ -753,21 +754,51 @@ Sprint 21D internal wiring completed state:
 - 4 new tests in `tests/test_sprint21d_internal_wiring.py` cover wired input transfer, output transfer, full-output blockers, persistence, and snapshot exposure.
 - Full pytest suite passes 230 tests after the 21D internal-wiring slice.
 
+Sprint 22 completed state:
+- directional gates now distinguish source and exit endpoints while preserving bidirectional legacy gates.
+- reciprocal one-way gate links are allowed, but duplicate same-direction links are rejected.
+- train consists are validated at purchase, schedule preview/create, and runtime dispatch, with specialized cargo reporting the required consist.
+- tests cover directional route availability, reverse-link metadata, consist parsing, preview validation, matching specialized schedules, and runtime blocking.
+
+Sprint 23 completed state:
+- schedules support ordered intermediate `stops`.
+- preview/create results include exact `route_stop_ids`, route segments, route nodes/links, gate handoff context, and structural blockers for invalid operational routes.
+- command parsing, save/load, snapshot output, dispatch route use, and CLI inspection preserve multi-stop services.
+
+Sprint 24 completed state:
+- snapshots expose `cargo_flows` for schedule services.
+- each flow includes schedule identity, cargo, active state, configured stop sequence, resolved route nodes/links, trip counters, delivered units, and in-transit units.
+- Godot draws cargo-flow overlays from snapshot payloads instead of inferring flow rules client-side.
+
+Sprint 25 completed state:
+- `PreviewUpdateSchedule` / `UpdateSchedule` edit existing schedules through the same backend-owned route, stop, consist, and next-departure validation used by schedule creation.
+- `PreviewDeleteSchedule` / `DeleteSchedule` remove idle schedules and reject schedules with an active in-flight schedule trip.
+- schedule snapshots include `priority` and `return_to_origin`, and schedule deletion removes the related cargo-flow payload.
+- Godot bridge helpers and main-panel controls let the player preview/apply schedule cargo, units, interval, active-state, and intermediate-stop edits, then delete idle schedules.
+- invalid schedule edit previews surface route-segment and blocked-link reasons in the status strip.
+
+Sprint 26 completed state:
+- the stdio bridge accepts `save_path`, `load_path`, and `scenario` frames, replacing the live Python simulation in-place and returning `saved_path`, `loaded_path`, or `loaded_scenario` metadata in the bridge payload.
+- `early_build` / `early` / `starter` / `new_game` adds a sparse two-world start with limited cash, construction stock, one starter train, and one inactive starter schedule for first-build testing.
+- `industrial_expansion` / `industrial` / `expanded` / `large_industry` adds a larger connected web with extra worlds, gates, resource deposits, typed industries, power plants, gate support, and multi-stop services for stress testing industry logistics.
+- the Godot bridge exposes save/load/scenario helpers, and the Galaxy Map control panel has a save path field, Save Game, Load Game, and scenario reset controls.
+- tests cover bridge save/load round-trip, bridge scenario reset, scenario catalog listing, preset scale/content expectations, and Godot script wiring.
+
+Sprint 27 completed state:
+- mining mission previews and dispatches now use backend-computed fuel and power requirements from the selected `SpaceSite`; omitted client fields no longer allow free launches.
+- mission previews report invalid sites, bad launch/return node kinds, missing fuel, power shortfall, expected yield, return capacity, and the normalized dispatch command.
+- dispatched missions consume fuel, reserve world power, release reserved power on completion/failure, and return resources into collection/orbital storage for the existing resource-distribution and recipe phases to consume on later ticks.
+- outpost bootstrap remains backend-owned: preview/build stage an outpost construction project, delivered cargo completes it, and completion promotes the node into an operational logistics role.
+- Local Region now previews mining missions from spaceport nodes, shows fuel/power/yield/return-space context from backend command results, and only dispatches after preview confirmation.
+- tests cover backend-computed requirements, missing-fuel blockers, returned resources feeding local industry, legacy space lifecycle persistence, and Local Region preview wiring.
+
 ## Current next step
 
-Sprint 21 should continue the 2D facility and industry diagnostic pass now that remote extraction, signal/block, and power-generation foundations have enough backend state to inspect:
-- deepen node drill-in cards for facility components, resource recipes, power plants, gate support, space sites, and active mining missions
-- add backend-preview UI for facility components without duplicating simulation rules in Godot
-- add local rail planning tools for curved alignments, waypoint edits, branches, signals, protected blocks, vacuum-tube portals, and cargo/consist compatibility
-- add overlays that connect resource-chain blockers, plant fuel blockers, gate power blockers, construction needs, and branch-pressure warnings
-- convert the hand-authored relationship atlas into a CLI-generated report once the catalog and scenario relationships stabilize
+Sprint 28 should close the next gameplay gap by making rail and signal planning editable in Godot.
 
-Sprint 20 remote extraction and outpost logistics remains the backend dependency stack for this UI work:
-- add remote resource sites such as asteroid fields, moons, debris fields, gas pockets, or anomalies, with resource ids, yield metadata, travel time, and discovery state
-- add fixed-tick mining missions that require launch/return nodes, travel time, fuel or power inputs, and deterministic returned resources
-- add orbital or collection-station nodes/projects that connect returned resources to the rail/gate industry chain
-- add CLI/snapshot reports for mission status, expected return, blockers, and returned resources
-- add rail sidecar work for train consists or typed capacity maps where remote outputs include bulk ore, liquids, protected electronics, heavy modules, reactor materials, or exotic cargo
-- add tests for mission dispatch, mission return, storage, save/load continuity, and report determinism
+Recommended Sprint 28 target:
+- add Local Region rail/signal planning controls for existing backend-owned alignments and track signals.
+- preview waypoint edits, signal placement, protected block warnings, and consist/cargo compatibility through backend commands.
+- keep graphical editing as a client proposal surface; Python remains authoritative for validation and route/debug payloads.
 
-The 2D facility UI should wait until the backend can show real resource-chain, power, remote-extraction, and rail-network blockers, and 3D facility presentation should wait until after resource, power, space-extraction, outpost, rail-depth, and 2D diagnostic contracts are stable.
+3D facility presentation should still wait until after resource, power, space-extraction, outpost, rail-depth, and 2D diagnostic contracts are stable.

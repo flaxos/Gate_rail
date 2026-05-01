@@ -64,6 +64,7 @@ class TrainConsist(StrEnum):
     BULK_HOPPER = "bulk_hopper"
     LIQUID_TANKER = "liquid_tanker"
     PROTECTED = "protected"
+    HEAVY_FLAT = "heavy_flat"
 
 
 class ProgressionTrend(StrEnum):
@@ -467,6 +468,10 @@ class NetworkNode:
     facility: Facility | None = None
     construction_project_id: str | None = None
     outpost_kind: OutpostKind | None = None
+    stock_targets: dict[CargoType, int] = field(default_factory=dict)
+    buffer_priority: int = 0
+    push_logic: bool = True
+    pull_logic: bool = True
 
     def effective_storage_capacity(self) -> int:
         """Return active storage cap, derived from facility bays when present."""
@@ -713,6 +718,7 @@ class FreightSchedule:
     priority: int = 100
     active: bool = True
     return_to_origin: bool = True
+    stops: tuple[str, ...] = ()
     delivered_units: int = 0
     trips_completed: int = 0
     trips_dispatched: int = 0
