@@ -230,6 +230,28 @@ def test_cargo_typed_site_returns_haul_into_train_cargo_inventory() -> None:
     assert collection.resource_stock("mixed_ore") == 0
 
 
+def test_cargo_typed_site_preview_reports_train_cargo_bucket() -> None:
+    state = _cargo_site_state()
+
+    preview = state.apply_command(
+        command_from_dict(
+            {
+                "type": "PreviewDispatchMiningMission",
+                "mission_id": "mission_preview",
+                "site_id": "site_ore",
+                "launch_node_id": "orbital_yard",
+                "return_node_id": "collection_station",
+            }
+        )
+    )
+
+    assert preview["ok"] is True
+    assert preview["haul_bucket"] == "cargo"
+    assert preview["haul_label"] == "ore"
+    assert preview["site_cargo_type"] == "ore"
+    assert preview["site_resource_id"] == "mixed_ore"
+
+
 def test_cargo_typed_site_drops_overflow_when_return_node_is_full() -> None:
     state = _cargo_site_state(return_capacity=50)
     state.apply_command(

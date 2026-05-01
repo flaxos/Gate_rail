@@ -13,11 +13,6 @@ const MIN_CENTER_MAP_WIDTH := 360.0
 const MAP_INSET := Vector2(92, 96)
 const MAX_ALERT_HISTORY := 8
 const MAX_ALERT_MESSAGE_LENGTH := 86
-const PLAYTEST_SCENARIOS := [
-	"early_build",
-	"sprint20",
-	"industrial_expansion",
-]
 const TRAIN_PICK_RADIUS := 18.0
 const NODE_PICK_RADIUS := 18.0
 const WORLD_PICK_RADIUS := 52.0
@@ -63,10 +58,15 @@ var _control_panel: PanelContainer
 var _operations_panel: PanelContainer
 var _inspector_panel: PanelContainer
 var _alert_panel: PanelContainer
+var _operations_scroll: ScrollContainer
 var _schedule_scroll: ScrollContainer
 var _contract_scroll: ScrollContainer
 var _order_scroll: ScrollContainer
 var _alert_scroll: ScrollContainer
+var _tutorial_panel: PanelContainer
+var _tutorial_summary: Label
+var _tutorial_list: VBoxContainer
+var _tutorial_action_button: Button
 var _hud_tick_value: Label
 var _hud_cash_value: Label
 var _hud_reputation_value: Label
@@ -93,11 +93,14 @@ var _dispatch_destination: OptionButton
 var _dispatch_cargo: OptionButton
 var _dispatch_units: SpinBox
 var _dispatch_priority: SpinBox
+var _dispatch_status_label: Label
 var _alert_history: Array = []
+var _tutorial_next_action: Dictionary = {}
 var _auto_running := false
 var _auto_step_pending := false
 var _bridge_running := false
 var _manual_order_sequence := 1
+var _dispatch_click_stage := "pickup"
 var _last_command_signature := ""
 var _selected_kind := ""
 var _selected_id := ""
@@ -244,8 +247,6 @@ func _build_control_panel(ui: CanvasLayer) -> void:
 
 	_scenario_select = OptionButton.new()
 	_scenario_select.custom_minimum_size = Vector2(190, 0)
-	for scenario_id in PLAYTEST_SCENARIOS:
-		_scenario_select.add_item(str(scenario_id))
 	scenario_row.add_child(_scenario_select)
 
 	var load_scenario_button := Button.new()
@@ -324,8 +325,14 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	margin.add_theme_constant_override("margin_bottom", 10)
 	_operations_panel.add_child(margin)
 
+	_operations_scroll = ScrollContainer.new()
+	_operations_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_operations_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(_operations_scroll)
+
 	var box := VBoxContainer.new()
-	margin.add_child(box)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_operations_scroll.add_child(box)
 
 	var finance_title := Label.new()
 	finance_title.text = "Finance and Reputation"
@@ -334,6 +341,8 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	_finance_label = Label.new()
 	_finance_label.text = "Waiting for snapshot..."
 	box.add_child(_finance_label)
+
+	_build_tutorial_section(box)
 
 	var contract_title := Label.new()
 	contract_title.text = "Contracts"
@@ -362,6 +371,13 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	_dispatch_units = _add_spin_row(form, "Units", 1, 200, 1, 4)
 	_dispatch_priority = _add_spin_row(form, "Priority", 1, 999, 1, 100)
 
+	_dispatch_status_label = Label.new()
+	_dispatch_status_label.text = "Manual Dispatch"
+	_dispatch_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_dispatch_status_label.add_theme_font_size_override("font_size", 12)
+	_dispatch_status_label.modulate = Color(0.70, 0.82, 0.84)
+	box.add_child(_dispatch_status_label)
+
 	var dispatch_button := Button.new()
 	dispatch_button.text = "Queue DispatchOrder"
 	_set_button_icon(dispatch_button, "ui_dispatch.svg")
@@ -378,6 +394,49 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 
 	_order_list = VBoxContainer.new()
 	_order_scroll.add_child(_order_list)
+
+
+func _build_tutorial_section(box: VBoxContainer) -> void:
+	_tutorial_panel = PanelContainer.new()
+	_tutorial_panel.visible = false
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.12, 0.14, 0.94)
+	panel_style.border_color = Color(0.20, 0.42, 0.44)
+	panel_style.set_border_width_all(1)
+	panel_style.set_corner_radius_all(6)
+	_tutorial_panel.add_theme_stylebox_override("panel", panel_style)
+	box.add_child(_tutorial_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	_tutorial_panel.add_child(margin)
+
+	var content := VBoxContainer.new()
+	margin.add_child(content)
+
+	var title := Label.new()
+	title.text = "Tutorial Loop"
+	title.modulate = Color(0.78, 0.94, 0.92)
+	content.add_child(title)
+
+	_tutorial_summary = Label.new()
+	_tutorial_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tutorial_summary.add_theme_font_size_override("font_size", 12)
+	_tutorial_summary.modulate = Color(0.70, 0.82, 0.84)
+	content.add_child(_tutorial_summary)
+
+	_tutorial_list = VBoxContainer.new()
+	_tutorial_list.add_theme_constant_override("separation", 3)
+	content.add_child(_tutorial_list)
+
+	_tutorial_action_button = Button.new()
+	_tutorial_action_button.text = "Advance tutorial"
+	_set_button_icon(_tutorial_action_button, "ui_step.svg")
+	_tutorial_action_button.pressed.connect(_on_tutorial_action_pressed)
+	content.add_child(_tutorial_action_button)
 
 
 func _build_inspector_panel(ui: CanvasLayer) -> void:
@@ -511,6 +570,8 @@ func _layout_ui() -> void:
 		_schedule_scroll.custom_minimum_size = Vector2(left_width - 40.0, 160.0)
 	if _inspector_label != null:
 		_inspector_label.custom_minimum_size = Vector2(left_width - 40.0, max(140.0, _panel_height(_inspector_panel) - 58.0))
+	if _operations_scroll != null:
+		_operations_scroll.custom_minimum_size = Vector2(right_width - 24.0, max(260.0, _panel_height(_operations_panel) - 24.0))
 	if _contract_scroll != null:
 		_contract_scroll.custom_minimum_size = Vector2(right_width - 40.0, 125.0)
 	if _order_scroll != null:
@@ -579,12 +640,14 @@ func _on_snapshot_received(next_snapshot: Dictionary) -> void:
 	_auto_running = GateRailBridge.is_auto_running()
 	_auto_step_pending = GateRailBridge.is_auto_step_pending()
 	_ingest_bridge_command_results()
+	_refresh_scenario_select_from_snapshot()
 	_rebuild_positions()
 	_update_hud()
 	_update_bridge_label()
 	_update_play_controls()
 	_rebuild_schedule_list()
 	_update_finance_panel()
+	_rebuild_tutorial_panel()
 	_rebuild_contract_list()
 	_rebuild_dispatch_options()
 	_rebuild_order_list()
@@ -594,12 +657,51 @@ func _on_snapshot_received(next_snapshot: Dictionary) -> void:
 	queue_redraw()
 
 
+func _refresh_scenario_select_from_snapshot() -> void:
+	if _scenario_select == null:
+		return
+	var catalog := _array(snapshot.get("scenario_catalog", []))
+	if catalog.is_empty():
+		return
+	var previous := _selected_option_text(_scenario_select)
+	_scenario_select.clear()
+	for item in catalog:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var key := str(item.get("key", ""))
+		if key.is_empty():
+			continue
+		_scenario_select.add_item(key)
+	if _scenario_select.item_count <= 0:
+		return
+	if not previous.is_empty():
+		_select_option_text(_scenario_select, previous)
+		if _selected_option_text(_scenario_select) == previous:
+			return
+	for index in range(_scenario_select.item_count):
+		var entry: Variant = catalog[index] if index < catalog.size() else null
+		if typeof(entry) == TYPE_DICTIONARY and _flag(entry.get("default", false), false):
+			_scenario_select.select(index)
+			return
+	_scenario_select.select(0)
+	return
+
+
 func _on_bridge_error(message: String) -> void:
-	_error_label.text = "Bridge: %s" % message
+	var friendly_message := _format_save_load_error(message)
+	_error_label.text = "Bridge: %s" % friendly_message
 	_auto_step_pending = false
 	_auto_running = GateRailBridge.is_auto_running()
 	_update_play_controls()
-	_push_alert("bridge_error", message)
+	_push_alert("bridge_error", friendly_message)
+
+
+func _format_save_load_error(message: String) -> String:
+	var missing_prefix := "save file not found:"
+	if message.begins_with(missing_prefix):
+		var path := message.substr(missing_prefix.length()).strip_edges()
+		return "Save not found at %s. Press Save Game first, or choose an existing save path." % path
+	return message
 
 
 func _on_bridge_status_changed(running: bool) -> void:
@@ -625,6 +727,19 @@ func _request_live_snapshot() -> void:
 func _on_step_pressed() -> void:
 	_error_label.text = "Sending {\"ticks\":1} to live bridge..."
 	GateRailBridge.step_ticks(1)
+
+
+func _on_tutorial_action_pressed() -> void:
+	if _tutorial_next_action.is_empty():
+		return
+	var kind := str(_tutorial_next_action.get("kind", ""))
+	if kind == "step_ticks":
+		var ticks: int = int(max(1, int(_tutorial_next_action.get("ticks", 1))))
+		var label := str(_tutorial_next_action.get("label", "Running tutorial"))
+		_error_label.text = "%s for %s tick(s)..." % [label, ticks]
+		GateRailBridge.step_ticks(ticks)
+		return
+	_error_label.text = "Unsupported tutorial action: %s" % kind
 
 
 func _on_play_pause_pressed() -> void:
@@ -775,11 +890,121 @@ func _on_dispatch_pressed() -> void:
 	_error_label.text = "Queueing %s..." % order_id
 	if GateRailBridge.dispatch_order(order_id, train_id, origin, destination, cargo, units, priority, 0):
 		_dispatch_order_id.text = ""
+		_dispatch_click_stage = "pickup"
+		_update_dispatch_builder_status()
 
 
 func _on_cancel_order_pressed(order_id: String) -> void:
 	_error_label.text = "Cancelling %s..." % order_id
 	GateRailBridge.cancel_order(order_id, 0)
+
+
+func _apply_selection_to_dispatch_builder(kind: String, entity_id: String) -> void:
+	if kind == "train":
+		_select_option_text(_dispatch_train, entity_id)
+		var train := _train_by_id(entity_id)
+		var node_id := str(train.get("node_id", ""))
+		if not node_id.is_empty():
+			_select_option_text(_dispatch_origin, node_id)
+			_select_dispatch_cargo_for_route(node_id, _selected_option_text(_dispatch_destination))
+			_dispatch_click_stage = "dropoff"
+		_update_dispatch_builder_status()
+		return
+
+	if kind != "node":
+		return
+
+	var current_origin := _selected_option_text(_dispatch_origin)
+	if _dispatch_click_stage == "dropoff" and not current_origin.is_empty() and entity_id != current_origin:
+		_select_option_text(_dispatch_destination, entity_id)
+		_select_dispatch_cargo_for_route(current_origin, entity_id)
+		_dispatch_click_stage = "ready"
+	else:
+		_select_option_text(_dispatch_origin, entity_id)
+		_select_dispatch_cargo_for_route(entity_id, _selected_option_text(_dispatch_destination))
+		_dispatch_click_stage = "dropoff"
+	_update_dispatch_builder_status()
+
+
+func _select_dispatch_cargo_for_route(origin_id: String, destination_id: String) -> void:
+	var cargo_id := _preferred_cargo_for_route(origin_id, destination_id)
+	if cargo_id.is_empty():
+		return
+	_select_option_text(_dispatch_cargo, cargo_id)
+	_select_dispatch_units_for_route(origin_id, cargo_id)
+
+
+func _preferred_cargo_for_route(origin_id: String, destination_id: String) -> String:
+	var origin_node := _node_by_id(origin_id)
+	var inventory_raw: Variant = origin_node.get("inventory", {})
+	if typeof(inventory_raw) != TYPE_DICTIONARY:
+		return ""
+	var inventory: Dictionary = inventory_raw
+	var candidates: Array = []
+
+	if not destination_id.is_empty():
+		var destination_node := _node_by_id(destination_id)
+		_append_unique_strings(candidates, _dictionary_keys(destination_node.get("demand", {})))
+		var recipe_raw: Variant = destination_node.get("recipe", {})
+		if typeof(recipe_raw) == TYPE_DICTIONARY:
+			var recipe: Dictionary = recipe_raw
+			_append_unique_strings(candidates, _dictionary_keys(recipe.get("inputs", {})))
+		for contract_item in _array(snapshot.get("contracts", [])):
+			if typeof(contract_item) != TYPE_DICTIONARY:
+				continue
+			var contract: Dictionary = contract_item
+			if str(contract.get("destination", "")) == destination_id and str(contract.get("status", "")) == "active":
+				_append_unique_strings(candidates, [str(contract.get("cargo", ""))])
+
+	for candidate in candidates:
+		var candidate_id := str(candidate)
+		if int(inventory.get(candidate_id, 0)) > 0:
+			return candidate_id
+
+	for cargo_id in _sorted_strings(_dictionary_keys(inventory)):
+		var stocked_id := str(cargo_id)
+		if int(inventory.get(stocked_id, 0)) > 0:
+			return stocked_id
+	return ""
+
+
+func _select_dispatch_units_for_route(origin_id: String, cargo_id: String) -> void:
+	if _dispatch_units == null or cargo_id.is_empty():
+		return
+	var suggested := _selected_train_capacity()
+	var available := _node_cargo_units(origin_id, cargo_id)
+	if available > 0 and available < suggested:
+		suggested = available
+	if suggested < 1:
+		suggested = 1
+	_dispatch_units.value = suggested
+
+
+func _selected_train_capacity() -> int:
+	var train_id := _selected_option_text(_dispatch_train)
+	var train := _train_by_id(train_id)
+	return int(train.get("capacity", 1))
+
+
+func _node_cargo_units(node_id: String, cargo_id: String) -> int:
+	var node := _node_by_id(node_id)
+	var inventory_raw: Variant = node.get("inventory", {})
+	if typeof(inventory_raw) != TYPE_DICTIONARY:
+		return 0
+	var inventory: Dictionary = inventory_raw
+	return int(inventory.get(cargo_id, 0))
+
+
+func _update_dispatch_builder_status() -> void:
+	if _dispatch_status_label == null:
+		return
+	_dispatch_status_label.text = "Manual Dispatch | Train %s | Pickup %s | Dropoff %s | %s x%s" % [
+		_selected_option_text(_dispatch_train),
+		_selected_option_text(_dispatch_origin),
+		_selected_option_text(_dispatch_destination),
+		_selected_option_text(_dispatch_cargo),
+		int(_dispatch_units.value) if _dispatch_units != null else 0,
+	]
 
 
 func _select_at_position(point: Vector2) -> bool:
@@ -809,6 +1034,7 @@ func _select_at_position(point: Vector2) -> bool:
 func _select_entity(kind: String, entity_id: String) -> void:
 	_selected_kind = kind
 	_selected_id = entity_id
+	_apply_selection_to_dispatch_builder(kind, entity_id)
 	_update_inspector()
 	queue_redraw()
 
@@ -998,6 +1224,91 @@ func _update_finance_panel() -> void:
 	]
 
 
+func _tutorial_snapshot() -> Dictionary:
+	var raw: Variant = snapshot.get("tutorial", {})
+	if typeof(raw) == TYPE_DICTIONARY:
+		var tutorial: Dictionary = raw
+		return tutorial
+	return {}
+
+
+func _rebuild_tutorial_panel() -> void:
+	if _tutorial_panel == null or _tutorial_list == null:
+		return
+	var tutorial := _tutorial_snapshot()
+	if tutorial.is_empty():
+		_tutorial_panel.visible = false
+		_tutorial_next_action = {}
+		return
+
+	_tutorial_panel.visible = true
+	if _tutorial_summary != null:
+		_tutorial_summary.text = str(tutorial.get("summary", ""))
+
+	for child in _tutorial_list.get_children():
+		child.queue_free()
+	for step in _array(tutorial.get("steps", [])):
+		if typeof(step) == TYPE_DICTIONARY:
+			_tutorial_list.add_child(_build_tutorial_step_row(step))
+
+	var action_raw: Variant = tutorial.get("next_action", {})
+	if typeof(action_raw) == TYPE_DICTIONARY:
+		var action: Dictionary = action_raw
+		_tutorial_next_action = action.duplicate(true)
+	else:
+		_tutorial_next_action = {}
+
+	if _tutorial_action_button != null:
+		var action_kind := str(_tutorial_next_action.get("kind", ""))
+		var can_run_action := action_kind == "step_ticks"
+		_tutorial_action_button.visible = can_run_action
+		_tutorial_action_button.disabled = not can_run_action
+		_tutorial_action_button.text = str(_tutorial_next_action.get("label", "Advance tutorial"))
+
+
+func _build_tutorial_step_row(step: Dictionary) -> Control:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size = Vector2(440, 28)
+	row.add_theme_constant_override("separation", 8)
+
+	var status := str(step.get("status", "pending"))
+	var status_label := Label.new()
+	status_label.custom_minimum_size = Vector2(72, 0)
+	status_label.text = status.to_upper()
+	status_label.add_theme_font_size_override("font_size", 11)
+	status_label.modulate = _tutorial_status_color(status)
+	row.add_child(status_label)
+
+	var label := Label.new()
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var row_text: String = "%s | %s/%s %s | %s -> %s" % [
+		step.get("label", step.get("id", "step")),
+		step.get("delivered", 0),
+		step.get("target", 0),
+		step.get("cargo", "?"),
+		step.get("origin", "?"),
+		step.get("destination", "?"),
+	]
+	var reward_cash := float(step.get("reward_cash", 0.0))
+	var reward_reputation := int(step.get("reward_reputation", 0))
+	if reward_cash > 0.0 or reward_reputation > 0:
+		row_text += " | reward %.0f cash / +%s rep" % [reward_cash, reward_reputation]
+	label.text = row_text
+	row.add_child(label)
+	return row
+
+
+func _tutorial_status_color(status: String) -> Color:
+	match status:
+		"complete":
+			return Color(0.50, 0.90, 0.55)
+		"active":
+			return Color(0.95, 0.76, 0.32)
+		_:
+			return Color(0.55, 0.66, 0.70)
+
+
 func _update_bridge_label() -> void:
 	if _bridge_status_value == null:
 		return
@@ -1072,6 +1383,10 @@ func _rebuild_alert_strip() -> void:
 		_alert_strip.add_child(_build_alert_chip(alert))
 		rendered += 1
 
+	for alert in _current_tutorial_alerts():
+		_alert_strip.add_child(_build_alert_chip(alert))
+		rendered += 1
+
 	for alert in _current_link_alerts():
 		_alert_strip.add_child(_build_alert_chip(alert))
 		rendered += 1
@@ -1108,6 +1423,17 @@ func _route_debug_alerts(command_result: Dictionary) -> Array:
 				"kind": "command_error",
 				"message": "%s: %s" % [str(blocked.get("link_id", "link")), str(blocked.get("reason", "blocked"))],
 			})
+	return alerts
+
+
+func _current_tutorial_alerts() -> Array:
+	var alerts: Array = []
+	var tutorial := _tutorial_snapshot()
+	if tutorial.is_empty():
+		return alerts
+	for alert in _array(tutorial.get("alerts", [])):
+		if typeof(alert) == TYPE_DICTIONARY:
+			alerts.append(alert)
 	return alerts
 
 
@@ -1186,6 +1512,8 @@ func _alert_prefix(kind: String) -> String:
 			return "DISRUPT"
 		"congestion":
 			return "CONGEST"
+		"tutorial":
+			return "TUTORIAL"
 		"warning":
 			return "WARN"
 		_:
@@ -1202,6 +1530,8 @@ func _alert_fill_color(kind: String) -> Color:
 			return Color(0.42, 0.16, 0.06, 0.96)
 		"congestion":
 			return Color(0.36, 0.26, 0.06, 0.96)
+		"tutorial":
+			return Color(0.05, 0.20, 0.22, 0.96)
 		"warning":
 			return Color(0.24, 0.20, 0.08, 0.96)
 		_:
@@ -1218,6 +1548,8 @@ func _alert_border_color(kind: String) -> Color:
 			return Color(0.98, 0.48, 0.22)
 		"congestion":
 			return Color(0.95, 0.74, 0.25)
+		"tutorial":
+			return Color(0.24, 0.78, 0.82)
 		"warning":
 			return Color(0.78, 0.68, 0.28)
 		_:
@@ -1513,6 +1845,7 @@ func _rebuild_dispatch_options() -> void:
 	_refill_option(_dispatch_origin, _node_ids())
 	_refill_option(_dispatch_destination, _node_ids())
 	_refill_option(_dispatch_cargo, _cargo_ids())
+	_update_dispatch_builder_status()
 
 
 func _train_ids() -> Array:
@@ -1533,6 +1866,9 @@ func _node_ids() -> Array:
 
 func _cargo_ids() -> Array:
 	var cargo: Dictionary = {}
+	for item in _array(snapshot.get("cargo_catalog", [])):
+		if typeof(item) == TYPE_DICTIONARY:
+			cargo[str(item.get("id", ""))] = true
 	for schedule in _array(snapshot.get("schedules", [])):
 		if typeof(schedule) == TYPE_DICTIONARY:
 			cargo[str(schedule.get("cargo", ""))] = true
@@ -1589,6 +1925,15 @@ func _string_list(values: Array) -> Array:
 	for value in values:
 		output.append(str(value))
 	return output
+
+
+func _append_unique_strings(target: Array, values: Array) -> void:
+	for value in values:
+		var text := str(value)
+		if text.is_empty():
+			continue
+		if not target.has(text):
+			target.append(text)
 
 
 func _dictionary_keys(value: Variant) -> Array:

@@ -135,6 +135,22 @@ gaterail --scenario early_build --inspect --report schedules,stockpiles
 gaterail --scenario industrial_expansion --ticks 20 --report traffic,resources,power,schedules
 ```
 
+Start from the six-world tutorial ring:
+
+```bash
+gaterail --scenario tutorial_six_worlds --inspect --report schedules,stockpiles
+gaterail --load saves/tutorial_six_worlds.json --ticks 20 --report schedules,finance
+```
+
+In Godot, load `tutorial_six_worlds` or `saves/tutorial_six_worlds.json`. The tutorial schedules start disabled for manual playtesting: click a train on the galaxy map, click a pickup node, click a dropoff node, then queue the one-shot dispatch. After the manual route works, enable or create schedules to automate the supply route. The Tutorial Loop panel is driven by the backend `tutorial` snapshot payload.
+
+Run the closed mining-to-settlement payoff loop through stdio:
+
+```bash
+printf '{"scenario":"mining_loop","commands":[{"type":"DispatchMiningMission","mission_id":"mission_loop","site_id":"site_brink_belt","launch_node_id":"frontier_spaceport","return_node_id":"frontier_collection"},{"type":"SetScheduleEnabled","schedule_id":"ore_haul_to_core","enabled":true},{"type":"SetScheduleEnabled","schedule_id":"parts_to_frontier_settlement","enabled":true}],"ticks":30}\n' \
+  | PYTHONPATH=src python3 -m gaterail.main --stdio
+```
+
 Save and resume a deterministic playtest:
 
 ```bash
@@ -172,7 +188,9 @@ godot --path godot
 The Godot scaffold has two scenes that share the `GateRailBridge` autoload:
 
 - `scenes/main.tscn` (Galaxy Map) — draws the fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. Exposes bridge status, save/load, scenario reset, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, auto-run, map entity inspection, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
-- `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, gate-hub, same-world rail, interworld gate-link, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; route creation lets the player tune cargo, units per departure, and interval before preview. The right HUD Build Planner shows preview context, gate handoff route warnings, and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The `LAYERS` toggle renders backend-owned supply, demand, inventory, shortage, recipe-blocked, and transfer-pressure overlays. The **Galaxy Map** button returns to `main.tscn`.
+- `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, gate-hub, same-world rail, interworld gate-link, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; route creation lets the player tune cargo, units per departure, and interval before preview. The right HUD Build Planner shows preview context, gate handoff route warnings, mining mission fuel/power/yield/haul-bucket context, and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The `LAYERS` toggle renders backend-owned supply, demand, inventory, shortage, recipe-blocked, and transfer-pressure overlays. The **Galaxy Map** button returns to `main.tscn`.
+
+Backend snapshots include `scenario_catalog` and `cargo_catalog`; Godot selectors consume those catalogs so new Python scenarios and cargo types do not need duplicate client-side registry edits.
 
 Run the test suite:
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from math import cos, pi, sin
+
+from gaterail.cargo import cargo_catalog_payload
 from gaterail.economy import BUFFER_NODE_KINDS
 from gaterail.facilities import facility_summary
 from gaterail.gate import preview_gate_power
@@ -71,6 +74,23 @@ def _plain_json_value(value: object) -> object:
     return value
 
 
+def _scenario_catalog_payload() -> list[dict[str, object]]:
+    """Return backend-owned built-in scenario metadata for clients."""
+
+    from gaterail.scenarios import DEFAULT_SCENARIO, scenario_definitions
+
+    return [
+        {
+            "key": definition.key,
+            "aliases": list(definition.aliases),
+            "title": definition.title,
+            "description": definition.description,
+            "default": definition.key == DEFAULT_SCENARIO,
+        }
+        for definition in scenario_definitions()
+    ]
+
+
 def _facility_block_entry_payload(entry: object) -> dict[str, object]:
     """Return a stable snapshot payload for one facility block entry."""
 
@@ -87,10 +107,14 @@ def _facility_block_entry_payload(entry: object) -> dict[str, object]:
     }
 
 
-def _world_position(index: int) -> dict[str, int]:
+def _world_position(index: int, total: int) -> dict[str, int]:
     """Return deterministic galaxy-scale coordinates owned by the Python sim."""
 
-    return {"x": 360 * index, "y": 0}
+    if total <= 1:
+        return {"x": 0, "y": 0}
+    radius = 420
+    angle = (-pi / 2.0) + ((2.0 * pi * index) / total)
+    return {"x": int(round(cos(angle) * radius)), "y": int(round(sin(angle) * radius))}
 
 
 def _node_layout(node: object) -> dict[str, float] | None:
@@ -142,6 +166,162 @@ def _contract_progress(contract: Contract) -> tuple[str, str, int]:
     if contract.kind == ContractKind.GATE_RECOVERY:
         return "powered", f"link:{contract.target_link_id}", contract.progress
     return "unknown", "unknown", contract.progress
+
+
+def _tutorial_six_worlds_payload(state: GameState) -> dict[str, object] | None:
+    """Return backend-owned tutorial loop progress for the six-world starter save."""
+
+    required_schedules = {
+        "tutorial_ore_to_cinder",
+        "tutorial_metal_to_atlas",
+        "tutorial_parts_to_helix",
+    }
+    if not required_schedules.issubset(state.schedules) or "helix_parts_tutorial" not in state.contracts:
+        return None
+
+    ore_schedule = state.schedules["tutorial_ore_to_cinder"]
+    metal_schedule = state.schedules["tutorial_metal_to_atlas"]
+    parts_schedule = state.schedules["tutorial_parts_to_helix"]
+    parts_contract = state.contracts["helix_parts_tutorial"]
+    cinder_smelter = state.nodes.get("cinder_smelter")
+    atlas_factory = state.nodes.get("atlas_factory")
+    parts_cargo = parts_contract.cargo_type or parts_schedule.cargo_type
+
+    cinder_ore = 0 if cinder_smelter is None else cinder_smelter.stock(ore_schedule.cargo_type)
+    cinder_metal = 0 if cinder_smelter is None else cinder_smelter.stock(metal_schedule.cargo_type)
+    atlas_metal = 0 if atlas_factory is None else atlas_factory.stock(metal_schedule.cargo_type)
+    atlas_parts = 0 if atlas_factory is None else atlas_factory.stock(parts_cargo)
+    contract_parts = int(parts_contract.delivered_units)
+    ore_progress = max(
+        int(ore_schedule.delivered_units),
+        cinder_ore,
+        cinder_metal,
+        atlas_metal,
+        atlas_parts,
+        contract_parts,
+    )
+    metal_progress = max(
+        int(metal_schedule.delivered_units),
+        atlas_metal,
+        atlas_parts,
+        contract_parts,
+    )
+    parts_progress = max(int(parts_schedule.delivered_units), contract_parts)
+    if parts_progress >= int(parts_contract.target_units) or atlas_parts >= int(parts_contract.target_units):
+        metal_progress = max(metal_progress, 10)
+        ore_progress = max(ore_progress, 20)
+    elif metal_progress >= 10:
+        ore_progress = max(ore_progress, 20)
+
+    steps: list[dict[str, object]] = [
+        {
+            "id": "mine_ore",
+            "label": "Mine ore for Cinder Forge",
+            "cargo": ore_schedule.cargo_type.value,
+            "origin": ore_schedule.origin,
+            "destination": ore_schedule.destination,
+            "schedule_id": ore_schedule.id,
+            "delivered": ore_progress,
+            "target": 20,
+            "dispatch": {
+                "train_id": ore_schedule.train_id,
+                "origin": ore_schedule.origin,
+                "destination": ore_schedule.destination,
+                "cargo": ore_schedule.cargo_type.value,
+                "requested_units": 20,
+            },
+        },
+        {
+            "id": "smelt_metal",
+            "label": "Smelt metal for Atlas Yards",
+            "cargo": metal_schedule.cargo_type.value,
+            "origin": metal_schedule.origin,
+            "destination": metal_schedule.destination,
+            "schedule_id": metal_schedule.id,
+            "delivered": metal_progress,
+            "target": 10,
+            "dispatch": {
+                "train_id": metal_schedule.train_id,
+                "origin": metal_schedule.origin,
+                "destination": metal_schedule.destination,
+                "cargo": metal_schedule.cargo_type.value,
+                "requested_units": 10,
+            },
+        },
+        {
+            "id": "deliver_parts",
+            "label": "Deliver parts to Helix Reach",
+            "cargo": parts_cargo.value,
+            "origin": parts_schedule.origin,
+            "destination": parts_contract.destination_node_id or parts_schedule.destination,
+            "schedule_id": parts_schedule.id,
+            "contract_id": parts_contract.id,
+            "delivered": parts_progress,
+            "target": int(parts_contract.target_units),
+            "reward_cash": round(parts_contract.reward_cash, 2),
+            "reward_reputation": int(parts_contract.reward_reputation),
+            "dispatch": {
+                "train_id": parts_schedule.train_id,
+                "origin": parts_schedule.origin,
+                "destination": parts_contract.destination_node_id or parts_schedule.destination,
+                "cargo": parts_schedule.cargo_type.value,
+                "requested_units": int(parts_contract.target_units),
+            },
+        },
+    ]
+
+    active_index: int | None = None
+    for index, step in enumerate(steps):
+        complete = int(step["delivered"]) >= int(step["target"])
+        if step["id"] == "deliver_parts" and parts_contract.status.value == "fulfilled":
+            complete = True
+        if complete:
+            step["status"] = "complete"
+        elif active_index is None:
+            step["status"] = "active"
+            active_index = index
+        else:
+            step["status"] = "pending"
+
+    all_complete = all(str(step.get("status", "")) == "complete" for step in steps)
+    if all_complete:
+        alerts = [
+            {
+                "kind": "tutorial",
+                "message": "Tutorial loop complete: Helix paid for delivered parts.",
+            }
+        ]
+        current_step_id = None
+        next_action = None
+    else:
+        active_step = steps[active_index or 0]
+        current_step_id = str(active_step["id"])
+        next_action = {
+            "kind": "manual_dispatch",
+            "label": "Set up a manual freight order",
+        }
+        alert_messages = {
+            "mine_ore": "Tutorial active: move ore from Brink Mines to Cinder Forge.",
+            "smelt_metal": "Tutorial active: smelt ore into metal and move it to Atlas Yards.",
+            "deliver_parts": "Tutorial active: build parts at Atlas Yards and ship them to Helix Reach.",
+        }
+        alerts = [
+            {
+                "kind": "tutorial",
+                "message": alert_messages.get(current_step_id, "Tutorial active."),
+            }
+        ]
+
+    return {
+        "id": "tutorial_six_worlds",
+        "title": "Six-World Tutorial Start",
+        "summary": "Mine ore, smelt metal, build parts, and ship them to Helix for a payout.",
+        "active": not all_complete,
+        "current_step_id": current_step_id,
+        "steps": steps,
+        "alerts": alerts,
+        "next_action": next_action,
+    }
 
 
 def _cargo_flow_payloads(state: GameState) -> list[dict[str, object]]:
@@ -246,7 +426,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                     "shortage_streak": world.shortage_streak,
                     "trend": world.last_trend.value,
                 },
-                "position": _world_position(world_index[world_id]),
+                "position": _world_position(world_index[world_id], len(world_ids)),
                 "deposits": deposit_ids,
             }
         )
@@ -557,6 +737,9 @@ def render_snapshot(state: GameState) -> dict[str, object]:
         "tick": state.tick,
         "finance": state.finance.snapshot(),
         "reputation": state.reputation,
+        "scenario_catalog": _scenario_catalog_payload(),
+        "cargo_catalog": cargo_catalog_payload(),
+        "tutorial": _tutorial_six_worlds_payload(state),
         "resources": resource_catalog_payload(),
         "resource_deposits": [
             resource_deposit_to_dict(deposit, include_resource=True)

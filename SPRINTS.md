@@ -24,6 +24,8 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 14 is complete: depots/warehouses move cargo through buffer rules, node snapshots expose transfer bottlenecks, per-node recipes drive local industry, and Local Region overlays make supply/demand/storage/shortage pressure visible.
 - Facility, industry, and rail-depth planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, elemental resource chains, power inputs, space extraction, outpost logistics, and richer rail networks exist.
 - Sprints 16-27 are complete through the current working tree: facility components/internal wiring, resource chains, typed industry, gate power support, power generation, remote extraction/outpost operations, directional gates, train consists, multi-stop schedules, cargo-flow snapshots, schedule edit/delete management, bridge save/load, and early/expanded playtest scenario presets are all covered by backend tests and Godot bridge/UI wiring.
+- Sprint 28A/28B are implemented, with a backend payoff extension now covered by tests: `mining_to_manufacturing` / `mining_loop` can dispatch a mining mission, haul ORE, smelt it into METAL, fabricate PARTS/construction materials, deliver PARTS to a frontier settlement, and fulfill a paid contract. Local Region mission previews and site lists distinguish train-cargo hauls from resource auto-flow hauls.
+- Sprint 29A/29B plus the manual playtest correction are implemented: `tutorial_six_worlds` / `tutorial_start` plus `saves/tutorial_six_worlds.json` provide a stocked six-world gate-ring tutorial start, snapshots expose backend-owned tutorial progress, and Godot renders the loop checklist, alert chip, reward context, circular galaxy layout, and click-filled one-shot dispatch setup.
 
 ## Long-term stages
 
@@ -796,25 +798,50 @@ Sprint 27 completed state:
 ## Sprint 28: Mining-To-Manufacturing Gameplay Loop
 
 Goal:
-- close the headline gameplay loop in a single playable scenario: dispatch a mining mission, watch it return cargo into a collection station, schedule a train to ferry that cargo through a gate, and consume it in a manufacturing-world `ProductionRecipe`.
+- close the headline gameplay loop in a single playable scenario: dispatch a mining mission, watch it return cargo into a collection station, schedule trains to ferry that cargo through a gate, smelt/build it into useful parts, deliver those parts to a settlement, and receive contract rewards for future expansion.
 
 Deliverables:
-- a new scenario preset that demonstrates the closed loop end-to-end and is fully exercised by an automated test.
+- a new scenario preset that demonstrates the closed loop end-to-end and is fully exercised by automated tests.
 - Local Region UI surfaces whether each `SpaceSite` returns into the train-cargo bucket (`cargo_type` set) or the resource-id auto-flow bucket, so the player can predict the haul's destination before dispatch.
 - A bridged "queue mining run" UX in Local Region that sequences `DispatchMiningMission` and (optional) schedule activation without leaving the panel.
 - Cargo-flow overlay/alert support for the new haul services so the live train loop is legible from the map.
 
-Slice plan:
-- 28A backend scenario `mining_to_manufacturing` plus an end-to-end pytest that runs the full loop (mission -> haul -> schedule -> recipe -> PARTS).
-- 28B Local Region preview shows `cargo_type` on mining mission previews; site catalog renders cargo vs resource bucket badges.
-- 28C Local Region offers a one-click "schedule the haul run" workflow tied to the dispatched mission's expected return tick / cargo.
-- 28D bridge cargo-flow overlays + alert chips reflect the haul service so the player can monitor the loop visually.
+Slice progress:
+- 28A complete: backend scenario `mining_to_manufacturing` / `mining_loop` plus end-to-end pytest for mission -> cargo haul -> smelter -> fabrication -> PARTS.
+- 28B complete: command previews return `site_cargo_type`, `site_resource_id`, `haul_bucket`, and `haul_label`; Local Region preview/site catalog renders cargo vs resource bucket badges.
+- 28C backend payoff complete: the scenario includes `frontier_settlement`, `parts_to_frontier_settlement`, and `frontier_parts_upgrade`, proving manufactured PARTS can satisfy settlement delivery contracts and pay cash/reputation rewards.
+- sync hardening complete: snapshots expose backend-owned `scenario_catalog` and `cargo_catalog`; Godot uses those payloads for scenario and cargo selectors instead of duplicating Python registries.
+- 28C Godot workflow remaining: Local Region one-click "schedule the haul run" flow tied to the dispatched mission's expected return tick / cargo.
+- 28D remaining: bridge cargo-flow overlays + alert chips reflect the haul and settlement-delivery services so the player can monitor the loop visually.
 
 Exit criteria:
-- a player loads the scenario, dispatches one mission, activates the haul schedule, and watches PARTS appear at the manufacturing depot without manually editing state, and the same loop runs deterministically under pytest.
+- a player loads the scenario, dispatches one mission, activates the haul and settlement delivery schedules, and watches the settlement contract pay out without manually editing state; the same loop runs deterministically under pytest.
 
 ## Deferred (post-Sprint 28)
 
 - Local Region rail/signal planning controls for backend-owned alignments and track signals (preview waypoint edits, signal placement, protected block warnings, consist/cargo compatibility). Previously slotted as Sprint 28; deferred behind closing the mining-to-train gameplay loop.
 
 3D facility presentation should still wait until after resource, power, space-extraction, outpost, rail-depth, and 2D diagnostic contracts are stable.
+
+## Sprint 29: Tutorial Start And UI Loop Polish
+
+Goal:
+- make the real loop approachable from a generous starting state.
+
+Completed 29A state:
+- `tutorial_six_worlds` / `tutorial_start` creates six worlds in a powered ring.
+- every world has two gate neighbours, local depots, stocked construction inventory, settlements, and gate hubs.
+- tutorial schedules move ORE from Brink Mines to Cinder Forge, METAL from Cinder Forge to Atlas Yards, and PARTS from Atlas Yards to Helix Reach.
+- the Helix starter contract pays cash/reputation once PARTS arrive.
+- `saves/tutorial_six_worlds.json` is generated from the scenario for immediate save/load testing.
+
+Completed 29B state:
+- `render_snapshot()` emits a `tutorial` payload for the six-world starter loop, including step status, cargo progress, rewards, alerts, and the next backend action.
+- Godot's main view renders that payload as a Tutorial Loop checklist without hardcoding tutorial schedule IDs or logistics rules.
+- the tutorial alert appears in the status chip strip alongside bridge, route, disruption, and congestion alerts.
+
+Manual playtest correction:
+- tutorial schedules now start disabled, so pressing Play no longer completes the loop automatically.
+- the six tutorial worlds render in a backend-owned circular galaxy layout instead of a straight line.
+- the Galaxy Map one-shot dispatch form is click-filled from map selection: select a train, select a pickup node, select a dropoff node, then queue the order.
+- backend tests prove the loop can be completed by manual one-shot orders before the player later chooses to automate routes with schedules.

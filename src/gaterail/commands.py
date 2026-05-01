@@ -2158,6 +2158,8 @@ def _validate_mining_mission(
         "fuel_input": fuel_input,
         "power_input": power_input,
     }
+    haul_bucket = "cargo" if site.cargo_type is not None else "resource"
+    haul_label = site.cargo_type.value if site.cargo_type is not None else site.resource_id
     result_extra = {
         "travel_ticks": site.travel_ticks * 2,
         "expected_yield": site.base_yield,
@@ -2167,6 +2169,10 @@ def _validate_mining_mission(
         "power_available": power_available,
         "power_shortfall_if_dispatched": max(0, power_input - power_available),
         "return_capacity_estimate": mission_return_capacity(return_node),
+        "site_cargo_type": site.cargo_type.value if site.cargo_type is not None else None,
+        "site_resource_id": site.resource_id,
+        "haul_bucket": haul_bucket,
+        "haul_label": haul_label,
         "normalized_command": normalized_command,
     }
     if fuel_available < fuel_input:
@@ -2749,6 +2755,10 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             power_available=fields["power_available"],
             power_shortfall_if_dispatched=fields["power_shortfall_if_dispatched"],
             return_capacity_estimate=fields["return_capacity_estimate"],
+            site_cargo_type=fields["site_cargo_type"],
+            site_resource_id=fields["site_resource_id"],
+            haul_bucket=fields["haul_bucket"],
+            haul_label=fields["haul_label"],
             normalized_command=fields["normalized_command"],
         )
 

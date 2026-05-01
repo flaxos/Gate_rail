@@ -5,9 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from gaterail.bridge import handle_bridge_message, iter_stdio_snapshots
+from gaterail.cargo import CargoType
 from gaterail.cli import run_cli
 from gaterail.models import ResourceRecipeKind
+from gaterail.scenarios import scenario_definitions
 from gaterail.simulation import TickSimulation
+from gaterail.snapshot import render_snapshot
 
 
 def test_bridge_can_save_and_reload_current_simulation(tmp_path) -> None:
@@ -104,9 +107,26 @@ def test_cli_lists_sprint26_playtest_scenario_types() -> None:
     assert "aliases: industrial, expanded, large_industry" in text
 
 
+def test_snapshot_exposes_backend_catalogs_for_godot_selectors() -> None:
+    snapshot = render_snapshot(TickSimulation.from_scenario("sprint20").state)
+
+    scenario_keys = {item["key"] for item in snapshot["scenario_catalog"]}
+    assert scenario_keys == {definition.key for definition in scenario_definitions()}
+    mining_loop = next(item for item in snapshot["scenario_catalog"] if item["key"] == "mining_to_manufacturing")
+    assert "mining_loop" in mining_loop["aliases"]
+    assert mining_loop["title"] == "Mining-to-Manufacturing Loop"
+
+    cargo_ids = {item["id"] for item in snapshot["cargo_catalog"]}
+    assert cargo_ids == {cargo_type.value for cargo_type in CargoType}
+    ore = next(item for item in snapshot["cargo_catalog"] if item["id"] == "ore")
+    assert ore["required_consist"] == "bulk_hopper"
+    assert ore["base_unit_revenue"] > 0
+
+
 def test_godot_save_load_and_scenario_controls_are_wired() -> None:
     bridge_script = Path("godot/scripts/gate_rail_bridge.gd").read_text(encoding="utf-8")
     main_script = Path("godot/scripts/main.gd").read_text(encoding="utf-8")
+    local_script = Path("godot/scripts/local_region.gd").read_text(encoding="utf-8")
 
     assert "var last_save_path" in bridge_script
     assert "func normalize_save_path(" in bridge_script
@@ -117,9 +137,17 @@ def test_godot_save_load_and_scenario_controls_are_wired() -> None:
     assert "func load_scenario(" in bridge_script
     assert '"scenario"' in bridge_script
 
+    assert "PLAYTEST_SCENARIOS" not in main_script
+    assert "scenario_catalog" in main_script
+    assert "_refresh_scenario_select_from_snapshot" in main_script
+    assert "ALL_CARGO_TYPES" not in local_script
+    assert "cargo_catalog" in main_script
+    assert "cargo_catalog" in local_script
     assert "_save_path_edit" in main_script
     assert "GateRailBridge.last_save_path" in main_script
     assert "GateRailBridge.normalize_save_path" in main_script
+    assert "_format_save_load_error" in main_script
+    assert "Press Save Game first" in main_script
     assert "_scenario_select" in main_script
     assert "_on_save_game_pressed" in main_script
     assert "_on_load_game_pressed" in main_script
