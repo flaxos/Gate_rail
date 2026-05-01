@@ -3,11 +3,16 @@ extends Node
 signal snapshot_received(snapshot: Dictionary)
 signal bridge_error(message: String)
 signal bridge_status_changed(running: bool)
+signal auto_run_changed(running: bool)
 
 const DEFAULT_FIXTURE := "res://fixtures/sprint9_snapshot.json"
 const DEFAULT_BRIDGE_COMMAND_TEMPLATE := "cd %s && PYTHONPATH=src python3 -m gaterail.main --stdio"
+const DEFAULT_AUTO_STEP_INTERVAL := 1.75
+const DEFAULT_SAVE_PATH := "saves/godot_playtest.json"
 
 var last_snapshot: Dictionary = {}
+var last_save_path: String = DEFAULT_SAVE_PATH
+var auto_step_interval: float = DEFAULT_AUTO_STEP_INTERVAL
 
 var _stdio: FileAccess
 var _stderr: FileAccess
@@ -16,6 +21,17 @@ var _write_mutex := Mutex.new()
 var _pid := -1
 var _running := false
 var _stopping := false
+var _auto_timer: Timer
+var _auto_running := false
+var _auto_step_pending := false
+
+
+func _ready() -> void:
+	_auto_timer = Timer.new()
+	_auto_timer.wait_time = auto_step_interval
+	_auto_timer.one_shot = false
+	_auto_timer.timeout.connect(_on_auto_step_timeout)
+	add_child(_auto_timer)
 
 
 func load_fixture_snapshot(path: String = DEFAULT_FIXTURE) -> Dictionary:
@@ -35,6 +51,33 @@ func load_fixture_snapshot(path: String = DEFAULT_FIXTURE) -> Dictionary:
 
 func is_bridge_running() -> bool:
 	return _running and _stdio != null and not _stopping
+
+
+func is_auto_running() -> bool:
+	return _auto_running
+
+
+func is_auto_step_pending() -> bool:
+	return _auto_step_pending
+
+
+func set_auto_running(running: bool) -> void:
+	if running == _auto_running:
+		return
+	_auto_running = running
+	_auto_step_pending = false
+	if _auto_running:
+		if not is_bridge_running() and not start_bridge():
+			_auto_running = false
+			auto_run_changed.emit(false)
+			return
+		if _auto_timer != null:
+			_auto_timer.wait_time = auto_step_interval
+			_auto_timer.start()
+	else:
+		if _auto_timer != null:
+			_auto_timer.stop()
+	auto_run_changed.emit(_auto_running)
 
 
 func start_bridge(command: String = "") -> bool:
@@ -80,6 +123,7 @@ func start_bridge(command: String = "") -> bool:
 func stop_bridge() -> void:
 	if not _running and _stdio == null:
 		return
+	set_auto_running(false)
 	_stopping = true
 	_running = false
 	if _pid > 0:
@@ -114,6 +158,55 @@ func step_ticks(ticks: int = 1) -> bool:
 	return send_message({"ticks": max(0, ticks)})
 
 
+func normalize_save_path(path: String) -> String:
+	var text := path.strip_edges()
+	if text.is_empty():
+		return DEFAULT_SAVE_PATH
+	if text.begins_with("res://") or text.begins_with("user://"):
+		return ProjectSettings.globalize_path(text)
+	if text.begins_with("/") or (text.length() >= 3 and text.substr(1, 2) == ":/"):
+		return text
+	if text.find("/") == -1 and text.find("\\") == -1:
+		text = "saves/" + text
+	if not text.ends_with(".json"):
+		text += ".json"
+	return text
+
+
+func save_game(path: String, ticks: int = 0) -> bool:
+	var resolved_path := normalize_save_path(path)
+	last_save_path = resolved_path
+	return send_message({
+		"save_path": resolved_path,
+		"ticks": max(0, ticks)
+	})
+
+
+func load_game(path: String, ticks: int = 0) -> bool:
+	var resolved_path := normalize_save_path(path)
+	last_save_path = resolved_path
+	return send_message({
+		"load_path": resolved_path,
+		"ticks": max(0, ticks)
+	})
+
+
+func load_scenario(scenario_id: String, ticks: int = 0) -> bool:
+	return send_message({
+		"scenario": scenario_id,
+		"ticks": max(0, ticks)
+	})
+
+
+func _on_auto_step_timeout() -> void:
+	if not _auto_running or _auto_step_pending:
+		return
+	if step_ticks(1):
+		_auto_step_pending = true
+	else:
+		set_auto_running(false)
+
+
 func set_schedule_enabled(schedule_id: String, enabled: bool, ticks: int = 0) -> bool:
 	return send_message({
 		"commands": [
@@ -121,6 +214,38 @@ func set_schedule_enabled(schedule_id: String, enabled: bool, ticks: int = 0) ->
 				"type": "SetScheduleEnabled",
 				"schedule_id": schedule_id,
 				"enabled": enabled
+			}
+		],
+		"ticks": max(0, ticks)
+	})
+
+
+func preview_update_schedule(schedule_id: String, fields: Dictionary, ticks: int = 0) -> bool:
+	var command := fields.duplicate(true)
+	command["type"] = "PreviewUpdateSchedule"
+	command["schedule_id"] = schedule_id
+	return send_message({
+		"commands": [command],
+		"ticks": max(0, ticks)
+	})
+
+
+func update_schedule(schedule_id: String, fields: Dictionary, ticks: int = 0) -> bool:
+	var command := fields.duplicate(true)
+	command["type"] = "UpdateSchedule"
+	command["schedule_id"] = schedule_id
+	return send_message({
+		"commands": [command],
+		"ticks": max(0, ticks)
+	})
+
+
+func delete_schedule(schedule_id: String, ticks: int = 0) -> bool:
+	return send_message({
+		"commands": [
+			{
+				"type": "DeleteSchedule",
+				"schedule_id": schedule_id
 			}
 		],
 		"ticks": max(0, ticks)
@@ -188,10 +313,12 @@ func _handle_bridge_line(line: String) -> void:
 		_emit_error("unsupported snapshot version: %s" % frame.get("snapshot_version", "missing"))
 		return
 	last_snapshot = frame
+	_auto_step_pending = false
 	snapshot_received.emit(frame)
 
 
 func _handle_bridge_stopped() -> void:
+	set_auto_running(false)
 	_running = false
 	_reset_bridge_handles()
 	bridge_status_changed.emit(false)
@@ -206,6 +333,8 @@ func _reset_bridge_handles() -> void:
 
 
 func _emit_error(message: String) -> void:
+	if _auto_running:
+		set_auto_running(false)
 	bridge_error.emit(message)
 
 

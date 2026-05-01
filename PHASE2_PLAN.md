@@ -305,6 +305,58 @@ Deliverables:
 Exit criteria:
 - the player can diagnose and improve an industrial, rail, power, or outpost bottleneck from the 2D client.
 
+Implemented Sprint 22-24 transport/flow slices:
+- directional gate links can model source-to-exit apertures while preserving bidirectional legacy gates.
+- train consists validate cargo compatibility for schedule previews, schedule creation, and runtime dispatch.
+- schedules can resolve ordered intermediate stops and return per-segment route debug, including blocked links for unpowered gates, disrupted links, and full capacity.
+- snapshots expose `cargo_flows` for schedule services, including route stops, resolved nodes/links, active state, in-transit units, delivered units, and trip counts.
+- Godot draws cargo-flow overlays from backend snapshot data and surfaces route segment blockers in planner/status context.
+
+## Sprint 25: Schedule And Flow Management
+
+Goal:
+- make the richer schedule/flow model editable from the bridge and Godot without duplicating route rules in the client.
+
+Deliverables:
+- backend preview/apply commands for editing existing schedules.
+- backend preview/apply commands for deleting schedules safely.
+- edit validation for stops, cargo, units, interval, active state, consist compatibility, train readiness, and route availability.
+- route-segment blocker payloads reused for edit previews.
+- Godot schedule-row controls for active state, cargo, units, interval, intermediate stops, preview, apply, and delete.
+- cargo-flow overlays and command alerts that make invalid schedule edits explainable.
+
+Exit criteria:
+- a player can inspect current cargo flows, preview schedule edits, apply safe edits, and delete idle schedules from Godot while Python remains authoritative for every route and cargo rule.
+
+Implemented Sprint 25 completed state:
+- `PreviewUpdateSchedule` / `UpdateSchedule` merge partial edits with the existing schedule, normalize a full backend command, validate route stops and consist compatibility, and return the same route segment/gate handoff context as creation previews.
+- `PreviewDeleteSchedule` / `DeleteSchedule` remove idle schedules and reject deletion while a train is actively running that schedule trip.
+- schedule snapshots now include `priority` and `return_to_origin` alongside `stops` and `route_stop_ids`; `cargo_flows` disappear automatically when a schedule is deleted.
+- the Godot bridge exposes schedule preview/update/delete helpers, and the main operations panel can preview/apply cargo, units, interval, active-state, and stop-list edits.
+- invalid schedule edit previews push route-segment and blocked-link explanations into the status strip.
+
+## Sprint 26: Save/Load And Scenario Testbeds
+
+Goal:
+- make playtest iteration practical from Godot and provide contrasting built-in worlds for early construction versus large industrial stress tests.
+
+Deliverables:
+- rudimentary stdio bridge save and load messages that reuse the existing JSON persistence format.
+- bridge scenario reset messages for swapping playtest presets without restarting the Python backend process.
+- an `early_build` preset for sparse, low-cash first-route and construction testing.
+- an `industrial_expansion` preset for large connected industry, power, gate support, and multi-stop schedule testing.
+- Godot Galaxy Map controls for save path, Save Game, Load Game, and scenario reset.
+
+Exit criteria:
+- a player can save, load, or swap the live simulation from Godot while Python remains authoritative, and can compare a compact early build state against a larger interconnected industrial world.
+
+Implemented Sprint 26 completed state:
+- the JSON bridge accepts `save_path`, `load_path`, and `scenario` frames; load/scenario requests replace the live `TickSimulation` state in-place before command/tick processing, and saves happen after requested ticks.
+- bridge responses include `saved_path`, `loaded_path`, or `loaded_scenario` metadata for client status text.
+- `early_build` seeds two worlds, limited cash/materials, one starter train, and one inactive food route for early route/build tests.
+- `industrial_expansion` layers Cinder Forge and Helix Research Reach onto the Sprint 20 baseline with extra gates, rail branches, deposits, recipes, power plants, gate support, specialized trains, and multi-stop services.
+- the Godot bridge exposes `save_game`, `load_game`, and `load_scenario`; `main.gd` adds a compact scenario selector and save/load row to the Galaxy Map control panel.
+
 ## Deferred: 3D Facility View Spike
 
 Goal:

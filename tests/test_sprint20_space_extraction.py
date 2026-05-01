@@ -1,5 +1,6 @@
 """Tests for Sprint 20: Space Extraction and Collection Stations."""
 
+from gaterail.cargo import CargoType
 from gaterail.commands import DispatchMiningMission, apply_player_command
 from gaterail.models import (
     GameState,
@@ -18,14 +19,15 @@ def test_mining_mission_lifecycle():
     """Test dispatch, transit, completion, and resource delivery of a mining mission."""
 
     state = GameState()
-    state.add_world(WorldState(id="w1", name="W1", tier=DevelopmentTier.CORE_WORLD))
+    state.add_world(WorldState(id="w1", name="W1", tier=DevelopmentTier.CORE_WORLD, power_available=200))
     
     # Setup node
     node = NetworkNode(
         id="node_station_1",
         world_id="w1",
         name="Orbital Station",
-        kind=NodeKind.SETTLEMENT,
+        kind=NodeKind.SPACEPORT,
+        inventory={CargoType.FUEL: 100},
         storage_capacity=1000,
     )
     state.add_node(node)
@@ -81,7 +83,7 @@ def test_mining_mission_persistence():
     """Test save/load cycle maintains space sites and mining missions."""
 
     state = GameState()
-    state.add_world(WorldState(id="w1", name="W1", tier=DevelopmentTier.CORE_WORLD))
+    state.add_world(WorldState(id="w1", name="W1", tier=DevelopmentTier.CORE_WORLD, power_available=200))
     
     site = SpaceSite(
         id="site_beta",
@@ -100,7 +102,15 @@ def test_mining_mission_persistence():
     )
     
     # Fake a node for validation
-    state.add_node(NetworkNode(id="node_0", world_id="w1", name="N", kind=NodeKind.SETTLEMENT))
+    state.add_node(
+        NetworkNode(
+            id="node_0",
+            world_id="w1",
+            name="N",
+            kind=NodeKind.SPACEPORT,
+            inventory={CargoType.FUEL: 100},
+        )
+    )
     apply_player_command(state, command)
     
     sim = TickSimulation(state=state)

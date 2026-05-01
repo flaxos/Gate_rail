@@ -54,7 +54,7 @@ def test_manufacturing_uses_frontier_ore_delivery_for_exports() -> None:
 def test_survey_outpost_exports_research_after_supplies_arrive() -> None:
     simulation = TickSimulation.from_scenario("sprint6")
 
-    reports = simulation.run_ticks(21)
+    reports = simulation.run_ticks(20)
     report = reports[-1]
 
     assert report["economy"]["produced"]["outer_outpost"] == {"research_equipment": 1}

@@ -66,7 +66,7 @@ def test_sprint8_monthly_benchmark_has_tuned_traffic_pressure() -> None:
     assert ledger["traffic_pressure"]["gate_core_frontier"]["full_ticks"] == 1
     assert ledger["traffic_pressure"]["gate_frontier_outer"]["disrupted_ticks"] == 2
     assert ledger["traffic_pressure"]["gate_frontier_outer"]["peak_pressure"] == 1.0
-    assert ledger["finance"]["ending_cash"] == 7816.0
+    assert ledger["finance"]["ending_cash"] == 7880.0
 
 
 def test_save_load_round_trip_continues_deterministically(tmp_path) -> None:

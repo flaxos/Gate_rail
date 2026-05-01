@@ -97,6 +97,7 @@ var _world_nodes: Array = []
 var _world_links: Array = []
 var _node_positions: Dictionary = {}
 var _gate_hub_node_id: String = ""
+var _outposts_by_id: Dictionary = {}
 
 var _canvas_rect: Rect2 = Rect2()
 
@@ -189,11 +190,15 @@ func _ready() -> void:
 	GateRailBridge.snapshot_received.connect(_on_snapshot_received)
 	GateRailBridge.bridge_error.connect(_on_bridge_error)
 	GateRailBridge.bridge_status_changed.connect(_on_bridge_status_changed)
+	GateRailBridge.auto_run_changed.connect(_on_bridge_auto_run_changed)
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
 
-	var fixture := GateRailBridge.load_fixture_snapshot()
-	if not fixture.is_empty():
-		_apply_snapshot(fixture)
+	if not GateRailBridge.last_snapshot.is_empty():
+		_apply_snapshot(GateRailBridge.last_snapshot)
+	else:
+		var fixture := GateRailBridge.load_fixture_snapshot()
+		if not fixture.is_empty():
+			_apply_snapshot(fixture)
 	_update_bridge_chip(GateRailBridge.is_bridge_running())
 	GateRailBridge.request_snapshot()
 
@@ -1670,7 +1675,26 @@ func _draw_trains(_size: Vector2) -> void:
 			else:
 				continue
 
+		if status == "in_transit":
+			_draw_local_train_route_path(train)
 		_draw_train_glyph(draw_pos, draw_dir, status)
+
+
+func _draw_local_train_route_path(train: Dictionary) -> void:
+	var route_nodes: Array = train.get("route_node_ids", [])
+	if route_nodes.size() < 2:
+		return
+	var path_color := Color(COLOR_CYAN.r, COLOR_CYAN.g, COLOR_CYAN.b, 0.36)
+	var marker_color := Color(1.0, 0.95, 0.62, 0.68)
+	for index in range(route_nodes.size() - 1):
+		var from_id := str(route_nodes[index])
+		var to_id := str(route_nodes[index + 1])
+		if not _node_positions.has(from_id) or not _node_positions.has(to_id):
+			continue
+		var a: Vector2 = _node_positions[from_id]
+		var b: Vector2 = _node_positions[to_id]
+		_canvas_panel.draw_line(a, b, path_color, 2.0)
+		_canvas_panel.draw_circle(a.lerp(b, 0.5), 2.8, marker_color)
 
 
 func _draw_train_glyph(pos: Vector2, direction: Vector2, status: String) -> void:
@@ -1961,6 +1985,8 @@ func _draw_links_and_nodes(size: Vector2) -> void:
 		var mode := str(link.get("mode", "rail"))
 		_draw_track_segment(a, b, mode)
 
+	_draw_cargo_flows()
+
 	# Nodes
 	var font := ThemeDB.fallback_font
 	for node in _world_nodes:
@@ -1976,6 +2002,57 @@ func _draw_links_and_nodes(size: Vector2) -> void:
 		_canvas_panel.draw_string(font, pos + Vector2(-50, 58), kind_lbl, HORIZONTAL_ALIGNMENT_CENTER, 100, 10, COLOR_STEEL)
 		if node.get("construction_project_id") != null and str(node.get("construction_project_id")) != "":
 			_canvas_panel.draw_string(font, pos + Vector2(-60, -32), "UNDER CONSTRUCTION", HORIZONTAL_ALIGNMENT_CENTER, 120, 10, COLOR_AMBER_HOT)
+
+
+func _draw_cargo_flows() -> void:
+	var flow_index := 0
+	for flow in _latest_snapshot.get("cargo_flows", []):
+		if typeof(flow) != TYPE_DICTIONARY:
+			continue
+		var route_nodes: Array = flow.get("route_node_ids", [])
+		if route_nodes.size() < 2:
+			continue
+		var cargo := str(flow.get("cargo", ""))
+		var base_color := _cargo_flow_color(cargo)
+		var in_transit := int(flow.get("in_transit_units", 0))
+		var units := int(flow.get("units_per_departure", 0))
+		var width: float = 2.0 + clampf(float(max(in_transit, units)) / 14.0, 0.0, 3.0)
+		var alpha := 0.28 if _flag(flow.get("active", true), true) else 0.10
+		if in_transit > 0:
+			alpha = 0.58
+		var color := Color(base_color.r, base_color.g, base_color.b, alpha)
+		var marker_color := Color(base_color.r, base_color.g, base_color.b, min(0.9, alpha + 0.24))
+		var offset := float(flow_index % 4) * 2.5
+		flow_index += 1
+		for index in range(route_nodes.size() - 1):
+			var from_id := str(route_nodes[index])
+			var to_id := str(route_nodes[index + 1])
+			if not _node_positions.has(from_id) or not _node_positions.has(to_id):
+				continue
+			var a: Vector2 = _node_positions[from_id]
+			var b: Vector2 = _node_positions[to_id]
+			var dir := (b - a).normalized()
+			var perp := Vector2(-dir.y, dir.x) * offset
+			_canvas_panel.draw_line(a + perp, b + perp, color, width)
+			_canvas_panel.draw_circle(a.lerp(b, 0.5) + perp, 3.0, marker_color)
+
+
+func _cargo_flow_color(cargo: String) -> Color:
+	match cargo:
+		"food":
+			return Color(0.42, 0.86, 0.42)
+		"ore", "stone", "metal":
+			return Color(0.74, 0.78, 0.82)
+		"construction_materials", "parts", "machinery":
+			return Color(0.98, 0.68, 0.25)
+		"medical_supplies", "research_equipment":
+			return Color(0.50, 0.84, 1.0)
+		"water", "fuel":
+			return Color(0.38, 0.62, 0.95)
+		"electronics", "consumer_goods":
+			return Color(0.86, 0.64, 0.94)
+		_:
+			return Color(0.82, 0.88, 0.78)
 
 
 func _draw_logistics_overlays(_size: Vector2) -> void:
@@ -1999,6 +2076,14 @@ func _draw_logistics_overlays(_size: Vector2) -> void:
 			var badge: Dictionary = badges[i]
 			var offset := Vector2(-38 + float(i) * 19.0, -38)
 			_draw_overlay_badge(pos + offset, str(badge.get("label", "")), badge.get("color", COLOR_STEEL))
+
+		# Sprint 21C: outpost progress ring
+		if node.get("outpost_kind", null) != null and _outposts_by_id.has(node_id):
+			var outpost: Dictionary = _outposts_by_id[node_id]
+			var fraction := clampf(float(outpost.get("progress_fraction", 0.0)), 0.0, 1.0)
+			_canvas_panel.draw_arc(pos, 22.0, -PI / 2.0, -PI / 2.0 + TAU, 32, Color(COLOR_CYAN.r, COLOR_CYAN.g, COLOR_CYAN.b, 0.18), 2.0, true)
+			if fraction > 0.0:
+				_canvas_panel.draw_arc(pos, 22.0, -PI / 2.0, -PI / 2.0 + TAU * fraction, 32, COLOR_CYAN, 2.4, true)
 
 		var note := _node_overlay_note(node)
 		if not note.is_empty():
@@ -2061,10 +2146,40 @@ func _node_overlay_badges(node: Dictionary) -> Array:
 		badges.append({"label": "I", "color": COLOR_CYAN})
 	if float(node.get("transfer_pressure", 0.0)) >= 0.75:
 		badges.append({"label": "T", "color": _transfer_pressure_color(float(node.get("transfer_pressure", 0.0)), int(node.get("saturation_streak", 0)))})
+	# Sprint 21C overlay pip
+	var pip = node.get("overlay_pip")
+	if typeof(pip) == TYPE_DICTIONARY:
+		var layer := String(pip.get("layer", ""))
+		var color := COLOR_STEEL
+		var label := "·"
+		match layer:
+			"facility_block_layer":
+				color = COLOR_ERR
+				label = "B"
+			"outpost_layer":
+				color = COLOR_CYAN
+				label = "O"
+			"power_layer":
+				color = COLOR_AMBER
+				label = "P"
+		badges.append({"label": label, "color": color})
 	return badges
 
 
 func _node_overlay_note(node: Dictionary) -> String:
+	# Sprint 21C: outposts and power-layer notes take priority for actionable info.
+	var node_id := str(node.get("id", ""))
+	if node.get("outpost_kind", null) != null and _outposts_by_id.has(node_id):
+		var outpost: Dictionary = _outposts_by_id[node_id]
+		var fraction := float(outpost.get("progress_fraction", 0.0))
+		var pct := int(round(fraction * 100.0))
+		var top_needs: Array = outpost.get("top_needs", [])
+		if not top_needs.is_empty() and typeof(top_needs[0]) == TYPE_DICTIONARY:
+			return "outpost %d%% need %s" % [pct, str(top_needs[0].get("cargo", ""))]
+		return "outpost %d%%" % pct
+	var pip = node.get("overlay_pip")
+	if typeof(pip) == TYPE_DICTIONARY and String(pip.get("layer", "")) == "power_layer":
+		return "power draw %d" % int(node.get("power_required", 0))
 	var shortages := _cargo_dict(node.get("shortages", {}))
 	if _dict_positive_total(shortages) > 0:
 		return "short %s" % _format_top_cargo(shortages, 1)
@@ -2090,6 +2205,11 @@ func _node_overlay_note(node: Dictionary) -> String:
 
 
 func _node_overlay_note_color(node: Dictionary) -> Color:
+	if node.get("outpost_kind", null) != null:
+		return COLOR_CYAN
+	var pip = node.get("overlay_pip")
+	if typeof(pip) == TYPE_DICTIONARY and String(pip.get("layer", "")) == "power_layer":
+		return COLOR_AMBER
 	if _dict_positive_total(node.get("shortages", {})) > 0:
 		return COLOR_ERR
 	if _dict_positive_total(node.get("recipe_blocked", {})) > 0:
@@ -2239,7 +2359,7 @@ func _draw_build_preview(_size: Vector2) -> void:
 	var preview_color := COLOR_AMBER_HOT
 	if not _last_preview_result.is_empty():
 		preview_text = _preview_summary(_last_preview_result)
-		preview_color = COLOR_OK if bool(_last_preview_result.get("ok", false)) else COLOR_ERR
+		preview_color = COLOR_OK if _flag(_last_preview_result.get("ok", false)) else COLOR_ERR
 	var font := ThemeDB.fallback_font
 	_canvas_panel.draw_string(font, mouse_local + Vector2(14, -8), preview_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, preview_color)
 
@@ -2284,7 +2404,7 @@ func _draw_snap_cursor(_size: Vector2) -> void:
 func _preview_summary(result: Dictionary) -> String:
 	if result.is_empty():
 		return "backend preview pending"
-	if not bool(result.get("ok", false)):
+	if not _flag(result.get("ok", false)):
 		return "INVALID · %s" % str(result.get("reason", result.get("message", "blocked")))
 	var result_type := str(result.get("type", ""))
 	if result_type == "PreviewCreateSchedule":
@@ -2745,7 +2865,7 @@ func _planner_state_label() -> String:
 	if _active_tool == TOOL_SELECT and not _selected_local_id.is_empty():
 		return "inspect"
 	if not _last_preview_result.is_empty():
-		return "blocked" if not bool(_last_preview_result.get("ok", false)) else "valid"
+		return "blocked" if not _flag(_last_preview_result.get("ok", false)) else "valid"
 	if not _pending_route_tuning_train_id.is_empty():
 		return "tuning"
 	if not _route_train_id.is_empty():
@@ -2796,7 +2916,7 @@ func _preview_kind_display(kind: String) -> String:
 
 
 func _add_preview_details(result: Dictionary) -> void:
-	var ok := bool(result.get("ok", false))
+	var ok := _flag(result.get("ok", false))
 	var color := COLOR_OK if ok else COLOR_ERR
 	_add_planner_line("Preview", "VALID" if ok else "INVALID", color)
 	_add_planner_note(str(result.get("message", "")), color)
@@ -2816,6 +2936,10 @@ func _add_preview_details(result: Dictionary) -> void:
 		_add_planner_line("Transfer", "%d / tick" % int(result.get("transfer_limit_per_tick", 0)), COLOR_STEEL_2)
 	if result.has("route_travel_ticks"):
 		_add_planner_line("Route", "%d ticks" % int(result.get("route_travel_ticks", 0)), COLOR_CYAN)
+	if result.has("fuel_required") or result.has("power_required") or result.has("expected_yield"):
+		_add_mission_preview_context(result)
+	if result.has("route_stop_ids") or result.has("route_segments"):
+		_add_route_segment_context(result)
 	if result.has("gate_handoffs") or result.has("route_warnings"):
 		_add_route_gate_context(result)
 	if str(result.get("mode", "")) == "gate":
@@ -2826,6 +2950,24 @@ func _add_preview_details(result: Dictionary) -> void:
 		_add_normalized_command_details(normalized)
 
 
+func _add_mission_preview_context(result: Dictionary) -> void:
+	var fuel_required := int(result.get("fuel_required", 0))
+	var fuel_available := int(result.get("fuel_available", 0))
+	var fuel_color := COLOR_OK if fuel_available >= fuel_required else COLOR_ERR
+	_add_planner_line("Fuel", "%d required · %d available" % [fuel_required, fuel_available], fuel_color)
+
+	var power_required := int(result.get("power_required", 0))
+	var power_available := int(result.get("power_available", 0))
+	var power_shortfall := int(result.get("power_shortfall_if_dispatched", 0))
+	var power_color := COLOR_OK if power_shortfall <= 0 else COLOR_ERR
+	_add_planner_line("Power", "%d required · %d available" % [power_required, power_available], power_color)
+	if power_shortfall > 0:
+		_add_planner_note("Power shortfall: %d" % power_shortfall, COLOR_ERR)
+
+	_add_planner_line("Yield", "%d units" % int(result.get("expected_yield", 0)), COLOR_CYAN)
+	_add_planner_line("Return Space", "%d units" % int(result.get("return_capacity_estimate", 0)), COLOR_STEEL_2)
+
+
 func _add_gate_preview_context(result: Dictionary) -> void:
 	var origin_world := str(result.get("origin_world_name", result.get("origin_world_id", "—")))
 	var destination_world := str(result.get("destination_world_name", result.get("destination_world_id", "—")))
@@ -2834,11 +2976,38 @@ func _add_gate_preview_context(result: Dictionary) -> void:
 	_add_planner_line("Power Draw", "%d MW" % int(result.get("power_required", 0)), COLOR_AMBER_HOT)
 	var shortfall := int(result.get("power_shortfall", 0))
 	var available := int(result.get("power_available", 0))
-	var powered := bool(result.get("powered_if_built", false))
+	var powered := _flag(result.get("powered_if_built", false))
 	var power_color := COLOR_OK if powered else COLOR_ERR
 	_add_planner_line("Power Check", "%d MW available · short %d" % [available, shortfall], power_color)
 	if not powered:
 		_add_planner_note("Gate can be built now but will stay offline until the power shortfall is resolved.", COLOR_ERR)
+
+
+func _add_route_segment_context(result: Dictionary) -> void:
+	var stop_ids: Array = result.get("route_stop_ids", []) if typeof(result.get("route_stop_ids", [])) == TYPE_ARRAY else []
+	if stop_ids.size() >= 2:
+		_add_planner_line("Stops", " -> ".join(_string_list(stop_ids)), COLOR_CYAN)
+	var segments: Array = result.get("route_segments", []) if typeof(result.get("route_segments", [])) == TYPE_ARRAY else []
+	for item in segments:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var segment: Dictionary = item
+		if _flag(segment.get("ok", false)):
+			continue
+		var segment_label := "%s -> %s" % [
+			str(segment.get("from_node_id", "?")),
+			str(segment.get("to_node_id", "?")),
+		]
+		_add_planner_note("%s · %s" % [segment_label, str(segment.get("reason", "blocked"))], COLOR_ERR)
+		var blocked_links: Array = segment.get("blocked_links", []) if typeof(segment.get("blocked_links", [])) == TYPE_ARRAY else []
+		for blocked_item in blocked_links:
+			if typeof(blocked_item) != TYPE_DICTIONARY:
+				continue
+			var blocked: Dictionary = blocked_item
+			_add_planner_note(
+				"%s · %s" % [str(blocked.get("link_id", "link")), str(blocked.get("reason", "blocked"))],
+				_route_warning_color(str(blocked.get("severity", "blocked")))
+			)
 
 
 func _add_route_gate_context(result: Dictionary) -> void:
@@ -2857,7 +3026,7 @@ func _add_route_gate_context(result: Dictionary) -> void:
 			str(handoff.get("from_world_name", handoff.get("from_world_id", "—"))),
 			str(handoff.get("to_world_name", handoff.get("to_world_id", "—"))),
 		]
-		var powered := bool(handoff.get("powered", false))
+		var powered := _flag(handoff.get("powered", false))
 		var pressure := float(handoff.get("pressure", 0.0))
 		var shortfall := int(handoff.get("power_shortfall", 0))
 		var color := COLOR_OK
@@ -2871,7 +3040,7 @@ func _add_route_gate_context(result: Dictionary) -> void:
 		elif pressure >= 0.75:
 			color = COLOR_AMBER_HOT
 			state = "%d%% slots" % int(round(pressure * 100.0))
-		elif bool(handoff.get("disrupted", false)):
+		elif _flag(handoff.get("disrupted", false)):
 			color = COLOR_AMBER_HOT
 			state = "degraded"
 		var slots_text := "%d/%d slots" % [int(handoff.get("slots_used", 0)), int(handoff.get("slot_capacity", 0))]
@@ -2893,6 +3062,20 @@ func _route_warning_color(severity: String) -> Color:
 	if severity in ["degraded", "hot"]:
 		return COLOR_AMBER_HOT
 	return COLOR_STEEL_2
+
+
+func _flag(value: Variant, default_value: bool = false) -> bool:
+	match typeof(value):
+		TYPE_BOOL:
+			return value
+		TYPE_INT, TYPE_FLOAT:
+			return value != 0
+		TYPE_STRING:
+			return str(value).to_lower() in ["true", "1", "yes", "on"]
+		TYPE_NIL:
+			return default_value
+		_:
+			return default_value
 
 
 func _string_list(values: Array) -> Array:
@@ -3041,11 +3224,11 @@ func _add_node_inspection(node_id: String) -> void:
 			lbl.add_theme_font_size_override("font_size", 10)
 			lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			row.add_child(lbl)
-			var btn := _make_hud_button("Launch", COLOR_CYAN)
+			var btn := _make_hud_button("Preview", COLOR_CYAN)
 			btn.pressed.connect(func():
 				GateRailBridge.send_message({
 					"commands": [{
-						"type": "DispatchMiningMission",
+						"type": "PreviewDispatchMiningMission",
 						"mission_id": "m_%d" % Time.get_ticks_msec(),
 						"site_id": site_id,
 						"launch_node_id": node_id,
@@ -3165,10 +3348,11 @@ func _add_link_inspection(link_id: String) -> void:
 	var trains_on := int(link.get("trains_on_link", 0))
 	if trains_on > 0:
 		_add_planner_line("In Transit", "%d trains" % trains_on, COLOR_CYAN)
-	if bool(link.get("disrupted", false)):
+	if _flag(link.get("disrupted", false)):
 		var reasons: Array = link.get("disruption_reasons", []) if typeof(link.get("disruption_reasons")) == TYPE_ARRAY else []
 		_add_planner_line("Disrupted", ", ".join(reasons) if not reasons.is_empty() else "yes", COLOR_ERR)
-	_add_planner_line("Powered", "yes" if bool(link.get("powered", true)) else "no", COLOR_OK if bool(link.get("powered", true)) else COLOR_ERR)
+	var powered := _flag(link.get("powered", true), true)
+	_add_planner_line("Powered", "yes" if powered else "no", COLOR_OK if powered else COLOR_ERR)
 	if float(link.get("build_cost", 0.0)) > 0.0:
 		_add_planner_line("Build Cost", "₡ %s" % _format_commas(float(link.get("build_cost", 0.0))), COLOR_AMBER_HOT)
 
@@ -3262,6 +3446,8 @@ func _pending_commit_status() -> String:
 			return "Purchasing train at %s..." % str(_pending_build_command.get("node_id", ""))
 		"CreateSchedule":
 			return "Creating schedule %s..." % str(_pending_build_command.get("schedule_id", "route"))
+		"DispatchMiningMission":
+			return "Launching mission %s..." % str(_pending_build_command.get("mission_id", "mission"))
 		"BuildInternalConnection":
 			return "Wiring %s.%s -> %s.%s..." % [
 				str(_pending_build_command.get("source_component_id", "")),
@@ -3473,8 +3659,12 @@ func _update_bridge_chip(running: bool) -> void:
 	if _statusbar_bridge_label == null:
 		return
 	if running:
-		_statusbar_bridge_label.text = "BRIDGE · LIVE"
-		_statusbar_bridge_label.add_theme_color_override("font_color", COLOR_OK)
+		if GateRailBridge.is_auto_running():
+			_statusbar_bridge_label.text = "BRIDGE · RUNNING"
+			_statusbar_bridge_label.add_theme_color_override("font_color", COLOR_AMBER_HOT)
+		else:
+			_statusbar_bridge_label.text = "BRIDGE · LIVE"
+			_statusbar_bridge_label.add_theme_color_override("font_color", COLOR_OK)
 	else:
 		_statusbar_bridge_label.text = "BRIDGE · OFFLINE"
 		_statusbar_bridge_label.add_theme_color_override("font_color", COLOR_ERR)
@@ -3552,8 +3742,10 @@ func _handle_command_result(result: Dictionary) -> void:
 			_handle_preview_result(result, "schedule")
 		"PreviewBuildInternalConnection":
 			_handle_preview_result(result, "internal_connection")
+		"PreviewDispatchMiningMission":
+			_handle_preview_result(result, "mining_mission")
 		"BuildNode", "BuildLink":
-			var ok := bool(result.get("ok", false))
+			var ok := _flag(result.get("ok", false))
 			if ok:
 				var message := str(result.get("message", "construction complete"))
 				_clear_pending_preview()
@@ -3561,27 +3753,31 @@ func _handle_command_result(result: Dictionary) -> void:
 			else:
 				_set_status_text("BUILD FAILED · %s" % str(result.get("message", "unknown")), COLOR_ERR)
 		"DemolishLink":
-			if bool(result.get("ok", false)):
+			if _flag(result.get("ok", false)):
 				_set_status_text("DEMOLISHED · %s" % str(result.get("message", "link removed")), COLOR_OK)
 		"PurchaseTrain":
-			if bool(result.get("ok", false)):
+			if _flag(result.get("ok", false)):
 				_clear_pending_preview()
 				_set_status_text("TRAIN · %s" % str(result.get("message", "train purchased")), COLOR_OK)
 		"CreateSchedule":
-			if bool(result.get("ok", false)):
+			if _flag(result.get("ok", false)):
 				_clear_pending_preview()
 				_clear_route_builder()
 				_set_status_text("ROUTE · %s" % str(result.get("message", "schedule created")), COLOR_OK)
 		"BuildInternalConnection":
-			if bool(result.get("ok", false)):
+			if _flag(result.get("ok", false)):
 				_clear_pending_preview()
 				_clear_wire_builder()
 				_set_status_text("WIRE · %s" % str(result.get("message", "ports connected")), COLOR_OK)
+		"DispatchMiningMission":
+			if _flag(result.get("ok", false)):
+				_clear_pending_preview()
+				_set_status_text("MISSION · %s" % str(result.get("message", "mission dispatched")), COLOR_CYAN)
 
 
 func _handle_preview_result(result: Dictionary, preview_kind: String) -> void:
 	_last_preview_result = result.duplicate(true)
-	if not bool(result.get("ok", false)):
+	if not _flag(result.get("ok", false)):
 		_pending_build_command = {}
 		_pending_preview_kind = preview_kind
 		_pending_preview_target_id = str(result.get("target_id", ""))
@@ -3608,12 +3804,16 @@ func _on_bridge_status_changed(running: bool) -> void:
 	_update_bridge_chip(running)
 
 
+func _on_bridge_auto_run_changed(_running: bool) -> void:
+	_update_bridge_chip(GateRailBridge.is_bridge_running())
+
+
 func _apply_snapshot(snapshot: Dictionary) -> void:
 	_latest_snapshot = snapshot
 	var worlds: Array = snapshot.get("worlds", [])
 	var prev_world_id := _world_id
 	_selected_world = _find_world(worlds, _world_id)
-	if _selected_world.is_empty() and not worlds.is_empty():
+	if _selected_world.is_empty() and _world_id.is_empty() and not worlds.is_empty():
 		_selected_world = worlds[0]
 		_world_id = str(_selected_world.get("id", ""))
 
@@ -3633,6 +3833,12 @@ func _apply_snapshot(snapshot: Dictionary) -> void:
 			_world_nodes.append(n)
 			if str(n.get("kind", "")) == "gate_hub" and _gate_hub_node_id == "":
 				_gate_hub_node_id = str(n.get("id", ""))
+
+	_outposts_by_id = {}
+	for outpost in snapshot.get("outposts", []):
+		if typeof(outpost) != TYPE_DICTIONARY:
+			continue
+		_outposts_by_id[str(outpost.get("id", ""))] = outpost
 
 	var node_ids := {}
 	for n in _world_nodes:
@@ -3860,7 +4066,7 @@ func _update_gate_card(gate_link: Dictionary) -> void:
 	var capacity := int(gate_link.get("capacity", 0))
 	var base_capacity := int(gate_link.get("base_capacity", capacity))
 	var slots_used := int(gate_link.get("slots_used", 0))
-	var powered := bool(gate_link.get("powered", false))
+	var powered := _flag(gate_link.get("powered", false))
 	var power_required := int(gate_link.get("power_required", 0))
 	var destination_id := str(gate_link.get("destination", ""))
 	if destination_id == _gate_hub_node_id:

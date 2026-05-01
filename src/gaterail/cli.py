@@ -31,6 +31,7 @@ REPORT_SECTIONS = frozenset(
         "finance",
         "freight",
         "gates",
+        "outposts",
         "production",
         "progression",
         "power",
@@ -38,6 +39,7 @@ REPORT_SECTIONS = frozenset(
         "schedules",
         "shortages",
         "signals",
+        "space",
         "stockpiles",
         "traffic",
     }

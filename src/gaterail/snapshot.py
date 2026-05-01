@@ -5,13 +5,23 @@ from __future__ import annotations
 from gaterail.economy import BUFFER_NODE_KINDS
 from gaterail.facilities import facility_summary
 from gaterail.gate import preview_gate_power
-from gaterail.models import Contract, ContractKind, FacilityBlockReason, GameState, LinkMode
+from gaterail.models import (
+    ConstructionStatus,
+    Contract,
+    ContractKind,
+    FacilityBlockReason,
+    GameState,
+    LinkMode,
+    NodeKind,
+)
 from gaterail.resource_chains import resource_branch_pressure
 from gaterail.resources import resource_catalog_payload, resource_deposit_to_dict
 from gaterail.traffic import active_signals_for_link, build_signal_report, effective_link_capacity
+from gaterail.transport import route_through_stops
 
 
 SNAPSHOT_VERSION = 1
+SCHEDULE_ORDER_PREFIX = "schedule:"
 
 
 def _cargo_map(mapping: object) -> dict[str, int]:
@@ -102,6 +112,24 @@ def _track_alignment(link: object) -> list[dict[str, float]]:
     ]
 
 
+def _reverse_link_id_for(state: GameState, link: object) -> str | None:
+    """Return an existing link that supports reverse traversal for ``link``."""
+
+    origin = getattr(link, "origin", None)
+    destination = getattr(link, "destination", None)
+    mode = getattr(link, "mode", None)
+    link_id = getattr(link, "id", None)
+    endpoints = {origin, destination}
+    for candidate in sorted(state.links.values(), key=lambda item: item.id):
+        if candidate.id == link_id or candidate.mode != mode:
+            continue
+        if candidate.bidirectional and {candidate.origin, candidate.destination} == endpoints:
+            return candidate.id
+        if candidate.origin == destination and candidate.destination == origin:
+            return candidate.id
+    return None
+
+
 def _contract_progress(contract: Contract) -> tuple[str, str, int]:
     """Return render labels and current progress for a contract."""
 
@@ -114,6 +142,57 @@ def _contract_progress(contract: Contract) -> tuple[str, str, int]:
     if contract.kind == ContractKind.GATE_RECOVERY:
         return "powered", f"link:{contract.target_link_id}", contract.progress
     return "unknown", "unknown", contract.progress
+
+
+def _cargo_flow_payloads(state: GameState) -> list[dict[str, object]]:
+    """Return route-level cargo flow visualisation payloads."""
+
+    in_transit_by_schedule: dict[str, int] = {}
+    train_count_by_schedule: dict[str, int] = {}
+    for train in state.trains.values():
+        order_id = train.order_id or ""
+        if not order_id.startswith(SCHEDULE_ORDER_PREFIX):
+            continue
+        schedule_id = order_id.removeprefix(SCHEDULE_ORDER_PREFIX)
+        in_transit_by_schedule[schedule_id] = (
+            in_transit_by_schedule.get(schedule_id, 0) + int(train.cargo_units)
+        )
+        train_count_by_schedule[schedule_id] = train_count_by_schedule.get(schedule_id, 0) + 1
+
+    flows: list[dict[str, object]] = []
+    for schedule in sorted(state.schedules.values(), key=lambda item: item.id):
+        route = route_through_stops(
+            state,
+            schedule.origin,
+            schedule.stops,
+            schedule.destination,
+            require_operational=False,
+        )
+        route_stop_ids = [schedule.origin, *schedule.stops, schedule.destination]
+        flows.append(
+            {
+                "id": f"{SCHEDULE_ORDER_PREFIX}{schedule.id}",
+                "service_type": "schedule",
+                "schedule_id": schedule.id,
+                "train_id": schedule.train_id,
+                "active": schedule.active,
+                "cargo": schedule.cargo_type.value,
+                "route_stop_ids": route_stop_ids,
+                "route_node_ids": [] if route is None else list(route.node_ids),
+                "route_link_ids": [] if route is None else list(route.link_ids),
+                "route_travel_ticks": 0 if route is None else route.travel_ticks,
+                "route_valid": route is not None,
+                "units_per_departure": schedule.units_per_departure,
+                "interval_ticks": schedule.interval_ticks,
+                "next_departure_tick": schedule.next_departure_tick,
+                "delivered_units": schedule.delivered_units,
+                "in_transit_units": in_transit_by_schedule.get(schedule.id, 0),
+                "trips_dispatched": schedule.trips_dispatched,
+                "trips_completed": schedule.trips_completed,
+                "trains_in_transit": train_count_by_schedule.get(schedule.id, 0),
+            }
+        )
+    return flows
 
 
 def render_snapshot(state: GameState) -> dict[str, object]:
@@ -147,6 +226,13 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "population": world.population,
                 "stability": round(world.stability, 3),
                 "specialization": world.specialization,
+                "power_available": world.power_available,
+                "power_used": world.power_used,
+                "power_pressure": (
+                    round(world.power_used / world.power_available, 3)
+                    if world.power_available > 0
+                    else 0.0
+                ),
                 "power": {
                     "available": world.power_available,
                     "generated": world.power_generated_this_tick,
@@ -220,6 +306,45 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             "effective_unloader_rate": int(node.effective_inbound_rate()),
             "platform_queue_depth": int(state.platform_queue_depth_this_tick.get(node.id, 0)),
         }
+        node_power_required = (
+            int(node.facility.power_required()) if node.facility is not None else 0
+        )
+        overlay_pip: dict[str, str] | None = None
+        if facility_blocked_payload:
+            block_reason = next(
+                (
+                    entry.get("reason")
+                    for entry in state.facility_block_entries
+                    if isinstance(entry, dict) and entry.get("node") == node.id
+                ),
+                None,
+            )
+            reason_value = (
+                block_reason.value if hasattr(block_reason, "value") else str(block_reason)
+            )
+            overlay_pip = {
+                "layer": "facility_block_layer",
+                "severity": "warn",
+                "label": reason_value.replace("_", " ") if reason_value else "blocked",
+            }
+        elif node.outpost_kind is not None:
+            project = (
+                state.construction_projects.get(node.construction_project_id)
+                if node.construction_project_id
+                else None
+            )
+            if project is None or project.status != ConstructionStatus.COMPLETED:
+                overlay_pip = {
+                    "layer": "outpost_layer",
+                    "severity": "info",
+                    "label": "outpost in construction",
+                }
+        elif node_power_required > 0:
+            overlay_pip = {
+                "layer": "power_layer",
+                "severity": "info",
+                "label": "power draw",
+            }
         is_buffer = node.kind in BUFFER_NODE_KINDS
         if is_buffer:
             buffer_fill_pct: float | None = round(used / capacity, 3)
@@ -275,6 +400,9 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "loader_summary": loader_summary_payload,
                 "power_plants": sorted(power_plants_by_node.get(node.id, [])),
                 "construction_project_id": node.construction_project_id,
+                "outpost_kind": node.outpost_kind.value if node.outpost_kind else None,
+                "power_required": node_power_required,
+                "overlay_pip": overlay_pip,
                 "layout": _node_layout(node),
             }
         )
@@ -304,6 +432,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             }
         trains_on_link = trains_per_link.get(link.id, 0)
         utilisation = round(trains_on_link / max(1, link.capacity_per_tick), 3)
+        reverse_link_id = _reverse_link_id_for(state, link)
         links.append(
             {
                 "id": link.id,
@@ -315,6 +444,11 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "base_capacity": link.capacity_per_tick,
                 "active": link.active,
                 "bidirectional": link.bidirectional,
+                "directional": not link.bidirectional,
+                "source_node_id": link.origin,
+                "exit_node_id": link.destination,
+                "reverse_available": link.bidirectional or reverse_link_id is not None,
+                "reverse_link_id": reverse_link_id,
                 "power_required": link.power_required,
                 "effective_power_required": (
                     link.power_required if gate_status is None else gate_status.power_required
@@ -363,11 +497,15 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             "train_id": schedule.train_id,
             "origin": schedule.origin,
             "destination": schedule.destination,
+            "stops": list(schedule.stops),
+            "route_stop_ids": [schedule.origin, *schedule.stops, schedule.destination],
             "cargo": schedule.cargo_type.value,
             "units_per_departure": schedule.units_per_departure,
             "interval_ticks": schedule.interval_ticks,
             "next_departure_tick": schedule.next_departure_tick,
+            "priority": schedule.priority,
             "active": schedule.active,
+            "return_to_origin": schedule.return_to_origin,
             "trips_dispatched": schedule.trips_dispatched,
             "trips_completed": schedule.trips_completed,
             "delivered_units": schedule.delivered_units,
@@ -480,6 +618,9 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "fuel_input": mission.fuel_input,
                 "power_input": mission.power_input,
                 "expected_yield": mission.expected_yield,
+                "reserved_power": mission.reserved_power,
+                "fuel_consumed": mission.fuel_consumed,
+                "projected_yield": mission.expected_yield,
             }
             for mission in sorted(state.mining_missions.values(), key=lambda item: item.id)
         ],
@@ -488,6 +629,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
         "links": links,
         "trains": trains,
         "schedules": schedules,
+        "cargo_flows": _cargo_flow_payloads(state),
         "orders": orders,
         "contracts": contracts,
         "construction_projects": [
@@ -500,4 +642,49 @@ def render_snapshot(state: GameState) -> dict[str, object]:
             }
             for project in sorted(state.construction_projects.values(), key=lambda item: item.id)
         ],
+        "outposts": _outposts_payload(state),
     }
+
+
+def _outposts_payload(state: GameState) -> list[dict[str, object]]:
+    """Render top-level outposts: pending, active, and completed (promoted)."""
+
+    payload: list[dict[str, object]] = []
+    for node in sorted(state.nodes.values(), key=lambda item: item.id):
+        if node.outpost_kind is None:
+            continue
+        project = (
+            state.construction_projects.get(node.construction_project_id)
+            if node.construction_project_id
+            else None
+        )
+        required = project.required_cargo if project else {}
+        delivered = project.delivered_cargo if project else {}
+        remaining = project.remaining_cargo if project else {}
+        required_total = sum(int(v) for v in required.values())
+        delivered_total = sum(int(v) for v in delivered.values())
+        progress_fraction = (
+            delivered_total / required_total if required_total > 0 else 1.0
+        )
+        top_needs = [
+            {"cargo": cargo.value if hasattr(cargo, "value") else str(cargo), "units": int(units)}
+            for cargo, units in sorted(
+                remaining.items(), key=lambda item: (-int(item[1]), str(item[0]))
+            )[:3]
+            if int(units) > 0
+        ]
+        payload.append(
+            {
+                "id": node.id,
+                "kind": node.kind.value,
+                "outpost_kind": node.outpost_kind.value,
+                "construction_status": project.status.value if project else "completed",
+                "required_cargo": _cargo_map(required),
+                "delivered_cargo": _cargo_map(delivered),
+                "remaining_cargo": _cargo_map(remaining),
+                "progress_fraction": progress_fraction,
+                "top_needs": top_needs,
+                "world_id": node.world_id,
+            }
+        )
+    return payload

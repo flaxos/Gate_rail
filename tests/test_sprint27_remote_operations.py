@@ -1,0 +1,160 @@
+"""Sprint 27 remote extraction and outpost operation tests."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from gaterail.cargo import CargoType
+from gaterail.commands import command_from_dict
+from gaterail.models import (
+    DevelopmentTier,
+    GameState,
+    LinkMode,
+    NetworkLink,
+    NetworkNode,
+    NodeKind,
+    ResourceRecipe,
+    ResourceRecipeKind,
+    SpaceSite,
+    WorldState,
+)
+from gaterail.simulation import TickSimulation
+from gaterail.space import mission_fuel_required, mission_power_required
+
+
+def _remote_state(*, launch_fuel: int = 100, power_available: int = 200) -> GameState:
+    state = GameState()
+    state.add_world(
+        WorldState(
+            id="remote",
+            name="Remote Test World",
+            tier=DevelopmentTier.OUTPOST,
+            power_available=power_available,
+            power_used=50,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="orbital_yard",
+            name="Orbital Yard",
+            world_id="remote",
+            kind=NodeKind.ORBITAL_YARD,
+            inventory={CargoType.FUEL: launch_fuel},
+            storage_capacity=3_000,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="collection_station",
+            name="Collection Station",
+            world_id="remote",
+            kind=NodeKind.COLLECTION_STATION,
+            storage_capacity=1_000,
+            transfer_limit_per_tick=32,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="ore_smelter",
+            name="Ore Smelter",
+            world_id="remote",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=1_000,
+            transfer_limit_per_tick=32,
+            resource_recipe=ResourceRecipe(
+                id="remote_iron_smelting",
+                kind=ResourceRecipeKind.SMELTING,
+                inputs={"mixed_ore": 6},
+                outputs={"iron": 4},
+            ),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_collection_smelter",
+            origin="collection_station",
+            destination="ore_smelter",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=12,
+        )
+    )
+    state.add_space_site(
+        SpaceSite(
+            id="site_alpha",
+            name="Alpha Belt",
+            resource_id="mixed_ore",
+            travel_ticks=5,
+            base_yield=80,
+        )
+    )
+    return state
+
+
+def _mission_command(command_type: str = "PreviewDispatchMiningMission") -> dict[str, object]:
+    return {
+        "type": command_type,
+        "mission_id": "mission_alpha",
+        "site_id": "site_alpha",
+        "launch_node_id": "orbital_yard",
+        "return_node_id": "collection_station",
+    }
+
+
+def test_mining_mission_preview_uses_backend_fuel_and_power_requirements_when_omitted() -> None:
+    state = _remote_state()
+    site = state.space_sites["site_alpha"]
+
+    preview = state.apply_command(command_from_dict(_mission_command()))
+
+    assert preview["ok"] is True
+    assert preview["fuel_required"] == mission_fuel_required(site) == 30
+    assert preview["power_required"] == mission_power_required(site) == 15
+    assert preview["normalized_command"]["fuel_input"] == 30
+    assert preview["normalized_command"]["power_input"] == 15
+
+
+def test_mining_mission_without_explicit_inputs_still_reports_missing_fuel() -> None:
+    state = _remote_state(launch_fuel=20)
+
+    preview = state.apply_command(command_from_dict(_mission_command()))
+
+    assert preview["ok"] is False
+    assert preview["reason"] == "insufficient_fuel"
+    assert preview["fuel_required"] == 30
+    assert preview["fuel_available"] == 20
+
+
+def test_dispatched_mission_returns_resources_that_feed_local_industry() -> None:
+    state = _remote_state()
+    dispatch = state.apply_command(command_from_dict(_mission_command("DispatchMiningMission")))
+
+    assert dispatch["ok"] is True
+    assert state.nodes["orbital_yard"].stock(CargoType.FUEL) == 70
+    assert state.worlds["remote"].power_used == 65
+
+    mission = state.mining_missions["mission_alpha"]
+    mission.ticks_remaining = 1
+    simulation = TickSimulation(state=state)
+    report = simulation.step_tick()
+
+    assert report["space_missions"]["returned_resources"] == {"mixed_ore": 80}
+    assert state.nodes["collection_station"].resource_stock("mixed_ore") == 80
+    assert state.nodes["ore_smelter"].resource_stock("mixed_ore") == 0
+    assert state.worlds["remote"].power_used == 50
+
+    simulation.step_tick()
+
+    assert state.nodes["collection_station"].resource_stock("mixed_ore") == 74
+    assert state.nodes["ore_smelter"].resource_stock("mixed_ore") == 0
+    assert state.nodes["ore_smelter"].resource_stock("iron") == 4
+
+
+def test_godot_local_region_previews_mining_missions_before_dispatch() -> None:
+    script = Path("godot/scripts/local_region.gd").read_text(encoding="utf-8")
+
+    assert '"type": "PreviewDispatchMiningMission"' in script
+    assert "_handle_preview_result(result, \"mining_mission\")" in script
+    assert '"DispatchMiningMission"' in script
+    assert "Fuel" in script
+    assert "Power" in script

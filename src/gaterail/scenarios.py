@@ -25,6 +25,7 @@ from gaterail.models import (
     ResourceRecipe,
     ResourceRecipeKind,
     TrackPoint,
+    TrainConsist,
     WorldState,
 )
 from gaterail.resources import ResourceDeposit
@@ -646,6 +647,17 @@ def build_sprint4_scenario() -> GameState:
     )
     state.add_node(
         NetworkNode(
+            id="frontier_outer_gate",
+            name="Frontier Outer Gate Hub",
+            world_id="frontier",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=240,
+            layout_x=48.0,
+            layout_y=-62.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
             id="outer_outpost",
             name="Ashfall Survey Camp",
             world_id="outer",
@@ -682,13 +694,35 @@ def build_sprint4_scenario() -> GameState:
     state.add_link(
         NetworkLink(
             id="gate_frontier_outer",
-            origin="frontier_gate",
+            origin="frontier_outer_gate",
             destination="outer_gate",
             mode=LinkMode.GATE,
             travel_ticks=1,
             capacity_per_tick=16,
             power_required=90,
             power_source_world_id="frontier",
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_gate_transfer",
+            origin="frontier_gate",
+            destination="frontier_outer_gate",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=12,
+            alignment=(TrackPoint(16.0, -28.0), TrackPoint(34.0, -48.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_outer_gate_settlement",
+            origin="frontier_outer_gate",
+            destination="frontier_settlement",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=10,
+            alignment=(TrackPoint(78.0, -18.0), TrackPoint(104.0, 36.0)),
         )
     )
     state.add_link(
@@ -790,6 +824,7 @@ def build_sprint6_scenario() -> GameState:
     state = build_sprint5_scenario()
     state.economic_identity_enabled = True
     state.nodes["frontier_mine"].add_inventory(CargoType.MACHINERY, 3)
+    state.links["rail_core_yard_gate"] = replace(state.links["rail_core_yard_gate"], travel_ticks=2)
     state.links["gate_core_frontier"] = replace(state.links["gate_core_frontier"], capacity_per_tick=2)
     state.links["gate_frontier_outer"] = replace(state.links["gate_frontier_outer"], capacity_per_tick=2)
     state.schedules["ashfall_medical_service"].units_per_departure = 4
@@ -840,7 +875,11 @@ def build_sprint7_scenario() -> GameState:
     """Build the traffic pressure and recoverable failure scenario."""
 
     state = build_sprint6_scenario()
-    state.links["rail_core_yard_gate"] = replace(state.links["rail_core_yard_gate"], capacity_per_tick=1)
+    state.links["rail_core_yard_gate"] = replace(
+        state.links["rail_core_yard_gate"],
+        capacity_per_tick=1,
+        travel_ticks=3,
+    )
     state.add_disruption(
         NetworkDisruption(
             id="frontier_outer_gate_alignment",
@@ -858,7 +897,11 @@ def build_sprint8_scenario() -> GameState:
     """Build the balanced playtest scenario for repeatable CLI iteration."""
 
     state = build_sprint7_scenario()
-    state.links["rail_core_yard_gate"] = replace(state.links["rail_core_yard_gate"], capacity_per_tick=2)
+    state.links["rail_core_yard_gate"] = replace(
+        state.links["rail_core_yard_gate"],
+        capacity_per_tick=2,
+        travel_ticks=3,
+    )
     state.disruptions["frontier_outer_gate_alignment"] = NetworkDisruption(
         id="frontier_outer_gate_alignment",
         link_id="gate_frontier_outer",
@@ -1100,6 +1143,792 @@ def build_sprint20_scenario() -> GameState:
     return state
 
 
+def build_early_build_scenario() -> GameState:
+    """Build a sparse early-game sandbox for construction and first-route tests."""
+
+    state = GameState()
+    state.finance.cash = 3_200.0
+    state.add_world(
+        WorldState(
+            id="core",
+            name="Vesta Core",
+            tier=DevelopmentTier.CORE_WORLD,
+            population=8_500_000,
+            stability=0.97,
+            power_available=520,
+            power_used=210,
+            specialization="manufacturing",
+        )
+    )
+    state.add_world(
+        WorldState(
+            id="frontier",
+            name="Brink Frontier",
+            tier=DevelopmentTier.OUTPOST,
+            population=4_200,
+            stability=0.64,
+            power_available=95,
+            power_used=42,
+            specialization="starter_colony",
+        )
+    )
+
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="frontier_starter_iron",
+            world_id="frontier",
+            resource_id="iron_rich_ore",
+            name="Starter Ridge Iron",
+            grade=0.52,
+            yield_per_tick=2,
+            remaining_estimate=4_500,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="frontier_starter_silica",
+            world_id="frontier",
+            resource_id="silica_sand",
+            name="Starter Glass Flats",
+            grade=0.46,
+            yield_per_tick=1,
+            remaining_estimate=3_200,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="core_yard",
+            name="Core Starter Yard",
+            world_id="core",
+            kind=NodeKind.DEPOT,
+            inventory={
+                CargoType.FOOD: 42,
+                CargoType.CONSTRUCTION_MATERIALS: 28,
+                CargoType.MACHINERY: 6,
+                CargoType.PARTS: 4,
+            },
+            production={CargoType.FOOD: 2},
+            storage_capacity=240,
+            transfer_limit_per_tick=12,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="core_gate",
+            name="Core Starter Gate",
+            world_id="core",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=160,
+            transfer_limit_per_tick=10,
+            layout_x=116.0,
+            layout_y=18.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_gate",
+            name="Frontier Starter Gate",
+            world_id="frontier",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=140,
+            transfer_limit_per_tick=10,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_landing",
+            name="Brink Starter Landing",
+            world_id="frontier",
+            kind=NodeKind.SETTLEMENT,
+            inventory={CargoType.FOOD: 6, CargoType.CONSTRUCTION_MATERIALS: 3},
+            demand={CargoType.FOOD: 1, CargoType.CONSTRUCTION_MATERIALS: 1},
+            stock_targets={CargoType.FOOD: 18, CargoType.CONSTRUCTION_MATERIALS: 14},
+            storage_capacity=130,
+            transfer_limit_per_tick=8,
+            layout_x=98.0,
+            layout_y=62.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_starter_pit",
+            name="Starter Ridge Pit",
+            world_id="frontier",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=120,
+            transfer_limit_per_tick=6,
+            layout_x=-84.0,
+            layout_y=118.0,
+            resource_deposit_id="frontier_starter_iron",
+        )
+    )
+
+    state.add_link(
+        NetworkLink(
+            id="rail_core_yard_gate",
+            origin="core_yard",
+            destination="core_gate",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+            alignment=(TrackPoint(44.0, -12.0), TrackPoint(88.0, 12.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="gate_core_frontier",
+            origin="core_gate",
+            destination="frontier_gate",
+            mode=LinkMode.GATE,
+            travel_ticks=1,
+            capacity_per_tick=18,
+            power_required=65,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_gate_landing",
+            origin="frontier_gate",
+            destination="frontier_landing",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(34.0, 18.0), TrackPoint(76.0, 54.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_landing_pit",
+            origin="frontier_landing",
+            destination="frontier_starter_pit",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=6,
+            alignment=(TrackPoint(52.0, 86.0), TrackPoint(-32.0, 112.0)),
+        )
+    )
+
+    state.add_train(
+        FreightTrain(
+            id="pathfinder",
+            name="Pathfinder",
+            node_id="core_yard",
+            capacity=10,
+            dispatch_cost=35.0,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="starter_food_service",
+            train_id="pathfinder",
+            origin="core_yard",
+            destination="frontier_landing",
+            cargo_type=CargoType.FOOD,
+            units_per_departure=6,
+            interval_ticks=8,
+            next_departure_tick=1,
+            priority=90,
+            active=False,
+        )
+    )
+    return state
+
+
+def build_industrial_expansion_scenario() -> GameState:
+    """Build a larger connected industry sandbox for late-network stress tests."""
+
+    state = build_sprint20_scenario()
+    state.finance.cash = 24_000.0
+    state.worlds["core"].power_available = 760
+    state.worlds["frontier"].power_available = 135
+    state.nodes["core_yard"].add_inventory(CargoType.REACTOR_PARTS, 14)
+    state.nodes["core_yard"].add_inventory(CargoType.GATE_COMPONENTS, 8)
+
+    state.add_world(
+        WorldState(
+            id="forge",
+            name="Cinder Forge",
+            tier=DevelopmentTier.INDUSTRIAL_COLONY,
+            population=240_000,
+            stability=0.78,
+            power_available=95,
+            power_used=48,
+            specialization="metallurgy",
+        )
+    )
+    state.add_world(
+        WorldState(
+            id="research",
+            name="Helix Research Reach",
+            tier=DevelopmentTier.FRONTIER_COLONY,
+            population=42_000,
+            stability=0.70,
+            power_available=70,
+            power_used=40,
+            specialization="advanced_systems",
+        )
+    )
+
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="forge_bauxite_basin",
+            world_id="forge",
+            resource_id="bauxite",
+            name="Cinder Bauxite Basin",
+            grade=0.68,
+            yield_per_tick=5,
+            remaining_estimate=14_000,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="forge_carbon_stack",
+            world_id="forge",
+            resource_id="carbon_feedstock",
+            name="Cinder Carbon Stack",
+            grade=0.61,
+            yield_per_tick=4,
+            remaining_estimate=10_500,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="research_rare_earth_ridge",
+            world_id="research",
+            resource_id="rare_earth_concentrate",
+            name="Helix Rare Earth Ridge",
+            grade=0.44,
+            yield_per_tick=3,
+            remaining_estimate=6_800,
+        )
+    )
+    state.add_resource_deposit(
+        ResourceDeposit(
+            id="research_fissile_trace",
+            world_id="research",
+            resource_id="fissile_ore",
+            name="Helix Fissile Trace",
+            grade=0.36,
+            yield_per_tick=2,
+            remaining_estimate=4_400,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="forge_gate",
+            name="Cinder Gate Hub",
+            world_id="forge",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=420,
+            transfer_limit_per_tick=18,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_yard",
+            name="Cinder Assembly Yard",
+            world_id="forge",
+            kind=NodeKind.DEPOT,
+            inventory={CargoType.METAL: 38, CargoType.CONSTRUCTION_MATERIALS: 24},
+            production={CargoType.METAL: 2},
+            storage_capacity=760,
+            transfer_limit_per_tick=22,
+            layout_x=86.0,
+            layout_y=42.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_bauxite_pit",
+            name="Cinder Bauxite Pit",
+            world_id="forge",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=360,
+            transfer_limit_per_tick=14,
+            layout_x=-106.0,
+            layout_y=130.0,
+            resource_deposit_id="forge_bauxite_basin",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_carbon_rig",
+            name="Cinder Carbon Rig",
+            world_id="forge",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=320,
+            transfer_limit_per_tick=12,
+            layout_x=-132.0,
+            layout_y=26.0,
+            resource_deposit_id="forge_carbon_stack",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_aluminum_refinery",
+            name="Cinder Aluminum Refinery",
+            world_id="forge",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=440,
+            transfer_limit_per_tick=14,
+            layout_x=-24.0,
+            layout_y=114.0,
+            resource_recipe=ResourceRecipe(
+                id="aluminum_refining",
+                kind=ResourceRecipeKind.REFINING,
+                inputs={"bauxite": 4},
+                outputs={"aluminum": 2},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_parts_fabricator",
+            name="Cinder Parts Fabricator",
+            world_id="forge",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=460,
+            transfer_limit_per_tick=14,
+            layout_x=34.0,
+            layout_y=104.0,
+            resource_inventory={"iron": 12, "semiconductors": 6},
+            resource_recipe=ResourceRecipe(
+                id="parts_fabrication",
+                kind=ResourceRecipeKind.FABRICATION,
+                inputs={"aluminum": 1, "iron": 2},
+                outputs={"parts": 2},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_gate_component_line",
+            name="Cinder Gate Component Line",
+            world_id="forge",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=420,
+            transfer_limit_per_tick=12,
+            layout_x=78.0,
+            layout_y=116.0,
+            inventory={CargoType.GATE_COMPONENTS: 6},
+            resource_inventory={"parts": 4, "semiconductors": 4, "gate_components": 4},
+            resource_recipe=ResourceRecipe(
+                id="forge_gate_component_fabrication",
+                kind=ResourceRecipeKind.FABRICATION,
+                inputs={"parts": 2, "semiconductors": 1},
+                outputs={"gate_components": 1},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="forge_thermal_plant",
+            name="Cinder Thermal Plant",
+            world_id="forge",
+            kind=NodeKind.INDUSTRY,
+            resource_inventory={"carbon_feedstock": 8},
+            resource_demand={"carbon_feedstock": 1},
+            storage_capacity=220,
+            transfer_limit_per_tick=10,
+            layout_x=-70.0,
+            layout_y=30.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="research_gate",
+            name="Helix Gate Hub",
+            world_id="research",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=360,
+            transfer_limit_per_tick=14,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="research_labs",
+            name="Helix Research Yards",
+            world_id="research",
+            kind=NodeKind.DEPOT,
+            inventory={CargoType.RESEARCH_EQUIPMENT: 12, CargoType.ELECTRONICS: 18},
+            storage_capacity=520,
+            transfer_limit_per_tick=16,
+            layout_x=82.0,
+            layout_y=46.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="research_rare_earth_pit",
+            name="Helix Rare Earth Pit",
+            world_id="research",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=280,
+            transfer_limit_per_tick=10,
+            layout_x=-84.0,
+            layout_y=112.0,
+            resource_deposit_id="research_rare_earth_ridge",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="research_chip_line",
+            name="Helix Chip Line",
+            world_id="research",
+            kind=NodeKind.INDUSTRY,
+            resource_inventory={"electronics": 6, "silicon": 6},
+            storage_capacity=360,
+            transfer_limit_per_tick=12,
+            layout_x=34.0,
+            layout_y=126.0,
+            resource_recipe=ResourceRecipe(
+                id="helix_semiconductor_line",
+                kind=ResourceRecipeKind.SEMICONDUCTOR,
+                inputs={"electronics": 1, "rare_earth_concentrate": 1, "silicon": 1},
+                outputs={"semiconductors": 2},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="research_reactor_shop",
+            name="Helix Reactor Shop",
+            world_id="research",
+            kind=NodeKind.INDUSTRY,
+            resource_inventory={"electronics": 4, "uranium": 8},
+            storage_capacity=360,
+            transfer_limit_per_tick=12,
+            layout_x=82.0,
+            layout_y=122.0,
+            resource_recipe=ResourceRecipe(
+                id="reactor_parts_fabrication",
+                kind=ResourceRecipeKind.FABRICATION,
+                inputs={"electronics": 1, "uranium": 1},
+                outputs={"reactor_parts": 1},
+            ),
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="research_fission_plant",
+            name="Helix Fission Plant",
+            world_id="research",
+            kind=NodeKind.INDUSTRY,
+            resource_inventory={"uranium": 8},
+            resource_demand={"uranium": 1},
+            storage_capacity=180,
+            transfer_limit_per_tick=8,
+            layout_x=122.0,
+            layout_y=78.0,
+        )
+    )
+
+    state.add_link(
+        NetworkLink(
+            id="gate_core_forge",
+            origin="core_gate",
+            destination="forge_gate",
+            mode=LinkMode.GATE,
+            travel_ticks=1,
+            capacity_per_tick=18,
+            power_required=90,
+            power_source_world_id="core",
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="gate_forge_research",
+            origin="forge_gate",
+            destination="research_gate",
+            mode=LinkMode.GATE,
+            travel_ticks=1,
+            capacity_per_tick=14,
+            power_required=80,
+            power_source_world_id="forge",
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_gate_yard",
+            origin="forge_gate",
+            destination="forge_yard",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=18,
+            alignment=(TrackPoint(28.0, 8.0), TrackPoint(68.0, 36.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_yard_bauxite",
+            origin="forge_yard",
+            destination="forge_bauxite_pit",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=12,
+            alignment=(TrackPoint(42.0, 76.0), TrackPoint(-56.0, 128.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_bauxite_refinery",
+            origin="forge_bauxite_pit",
+            destination="forge_aluminum_refinery",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=10,
+            alignment=(TrackPoint(-82.0, 128.0), TrackPoint(-44.0, 118.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_carbon_power",
+            origin="forge_carbon_rig",
+            destination="forge_thermal_plant",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(-116.0, 28.0), TrackPoint(-88.0, 28.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_refinery_parts",
+            origin="forge_aluminum_refinery",
+            destination="forge_parts_fabricator",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=10,
+            alignment=(TrackPoint(-2.0, 112.0), TrackPoint(20.0, 108.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_yard_parts",
+            origin="forge_yard",
+            destination="forge_parts_fabricator",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=10,
+            alignment=(TrackPoint(78.0, 70.0), TrackPoint(44.0, 98.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_parts_gate_components",
+            origin="forge_parts_fabricator",
+            destination="forge_gate_component_line",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(52.0, 110.0), TrackPoint(70.0, 116.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_forge_yard_power",
+            origin="forge_yard",
+            destination="forge_thermal_plant",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(44.0, 48.0), TrackPoint(-36.0, 34.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_research_gate_labs",
+            origin="research_gate",
+            destination="research_labs",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=14,
+            alignment=(TrackPoint(28.0, 8.0), TrackPoint(64.0, 38.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_research_labs_rare_earth",
+            origin="research_labs",
+            destination="research_rare_earth_pit",
+            mode=LinkMode.RAIL,
+            travel_ticks=3,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(44.0, 78.0), TrackPoint(-44.0, 108.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_research_labs_chip_line",
+            origin="research_labs",
+            destination="research_chip_line",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(70.0, 76.0), TrackPoint(48.0, 116.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_research_labs_reactor_shop",
+            origin="research_labs",
+            destination="research_reactor_shop",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=8,
+            alignment=(TrackPoint(88.0, 74.0), TrackPoint(86.0, 112.0)),
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_research_labs_fission",
+            origin="research_labs",
+            destination="research_fission_plant",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=6,
+            alignment=(TrackPoint(100.0, 54.0), TrackPoint(118.0, 70.0)),
+        )
+    )
+
+    state.add_power_plant(
+        PowerPlant(
+            id="forge_cinder_thermal",
+            node_id="forge_thermal_plant",
+            kind=PowerPlantKind.THERMAL,
+            inputs={"carbon_feedstock": 1},
+            power_output=70,
+        )
+    )
+    state.add_power_plant(
+        PowerPlant(
+            id="research_helix_fission",
+            node_id="research_fission_plant",
+            kind=PowerPlantKind.FISSION,
+            inputs={"uranium": 1},
+            power_output=90,
+        )
+    )
+    state.nodes["frontier_gate_fabricator"].add_resource_inventory("gate_components", 4)
+    state.add_gate_support(
+        GatePowerSupport(
+            id="frontier_gate_component_support",
+            link_id="gate_frontier_outer",
+            node_id="frontier_gate_fabricator",
+            inputs={"gate_components": 1},
+            power_bonus=40,
+        )
+    )
+    state.add_gate_support(
+        GatePowerSupport(
+            id="forge_gate_component_support",
+            link_id="gate_core_forge",
+            node_id="forge_gate_component_line",
+            inputs={"gate_components": 1},
+            power_bonus=55,
+        )
+    )
+
+    state.add_train(
+        FreightTrain(
+            id="forge_runner",
+            name="Forge Runner",
+            node_id="forge_yard",
+            capacity=24,
+            consist=TrainConsist.HEAVY_FLAT,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="research_runner",
+            name="Research Runner",
+            node_id="research_labs",
+            capacity=12,
+            consist=TrainConsist.PROTECTED,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="bridgewright",
+            name="Bridgewright",
+            node_id="core_yard",
+            capacity=10,
+            consist=TrainConsist.PROTECTED,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="stabilizer",
+            name="Stabilizer",
+            node_id="forge_gate_component_line",
+            capacity=8,
+            consist=TrainConsist.PROTECTED,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="core_reactor_parts_to_helix",
+            train_id="bridgewright",
+            origin="core_yard",
+            destination="research_labs",
+            cargo_type=CargoType.REACTOR_PARTS,
+            units_per_departure=4,
+            interval_ticks=14,
+            priority=94,
+            stops=("forge_yard",),
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="forge_metal_to_core",
+            train_id="forge_runner",
+            origin="forge_yard",
+            destination="core_yard",
+            cargo_type=CargoType.METAL,
+            units_per_departure=10,
+            interval_ticks=10,
+            priority=82,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="helix_research_to_ashfall",
+            train_id="research_runner",
+            origin="research_labs",
+            destination="outer_outpost",
+            cargo_type=CargoType.RESEARCH_EQUIPMENT,
+            units_per_departure=3,
+            interval_ticks=12,
+            priority=86,
+            stops=("core_gate", "frontier_outer_gate"),
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="forge_gate_components_to_frontier",
+            train_id="stabilizer",
+            origin="forge_gate_component_line",
+            destination="frontier_gate",
+            cargo_type=CargoType.GATE_COMPONENTS,
+            units_per_departure=2,
+            interval_ticks=18,
+            priority=96,
+            stops=("core_gate",),
+        )
+    )
+    return state
+
+
 def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
     """Return all built-in scenarios in roadmap order."""
 
@@ -1201,6 +2030,20 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
             title="Space Extraction Logistics",
             description="Orbital stations extract resources from remote space sites via mining missions.",
             builder=build_sprint20_scenario,
+        ),
+        ScenarioDefinition(
+            key="early_build",
+            aliases=("early", "starter", "new_game"),
+            title="Early Build Sandbox",
+            description="Sparse two-world start with limited cash, starter materials, and one inactive route.",
+            builder=build_early_build_scenario,
+        ),
+        ScenarioDefinition(
+            key="industrial_expansion",
+            aliases=("industrial", "expanded", "large_industry"),
+            title="Industrial Expansion Web",
+            description="Large connected industry sandbox with extra gates, power, recipes, and multi-stop services.",
+            builder=build_industrial_expansion_scenario,
         ),
     )
 

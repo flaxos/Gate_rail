@@ -7,6 +7,7 @@ build/
 dist/
 godot/.godot/
 godot/imported/
+godot/addons/
 *.import
 *.uid
 .codex

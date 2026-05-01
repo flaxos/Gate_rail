@@ -36,7 +36,7 @@ def test_powering_frontier_gate_makes_expansion_route_available() -> None:
     assert state.worlds["frontier"].power_margin == 10
     assert route is not None
     assert route.link_ids == (
-        "rail_frontier_gate_settlement",
+        "rail_frontier_outer_gate_settlement",
         "gate_frontier_outer",
         "rail_outer_gate_outpost",
     )
@@ -83,6 +83,6 @@ def test_cli_sprint4_prints_gate_bottleneck() -> None:
 
     text = output.getvalue()
     assert result == 0
-    assert "3 worlds, 7 nodes, 4 rail links, 2 gate links, 4 trains, 4 orders" in text
+    assert "3 worlds, 8 nodes, 6 rail links, 2 gate links, 4 trains, 4 orders" in text
     assert "gate_frontier_outer underpowered" in text
     assert "Mercy: no route frontier_settlement->outer_outpost" in text

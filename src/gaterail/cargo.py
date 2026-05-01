@@ -175,6 +175,9 @@ CARGO_CONSIST_MAP: dict[CargoType, TrainConsist] = {
     CargoType.WATER: TrainConsist.LIQUID_TANKER,
     CargoType.FUEL: TrainConsist.LIQUID_TANKER,
     CargoType.COOLANT: TrainConsist.LIQUID_TANKER,
+    CargoType.MACHINERY: TrainConsist.HEAVY_FLAT,
+    CargoType.PARTS: TrainConsist.HEAVY_FLAT,
+    CargoType.CONSTRUCTION_MATERIALS: TrainConsist.HEAVY_FLAT,
     CargoType.ELECTRONICS: TrainConsist.PROTECTED,
     CargoType.RESEARCH_EQUIPMENT: TrainConsist.PROTECTED,
     CargoType.REACTOR_PARTS: TrainConsist.PROTECTED,
@@ -192,3 +195,15 @@ def required_consist_for(cargo_type: CargoType) -> TrainConsist:
     """Return the required TrainConsist for a given cargo, or GENERAL if none."""
 
     return CARGO_CONSIST_MAP.get(cargo_type, TrainConsist.GENERAL)
+
+
+def consist_can_carry(consist: TrainConsist, cargo_type: CargoType) -> bool:
+    """Return whether ``consist`` can carry ``cargo_type``.
+
+    General trains remain universal for backward compatibility with existing
+    scenarios and saves. Specialized consists are intentionally narrower.
+    """
+
+    if consist == TrainConsist.GENERAL:
+        return True
+    return consist == required_consist_for(cargo_type)
