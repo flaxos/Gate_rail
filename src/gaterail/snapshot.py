@@ -604,6 +604,7 @@ def render_snapshot(state: GameState) -> dict[str, object]:
                 "travel_ticks": site.travel_ticks,
                 "base_yield": site.base_yield,
                 "discovered": site.discovered,
+                "cargo_type": site.cargo_type.value if site.cargo_type is not None else None,
             }
             for site in sorted(state.space_sites.values(), key=lambda item: item.id)
         ],

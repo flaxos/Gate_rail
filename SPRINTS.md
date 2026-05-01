@@ -791,14 +791,18 @@ Sprint 27 completed state:
 - outpost bootstrap remains backend-owned: preview/build stage an outpost construction project, delivered cargo completes it, and completion promotes the node into an operational logistics role.
 - Local Region now previews mining missions from spaceport nodes, shows fuel/power/yield/return-space context from backend command results, and only dispatches after preview confirmation.
 - tests cover backend-computed requirements, missing-fuel blockers, returned resources feeding local industry, legacy space lifecycle persistence, and Local Region preview wiring.
+- `SpaceSite.cargo_type` (optional `CargoType`) lets a site return its haul into `node.inventory[cargo_type]` (the train-cargo bucket) instead of `node.resource_inventory[resource_id]`. When set, mission completion reports the haul under `space_missions.returned_cargo` keyed by cargo value; sites without a `cargo_type` keep the existing resource-id auto-flow path. The new field round-trips through persistence and snapshot.
 
 ## Current next step
 
-Sprint 28 should close the next gameplay gap by making rail and signal planning editable in Godot.
+Sprint 28 should bridge mining missions into the player-driven train loop: scenarios that use `SpaceSite.cargo_type=CargoType.ORE` (or similar) so mining missions feed `node.inventory`, then a player-scheduled train picks up the haul and ferries it through a gate to a manufacturing world for the existing `ProductionRecipe` chain.
 
 Recommended Sprint 28 target:
-- add Local Region rail/signal planning controls for existing backend-owned alignments and track signals.
-- preview waypoint edits, signal placement, protected block warnings, and consist/cargo compatibility through backend commands.
-- keep graphical editing as a client proposal surface; Python remains authoritative for validation and route/debug payloads.
+- ship a new scenario preset that demonstrates the closed loop: spaceport with fuel + mining mission -> cargo-typed haul into `collection_station.inventory[ORE]` -> player-built schedule picks it up -> train through gate -> manufacturing world's ProductionRecipe consumes ORE and outputs PARTS/MEDICAL_SUPPLIES.
+- expose the cargo_type choice on Local Region's mining mission preview so the player can see whether the haul will land in the train-cargo bucket or the auto-flow resource bucket before dispatch.
+- keep the resource-id (auto-flow) path intact for the deeper Stage 3 industrial-chemistry chain.
+
+Deferred to a later sprint:
+- Local Region rail/signal planning controls for backend-owned alignments and track signals (preview waypoint edits, signal placement, protected block warnings, consist/cargo compatibility). Previously slotted as Sprint 28; now deferred behind closing the mining-to-train gameplay loop.
 
 3D facility presentation should still wait until after resource, power, space-extraction, outpost, rail-depth, and 2D diagnostic contracts are stable.

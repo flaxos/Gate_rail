@@ -51,6 +51,7 @@ def advance_mining_missions(state: GameState) -> dict[str, object]:
     completed = 0
     failed = 0
     returned_resources: dict[str, int] = {}
+    returned_cargo: dict[str, int] = {}
     dropped_units: list[dict[str, int | str]] = []
 
     for mission in sorted(state.mining_missions.values(), key=lambda item: item.id):
@@ -82,11 +83,18 @@ def advance_mining_missions(state: GameState) -> dict[str, object]:
                 continue
 
             mission.status = MiningMissionStatus.COMPLETED
-            resource_id = site.resource_id
-            delivered = node.add_resource_inventory(resource_id, mission.expected_yield)
+            if site.cargo_type is not None:
+                cargo_type = site.cargo_type
+                delivered = node.add_inventory(cargo_type, mission.expected_yield)
+                if delivered > 0:
+                    key = cargo_type.value
+                    returned_cargo[key] = returned_cargo.get(key, 0) + delivered
+            else:
+                resource_id = site.resource_id
+                delivered = node.add_resource_inventory(resource_id, mission.expected_yield)
+                if delivered > 0:
+                    returned_resources[resource_id] = returned_resources.get(resource_id, 0) + delivered
             dropped = max(0, mission.expected_yield - delivered)
-            if delivered > 0:
-                returned_resources[resource_id] = returned_resources.get(resource_id, 0) + delivered
             if dropped > 0:
                 dropped_units.append(
                     {
@@ -104,5 +112,6 @@ def advance_mining_missions(state: GameState) -> dict[str, object]:
         "completed_this_tick": completed,
         "failed_this_tick": failed,
         "returned_resources": returned_resources,
+        "returned_cargo": returned_cargo,
         "dropped_units": dropped_units,
     }

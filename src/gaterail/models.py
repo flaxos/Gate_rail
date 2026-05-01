@@ -806,6 +806,7 @@ class SpaceSite:
     travel_ticks: int
     base_yield: int
     discovered: bool = True
+    cargo_type: CargoType | None = None
 
 
 @dataclass(slots=True)
