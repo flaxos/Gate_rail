@@ -434,10 +434,50 @@ def test_cancel_outpost_refunds_half_cash_and_delivered_cargo_to_nearest_refund_
     assert result["ok"] is True
     assert result["refund_cash"] == preview["refund_cash"]
     assert result["refund_cargo"] == preview["refund_cargo"]
+    assert result["refund_dropped"] == {}
+    assert preview["refund_dropped"] == {}
     assert outpost.id not in state.nodes
     assert project.id not in state.construction_projects
     assert state.nodes["frontier_depot"].stock(CargoType.CONSTRUCTION_MATERIALS) == 25
     assert state.finance.cash == pytest.approx(starting_cash + preview["refund_cash"])
+
+
+def test_cancel_outpost_caps_refund_at_refund_node_storage_capacity() -> None:
+    state, outpost, project = _partial_outpost_state()
+    refund_node = state.nodes["frontier_depot"]
+    capacity = refund_node.effective_storage_capacity()
+    refund_node.add_inventory(CargoType.CONSTRUCTION_MATERIALS, capacity - 10)
+    starting_stock = refund_node.stock(CargoType.CONSTRUCTION_MATERIALS)
+    starting_cash = state.finance.cash
+
+    preview = state.apply_command(
+        command_from_dict(
+            {
+                "type": "PreviewCancelOutpost",
+                "outpost_id": outpost.id,
+            }
+        )
+    )
+
+    assert preview["ok"] is True
+    assert preview["refund_cargo"] == {"construction_materials": 10}
+    assert preview["refund_dropped"] == {"construction_materials": 15}
+
+    result = state.apply_command(
+        command_from_dict(
+            {
+                "type": "CancelOutpost",
+                "outpost_id": outpost.id,
+            }
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["refund_cargo"] == {"construction_materials": 10}
+    assert result["refund_dropped"] == {"construction_materials": 15}
+    assert refund_node.stock(CargoType.CONSTRUCTION_MATERIALS) == starting_stock + 10
+    assert refund_node.total_inventory() == capacity
+    assert state.finance.cash == pytest.approx(starting_cash + result["refund_cash"])
 
 
 def test_outpost_save_load_round_trip_matches_unsaved_completion_path() -> None:
