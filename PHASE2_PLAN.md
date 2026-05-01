@@ -357,6 +357,60 @@ Implemented Sprint 26 completed state:
 - `industrial_expansion` layers Cinder Forge and Helix Research Reach onto the Sprint 20 baseline with extra gates, rail branches, deposits, recipes, power plants, gate support, specialized trains, and multi-stop services.
 - the Godot bridge exposes `save_game`, `load_game`, and `load_scenario`; `main.gd` adds a compact scenario selector and save/load row to the Galaxy Map control panel.
 
+## Sprint 27: Remote Operations Hardening
+
+Goal:
+- make mining mission and outpost operations dependable enough to feed the normal rail/gate/resource chain.
+
+Implemented Sprint 27 completed state:
+- mining mission previews and dispatches use backend-computed fuel and power requirements when the client omits explicit values, so free launches are rejected.
+- previews report missing fuel, power shortfall, invalid site, bad launch/return node, expected yield, return capacity, and normalized dispatch commands.
+- mission completion can return either resource-catalog units into `resource_inventory` or train-haulable cargo into `inventory` via optional `SpaceSite.cargo_type`.
+- Local Region previews mining missions before dispatch and shows fuel, power, yield, return-space, and haul-bucket context from backend command results.
+- outpost bootstrap remains backend-owned through preview/build construction projects and delivered-cargo completion.
+
+## Sprint 28: Mining-To-Manufacturing Payoff Loop
+
+Goal:
+- prove the real early gameplay loop: mine ore remotely, haul it by train, smelt it, fabricate parts, deliver those parts to a settlement, and earn rewards that can fund further expansion.
+
+Implemented Sprint 28A/28B plus backend payoff state:
+- `mining_to_manufacturing` / `mining_loop` is a built-in scenario with a frontier spaceport, collection station, powered gate, core smelter, manufacturing yard, frontier settlement, bulk ore train, heavy-flat parts train, and paid settlement contract.
+- the automated loop test dispatches the mission, activates schedules, verifies ORE leaves the collection station, METAL is produced at the smelter, PARTS and construction materials are fabricated at the yard, PARTS reach the settlement, and the contract pays cash/reputation.
+- mission previews now return `site_cargo_type`, `site_resource_id`, `haul_bucket`, and `haul_label`, and Local Region renders cargo-vs-resource badges in the site list and mission planner.
+- snapshots expose backend-owned `scenario_catalog` and `cargo_catalog` payloads; Godot scenario/cargo selectors consume those catalogs instead of maintaining parallel hardcoded registries.
+
+Remaining Sprint 28 work:
+- add a Local Region one-click workflow for queuing the haul run around mission return timing.
+- surface the new haul and settlement-delivery services as clearer cargo-flow overlays and alert chips.
+
+## Sprint 29: Tutorial Start And Loop Usability
+
+Goal:
+- provide a generous six-world tutorial start and decide what is backend-complete versus still needing client workflow polish.
+
+Implemented Sprint 29A state:
+- `tutorial_six_worlds` / `tutorial_start` is a built-in scenario with six stocked worlds in a powered gate ring.
+- each world has two gate links to two neighbouring worlds, plus local depots, settlements, gate hubs, and construction stock.
+- active tutorial schedules move ORE to a smelter, METAL to a factory, and PARTS to a settlement contract that pays cash/reputation.
+- `saves/tutorial_six_worlds.json` is generated from the scenario for immediate Godot load/save testing.
+
+Implemented Sprint 29B state:
+- snapshots expose a backend-owned `tutorial` object for the six-world starter loop.
+- tutorial steps report active/pending/complete state, delivered/target cargo, route endpoints, contract reward cash, and reward reputation.
+- Godot renders the tutorial checklist and status alert chip from the snapshot contract.
+- Godot does not hardcode the tutorial schedule IDs or own loop completion rules.
+
+Manual playtest correction:
+- tutorial schedules start disabled, so Play advances time without automatically solving ore, metal, and parts delivery.
+- the six-world tutorial map uses circular backend-owned world positions.
+- map selection feeds the one-shot dispatch form: train selection fills train/pickup, node selection fills pickup/dropoff, and cargo/units are inferred from origin stock plus destination demand, recipe inputs, or active contracts.
+
+Current playability assessment:
+- backend loop is feature-complete enough to run deterministic cargo loops, gate routing, train schedules, recipe processing, settlement delivery contracts, rewards, save/load, and scenario swapping.
+- Godot can load scenarios/saves, inspect entities, click-fill and issue one-shot orders, toggle schedules for automation, preview construction, view Local Region diagnostics, and follow the six-world tutorial loop from a backend-provided checklist.
+- remaining work is usability polish rather than core-rule invention: richer cargo-flow overlays, one-click mission/haul workflow, and clearer schedule creation from successful manual routes.
+
 ## Deferred: 3D Facility View Spike
 
 Goal:

@@ -207,3 +207,22 @@ def consist_can_carry(consist: TrainConsist, cargo_type: CargoType) -> bool:
     if consist == TrainConsist.GENERAL:
         return True
     return consist == required_consist_for(cargo_type)
+
+
+def cargo_catalog_payload() -> list[dict[str, object]]:
+    """Return JSON-safe cargo metadata for client selectors."""
+
+    payload: list[dict[str, object]] = []
+    for cargo_type in sorted(CargoType, key=lambda item: item.value):
+        metadata = metadata_for(cargo_type)
+        payload.append(
+            {
+                "id": cargo_type.value,
+                "priority": metadata.priority,
+                "base_unit_revenue": metadata.base_unit_revenue,
+                "preferred_origin": metadata.preferred_origin,
+                "preferred_destination": metadata.preferred_destination,
+                "required_consist": required_consist_for(cargo_type).value,
+            }
+        )
+    return payload

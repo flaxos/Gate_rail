@@ -1988,6 +1988,39 @@ def _outpost_project_for_node(state: object, node: NetworkNode) -> ConstructionP
     return None
 
 
+def _planned_outpost_refund(project: ConstructionProject) -> dict[CargoType, int]:
+    """Return the unbounded half-refund mapping for one outpost project."""
+
+    return {
+        cargo_type: units // 2
+        for cargo_type, units in project.delivered_cargo.items()
+        if units // 2 > 0
+    }
+
+
+def _project_outpost_refund(
+    project: ConstructionProject, refund_node: NetworkNode
+) -> tuple[dict[CargoType, int], dict[CargoType, int]]:
+    """Forecast the refund split between accepted and capacity-dropped units."""
+
+    planned = _planned_outpost_refund(project)
+    available_space = max(
+        0, refund_node.effective_storage_capacity() - refund_node.total_inventory()
+    )
+    accepted: dict[CargoType, int] = {}
+    dropped: dict[CargoType, int] = {}
+    remaining_space = available_space
+    for cargo_type in sorted(planned, key=lambda c: c.value):
+        wanted = planned[cargo_type]
+        fits = max(0, min(wanted, remaining_space))
+        remaining_space -= fits
+        if fits > 0:
+            accepted[cargo_type] = fits
+        if fits < wanted:
+            dropped[cargo_type] = wanted - fits
+    return accepted, dropped
+
+
 def _outpost_layout_payload(command: BuildOutpost | PreviewBuildOutpost) -> dict[str, float] | None:
     """Return JSON-safe layout metadata for one outpost command."""
 
@@ -2125,6 +2158,8 @@ def _validate_mining_mission(
         "fuel_input": fuel_input,
         "power_input": power_input,
     }
+    haul_bucket = "cargo" if site.cargo_type is not None else "resource"
+    haul_label = site.cargo_type.value if site.cargo_type is not None else site.resource_id
     result_extra = {
         "travel_ticks": site.travel_ticks * 2,
         "expected_yield": site.base_yield,
@@ -2134,6 +2169,10 @@ def _validate_mining_mission(
         "power_available": power_available,
         "power_shortfall_if_dispatched": max(0, power_input - power_available),
         "return_capacity_estimate": mission_return_capacity(return_node),
+        "site_cargo_type": site.cargo_type.value if site.cargo_type is not None else None,
+        "site_resource_id": site.resource_id,
+        "haul_bucket": haul_bucket,
+        "haul_label": haul_label,
         "normalized_command": normalized_command,
     }
     if fuel_available < fuel_input:
@@ -2716,6 +2755,10 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             power_available=fields["power_available"],
             power_shortfall_if_dispatched=fields["power_shortfall_if_dispatched"],
             return_capacity_estimate=fields["return_capacity_estimate"],
+            site_cargo_type=fields["site_cargo_type"],
+            site_resource_id=fields["site_resource_id"],
+            haul_bucket=fields["haul_bucket"],
+            haul_label=fields["haul_label"],
             normalized_command=fields["normalized_command"],
         )
 
@@ -2929,11 +2972,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
                 message=f"no refund node on world {node.world_id}",
             )
         refund_cash = round(project.cash_cost * 0.5, 2)
-        refund_cargo = {
-            cargo_type: units // 2
-            for cargo_type, units in project.delivered_cargo.items()
-            if units // 2 > 0
-        }
+        refund_cargo, refund_dropped = _project_outpost_refund(project, refund_node)
         return command_result(
             command.type,
             ok=True,
@@ -2941,6 +2980,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             message=f"valid cancellation preview for {command.outpost_id}",
             refund_cash=refund_cash,
             refund_cargo=_plain_cargo_cost(refund_cargo),
+            refund_dropped=_plain_cargo_cost(refund_dropped),
             refund_node_id=refund_node.id,
             normalized_command={"type": "CancelOutpost", "outpost_id": command.outpost_id},
         )
@@ -2971,13 +3011,16 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
                 message=f"no refund node on world {node.world_id}",
             )
         refund_cash = round(project.cash_cost * 0.5, 2)
-        refund_cargo = {
-            cargo_type: units // 2
-            for cargo_type, units in project.delivered_cargo.items()
-            if units // 2 > 0
-        }
-        for cargo_type, units in refund_cargo.items():
-            refund_node.add_inventory(cargo_type, units)
+        planned_refund = _planned_outpost_refund(project)
+        refund_cargo: dict[CargoType, int] = {}
+        refund_dropped: dict[CargoType, int] = {}
+        for cargo_type in sorted(planned_refund, key=lambda c: c.value):
+            wanted = planned_refund[cargo_type]
+            accepted = refund_node.add_inventory(cargo_type, wanted)
+            if accepted > 0:
+                refund_cargo[cargo_type] = accepted
+            if accepted < wanted:
+                refund_dropped[cargo_type] = wanted - accepted
         state.finance.cash += refund_cash
         state.construction_projects.pop(project.id, None)
         state.nodes.pop(node.id, None)
@@ -2988,6 +3031,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             message=f"cancelled outpost {command.outpost_id}",
             refund_cash=refund_cash,
             refund_cargo=_plain_cargo_cost(refund_cargo),
+            refund_dropped=_plain_cargo_cost(refund_dropped),
             refund_node_id=refund_node.id,
         )
 

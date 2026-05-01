@@ -151,22 +151,6 @@ var _wire_dragging: bool = false
 var _wire_source_endpoint: Dictionary = {}
 var _wire_mouse_pos: Vector2 = Vector2.ZERO
 
-const ALL_CARGO_TYPES: Array = [
-	"food",
-	"water",
-	"ore",
-	"stone",
-	"biomass",
-	"fuel",
-	"metal",
-	"parts",
-	"electronics",
-	"construction_materials",
-	"consumer_goods",
-	"medical_supplies",
-	"research_equipment",
-]
-
 # Terrain / visual state
 var _terrain_patches: Array = []  # Array of {pos, size, color, alpha}
 var _terrain_zones: Array = []    # Array of {pos, radius, zone_type}
@@ -231,7 +215,7 @@ func _open_cargo_kind_popup(origin_id: String, destination_id: String) -> void:
 	_pending_route_dest_id = destination_id
 	_cargo_popup_options = _cargo_options_for_route(origin_id, destination_id)
 	if _cargo_popup_options.is_empty():
-		_cargo_popup_options = ALL_CARGO_TYPES.duplicate()
+		_cargo_popup_options = _cargo_catalog_ids()
 	_cargo_kind_popup.clear()
 	var suggested := _suggest_cargo_for_route(origin_id, destination_id)
 	for i in _cargo_popup_options.size():
@@ -406,8 +390,21 @@ func _cargo_options_for_route(origin_id: String, destination_id: String) -> Arra
 	var options: Array = combined.keys()
 	options.sort()
 	if options.is_empty():
-		return ALL_CARGO_TYPES.duplicate()
+		return _cargo_catalog_ids()
 	return options
+
+
+func _cargo_catalog_ids() -> Array:
+	var ids: Array = []
+	var catalog: Array = _latest_snapshot.get("cargo_catalog", []) if typeof(_latest_snapshot.get("cargo_catalog")) == TYPE_ARRAY else []
+	for item in catalog:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var cargo_id := str(item.get("id", ""))
+		if not cargo_id.is_empty():
+			ids.append(cargo_id)
+	ids.sort()
+	return ids
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -2966,6 +2963,26 @@ func _add_mission_preview_context(result: Dictionary) -> void:
 
 	_add_planner_line("Yield", "%d units" % int(result.get("expected_yield", 0)), COLOR_CYAN)
 	_add_planner_line("Return Space", "%d units" % int(result.get("return_capacity_estimate", 0)), COLOR_STEEL_2)
+	_add_haul_bucket_planner_line(result)
+
+
+func _add_haul_bucket_planner_line(result: Dictionary) -> void:
+	var bucket := str(result.get("haul_bucket", ""))
+	if bucket.is_empty():
+		return
+	var label := str(result.get("haul_label", "")).replace("_", " ")
+	if bucket == "cargo":
+		_add_planner_line(
+			"Haul Bucket",
+			"cargo · %s (trains can carry)" % label,
+			COLOR_OK,
+		)
+	else:
+		_add_planner_line(
+			"Haul Bucket",
+			"resource · %s (auto-flow only)" % label,
+			COLOR_AMBER_HOT,
+		)
 
 
 func _add_gate_preview_context(result: Dictionary) -> void:
@@ -3216,11 +3233,14 @@ func _add_node_inspection(node_id: String) -> void:
 			var site_id := str(site.get("id", ""))
 			var sname := str(site.get("name", ""))
 			var sres := str(site.get("resource_id", "")).replace("_", " ")
+			var raw_cargo = site.get("cargo_type", null)
+			var has_cargo := typeof(raw_cargo) == TYPE_STRING and not String(raw_cargo).is_empty()
+			var bucket_label := "cargo · " + String(raw_cargo).replace("_", " ") if has_cargo else "auto-flow · " + sres
 			var dist := int(site.get("travel_ticks", 0))
 			var row := HBoxContainer.new()
 			var lbl := Label.new()
-			lbl.text = "• %s (%s) · %d tk" % [sname, sres, dist]
-			lbl.add_theme_color_override("font_color", COLOR_STEEL)
+			lbl.text = "• %s (%s) · %d tk" % [sname, bucket_label, dist]
+			lbl.add_theme_color_override("font_color", COLOR_OK if has_cargo else COLOR_STEEL)
 			lbl.add_theme_font_size_override("font_size", 10)
 			lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			row.add_child(lbl)

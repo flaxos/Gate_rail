@@ -500,12 +500,15 @@ def _space_site_to_dict(site: SpaceSite) -> dict[str, object]:
         "travel_ticks": site.travel_ticks,
         "base_yield": site.base_yield,
         "discovered": site.discovered,
+        "cargo_type": site.cargo_type.value if site.cargo_type is not None else None,
     }
 
 
 def _space_site_from_dict(data: dict[str, Any]) -> SpaceSite:
     """Deserialize a space site."""
 
+    raw_cargo = data.get("cargo_type")
+    cargo_type = CargoType(raw_cargo) if raw_cargo else None
     return SpaceSite(
         id=str(data["id"]),
         name=str(data["name"]),
@@ -513,6 +516,7 @@ def _space_site_from_dict(data: dict[str, Any]) -> SpaceSite:
         travel_ticks=int(data["travel_ticks"]),
         base_yield=int(data["base_yield"]),
         discovered=bool(data.get("discovered", True)),
+        cargo_type=cargo_type,
     )
 
 

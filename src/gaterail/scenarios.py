@@ -20,10 +20,12 @@ from gaterail.models import (
     NetworkLink,
     NetworkNode,
     NodeKind,
+    NodeRecipe,
     PowerPlant,
     PowerPlantKind,
     ResourceRecipe,
     ResourceRecipeKind,
+    SpaceSite,
     TrackPoint,
     TrainConsist,
     WorldState,
@@ -1143,6 +1145,592 @@ def build_sprint20_scenario() -> GameState:
     return state
 
 
+def build_mining_to_manufacturing_scenario() -> GameState:
+    """Closed gameplay loop: mining mission -> train haul -> manufacturing recipe.
+
+    Demonstrates the `SpaceSite.cargo_type` bridge: an asteroid belt returns
+    `CargoType.ORE` into a frontier collection station's train-cargo bucket,
+    a player-toggled schedule ferries the ore through a powered gate to a
+    core manufacturing depot, and the existing `ore_fabrication` recipe
+    consumes ORE and outputs PARTS / CONSTRUCTION_MATERIALS / MEDICAL_SUPPLIES.
+    """
+
+    state = GameState()
+    state.economic_identity_enabled = True
+    state.finance.cash = 5_000.0
+
+    state.add_world(
+        WorldState(
+            id="frontier",
+            name="Brink Frontier",
+            tier=DevelopmentTier.OUTPOST,
+            population=4_500,
+            stability=0.7,
+            power_available=200,
+            power_used=40,
+            specialization="mining",
+        )
+    )
+    state.add_world(
+        WorldState(
+            id="core",
+            name="Vesta Core",
+            tier=DevelopmentTier.CORE_WORLD,
+            population=8_000_000,
+            stability=0.95,
+            power_available=600,
+            power_used=180,
+            specialization="manufacturing",
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="frontier_spaceport",
+            name="Brink Spaceport",
+            world_id="frontier",
+            kind=NodeKind.SPACEPORT,
+            inventory={CargoType.FUEL: 200},
+            storage_capacity=2_000,
+            transfer_limit_per_tick=24,
+            layout_x=-120.0,
+            layout_y=-60.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_collection",
+            name="Brink Collection Station",
+            world_id="frontier",
+            kind=NodeKind.COLLECTION_STATION,
+            storage_capacity=600,
+            transfer_limit_per_tick=24,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_gate",
+            name="Brink Gate Hub",
+            world_id="frontier",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=400,
+            transfer_limit_per_tick=24,
+            layout_x=140.0,
+            layout_y=20.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_settlement",
+            name="Brink Works Settlement",
+            world_id="frontier",
+            kind=NodeKind.SETTLEMENT,
+            demand={CargoType.PARTS: 1},
+            storage_capacity=500,
+            transfer_limit_per_tick=16,
+            layout_x=250.0,
+            layout_y=90.0,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="core_gate",
+            name="Vesta Gate Hub",
+            world_id="core",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=400,
+            transfer_limit_per_tick=24,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="core_smelter",
+            name="Vesta Arc Smelter",
+            world_id="core",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=600,
+            transfer_limit_per_tick=24,
+            recipe=NodeRecipe(
+                inputs={CargoType.ORE: 20},
+                outputs={CargoType.METAL: 20},
+            ),
+            layout_x=180.0,
+            layout_y=-100.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="core_yard",
+            name="Vesta Manufacturing Yard",
+            world_id="core",
+            kind=NodeKind.DEPOT,
+            inventory={CargoType.MACHINERY: 4},
+            storage_capacity=600,
+            transfer_limit_per_tick=24,
+            recipe=NodeRecipe(
+                inputs={CargoType.METAL: 10},
+                outputs={
+                    CargoType.CONSTRUCTION_MATERIALS: 8,
+                    CargoType.PARTS: 10,
+                },
+            ),
+            layout_x=160.0,
+            layout_y=0.0,
+        )
+    )
+
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_collection_gate",
+            origin="frontier_collection",
+            destination="frontier_gate",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="gate_frontier_core",
+            origin="frontier_gate",
+            destination="core_gate",
+            mode=LinkMode.GATE,
+            travel_ticks=1,
+            capacity_per_tick=8,
+            power_required=80,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_gate_settlement",
+            origin="frontier_gate",
+            destination="frontier_settlement",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_core_gate_yard",
+            origin="core_gate",
+            destination="core_yard",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_core_yard_smelter",
+            origin="core_yard",
+            destination="core_smelter",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=12,
+        )
+    )
+
+    state.add_space_site(
+        SpaceSite(
+            id="site_brink_belt",
+            name="Brink Asteroid Belt",
+            resource_id="mixed_ore",
+            travel_ticks=4,
+            base_yield=60,
+            cargo_type=CargoType.ORE,
+        )
+    )
+
+    state.add_train(
+        FreightTrain(
+            id="prospector",
+            name="Prospector",
+            node_id="frontier_collection",
+            capacity=24,
+            consist=TrainConsist.BULK_HOPPER,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="builder",
+            name="Builder",
+            node_id="core_yard",
+            capacity=12,
+            consist=TrainConsist.HEAVY_FLAT,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="ore_haul_to_core",
+            train_id="prospector",
+            origin="frontier_collection",
+            destination="core_yard",
+            cargo_type=CargoType.ORE,
+            units_per_departure=20,
+            interval_ticks=14,
+            next_departure_tick=1,
+            priority=80,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="parts_to_frontier_settlement",
+            train_id="builder",
+            origin="core_yard",
+            destination="frontier_settlement",
+            cargo_type=CargoType.PARTS,
+            units_per_departure=10,
+            interval_ticks=18,
+            next_departure_tick=1,
+            priority=70,
+            active=False,
+        )
+    )
+    state.add_contract(
+        Contract(
+            id="frontier_parts_upgrade",
+            kind=ContractKind.CARGO_DELIVERY,
+            title="Brink Works Parts Upgrade",
+            client="Brink Works Settlement",
+            destination_node_id="frontier_settlement",
+            cargo_type=CargoType.PARTS,
+            target_units=10,
+            due_tick=90,
+            reward_cash=6_000.0,
+            penalty_cash=1_200.0,
+            reward_reputation=6,
+            penalty_reputation=5,
+        )
+    )
+
+    return state
+
+
+def _tutorial_depot_inventory() -> dict[CargoType, int]:
+    """Return the generous per-world starter stock for tutorial construction."""
+
+    return {
+        CargoType.CONSTRUCTION_MATERIALS: 800,
+        CargoType.METAL: 300,
+        CargoType.PARTS: 180,
+        CargoType.ELECTRONICS: 120,
+        CargoType.FUEL: 180,
+        CargoType.FOOD: 240,
+        CargoType.WATER: 240,
+    }
+
+
+def _tutorial_depot_stock_targets() -> dict[CargoType, int]:
+    """Reserve construction stock so tutorial industry does not consume it."""
+
+    return {
+        CargoType.CONSTRUCTION_MATERIALS: 500,
+        CargoType.METAL: 300,
+        CargoType.PARTS: 120,
+        CargoType.ELECTRONICS: 80,
+        CargoType.FUEL: 100,
+    }
+
+
+def _add_tutorial_local_rail(state: GameState, world_id: str, node_id: str, *, travel_ticks: int = 1) -> None:
+    """Connect one local node to its world's depot."""
+
+    state.add_link(
+        NetworkLink(
+            id=f"rail_{world_id}_depot_{node_id.removeprefix(world_id + '_')}",
+            origin=f"{world_id}_depot",
+            destination=node_id,
+            mode=LinkMode.RAIL,
+            travel_ticks=travel_ticks,
+            capacity_per_tick=18,
+        )
+    )
+
+
+def _add_tutorial_world(
+    state: GameState,
+    *,
+    world_id: str,
+    name: str,
+    tier: DevelopmentTier,
+    specialization: str,
+    position: int,
+) -> None:
+    """Add one tutorial world with two gate hubs and stocked construction depot."""
+
+    state.add_world(
+        WorldState(
+            id=world_id,
+            name=name,
+            tier=tier,
+            population=75_000 if tier < DevelopmentTier.CORE_WORLD else 4_000_000,
+            stability=0.86,
+            power_available=520,
+            power_used=140,
+            specialization=specialization,
+        )
+    )
+    x_offset = float(position * 40)
+    state.add_node(
+        NetworkNode(
+            id=f"{world_id}_depot",
+            name=f"{name} Depot",
+            world_id=world_id,
+            kind=NodeKind.DEPOT,
+            inventory=_tutorial_depot_inventory(),
+            stock_targets=_tutorial_depot_stock_targets(),
+            storage_capacity=4_000,
+            transfer_limit_per_tick=36,
+            layout_x=x_offset,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id=f"{world_id}_gate_prev",
+            name=f"{name} Inbound Gate",
+            world_id=world_id,
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=1_500,
+            transfer_limit_per_tick=30,
+            layout_x=x_offset - 130.0,
+            layout_y=-30.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id=f"{world_id}_gate_next",
+            name=f"{name} Outbound Gate",
+            world_id=world_id,
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=1_500,
+            transfer_limit_per_tick=30,
+            layout_x=x_offset + 130.0,
+            layout_y=-30.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id=f"{world_id}_settlement",
+            name=f"{name} Settlement",
+            world_id=world_id,
+            kind=NodeKind.SETTLEMENT,
+            demand={CargoType.FOOD: 1},
+            storage_capacity=1_000,
+            transfer_limit_per_tick=24,
+            layout_x=x_offset,
+            layout_y=120.0,
+        )
+    )
+    _add_tutorial_local_rail(state, world_id, f"{world_id}_gate_prev")
+    _add_tutorial_local_rail(state, world_id, f"{world_id}_gate_next")
+    _add_tutorial_local_rail(state, world_id, f"{world_id}_settlement")
+
+
+def build_tutorial_six_worlds_scenario() -> GameState:
+    """Six-world tutorial start with a ring of powered gates and active cargo loop."""
+
+    state = GameState()
+    state.economic_identity_enabled = True
+    state.finance.cash = 150_000.0
+
+    worlds = (
+        ("vesta", "Vesta Core", DevelopmentTier.CORE_WORLD, "manufacturing"),
+        ("brink", "Brink Mines", DevelopmentTier.FRONTIER_COLONY, "mining"),
+        ("cinder", "Cinder Forge", DevelopmentTier.INDUSTRIAL_COLONY, "manufacturing"),
+        ("atlas", "Atlas Yards", DevelopmentTier.INDUSTRIAL_COLONY, "manufacturing"),
+        ("helix", "Helix Reach", DevelopmentTier.FRONTIER_COLONY, "survey_outpost"),
+        ("aurora", "Aurora Farms", DevelopmentTier.FRONTIER_COLONY, "mining"),
+    )
+    for position, (world_id, name, tier, specialization) in enumerate(worlds):
+        _add_tutorial_world(
+            state,
+            world_id=world_id,
+            name=name,
+            tier=tier,
+            specialization=specialization,
+            position=position,
+        )
+
+    state.add_node(
+        NetworkNode(
+            id="brink_mine",
+            name="Brink Tutorial Mine",
+            world_id="brink",
+            kind=NodeKind.EXTRACTOR,
+            inventory={CargoType.ORE: 80},
+            production={CargoType.ORE: 12},
+            storage_capacity=1_200,
+            transfer_limit_per_tick=24,
+            layout_x=40.0,
+            layout_y=210.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="cinder_smelter",
+            name="Cinder Tutorial Smelter",
+            world_id="cinder",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=1_500,
+            transfer_limit_per_tick=30,
+            recipe=NodeRecipe(
+                inputs={CargoType.ORE: 20},
+                outputs={CargoType.METAL: 20},
+            ),
+            layout_x=80.0,
+            layout_y=210.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="atlas_factory",
+            name="Atlas Tutorial Factory",
+            world_id="atlas",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=1_500,
+            transfer_limit_per_tick=30,
+            recipe=NodeRecipe(
+                inputs={CargoType.METAL: 10},
+                outputs={
+                    CargoType.PARTS: 12,
+                    CargoType.CONSTRUCTION_MATERIALS: 8,
+                },
+            ),
+            layout_x=120.0,
+            layout_y=210.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="aurora_farm",
+            name="Aurora Tutorial Farm",
+            world_id="aurora",
+            kind=NodeKind.EXTRACTOR,
+            production={CargoType.FOOD: 8, CargoType.WATER: 6},
+            storage_capacity=1_200,
+            transfer_limit_per_tick=24,
+            layout_x=200.0,
+            layout_y=210.0,
+        )
+    )
+
+    _add_tutorial_local_rail(state, "brink", "brink_mine")
+    _add_tutorial_local_rail(state, "cinder", "cinder_smelter")
+    _add_tutorial_local_rail(state, "atlas", "atlas_factory")
+    _add_tutorial_local_rail(state, "aurora", "aurora_farm")
+
+    ring = ("vesta", "brink", "cinder", "atlas", "helix", "aurora")
+    for index, origin_world in enumerate(ring):
+        destination_world = ring[(index + 1) % len(ring)]
+        state.add_link(
+            NetworkLink(
+                id=f"gate_{origin_world}_{destination_world}",
+                origin=f"{origin_world}_gate_next",
+                destination=f"{destination_world}_gate_prev",
+                mode=LinkMode.GATE,
+                travel_ticks=1,
+                capacity_per_tick=4,
+                power_required=60,
+            )
+        )
+
+    state.add_train(
+        FreightTrain(
+            id="tutorial_ore_runner",
+            name="Tutorial Ore Runner",
+            node_id="brink_mine",
+            capacity=30,
+            consist=TrainConsist.BULK_HOPPER,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="tutorial_metal_runner",
+            name="Tutorial Metal Runner",
+            node_id="cinder_smelter",
+            capacity=20,
+            consist=TrainConsist.GENERAL,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="tutorial_parts_runner",
+            name="Tutorial Parts Runner",
+            node_id="atlas_factory",
+            capacity=12,
+            consist=TrainConsist.HEAVY_FLAT,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_ore_to_cinder",
+            train_id="tutorial_ore_runner",
+            origin="brink_mine",
+            destination="cinder_smelter",
+            cargo_type=CargoType.ORE,
+            units_per_departure=30,
+            interval_ticks=8,
+            next_departure_tick=1,
+            priority=90,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_metal_to_atlas",
+            train_id="tutorial_metal_runner",
+            origin="cinder_smelter",
+            destination="atlas_factory",
+            cargo_type=CargoType.METAL,
+            units_per_departure=20,
+            interval_ticks=10,
+            next_departure_tick=1,
+            priority=80,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_parts_to_helix",
+            train_id="tutorial_parts_runner",
+            origin="atlas_factory",
+            destination="helix_settlement",
+            cargo_type=CargoType.PARTS,
+            units_per_departure=12,
+            interval_ticks=12,
+            next_departure_tick=1,
+            priority=70,
+            active=False,
+        )
+    )
+    state.add_contract(
+        Contract(
+            id="helix_parts_tutorial",
+            kind=ContractKind.CARGO_DELIVERY,
+            title="Helix Starter Parts",
+            client="Helix Reach",
+            destination_node_id="helix_settlement",
+            cargo_type=CargoType.PARTS,
+            target_units=12,
+            due_tick=90,
+            reward_cash=20_000.0,
+            penalty_cash=0.0,
+            reward_reputation=4,
+            penalty_reputation=0,
+        )
+    )
+
+    return state
+
+
 def build_early_build_scenario() -> GameState:
     """Build a sparse early-game sandbox for construction and first-route tests."""
 
@@ -2044,6 +2632,20 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
             title="Industrial Expansion Web",
             description="Large connected industry sandbox with extra gates, power, recipes, and multi-stop services.",
             builder=build_industrial_expansion_scenario,
+        ),
+        ScenarioDefinition(
+            key="mining_to_manufacturing",
+            aliases=("mining_loop", "mine_to_factory", "loop_demo"),
+            title="Mining-to-Manufacturing Loop",
+            description="Mine ore in space, ferry it through a gate, and feed a manufacturing recipe end to end.",
+            builder=build_mining_to_manufacturing_scenario,
+        ),
+        ScenarioDefinition(
+            key="tutorial_six_worlds",
+            aliases=("tutorial_start", "six_world_tutorial", "starter_ring"),
+            title="Six-World Tutorial Start",
+            description="Six stocked worlds in a powered gate ring with active ore, metal, and parts tutorial hauls.",
+            builder=build_tutorial_six_worlds_scenario,
         ),
     )
 
