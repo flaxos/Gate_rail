@@ -793,16 +793,28 @@ Sprint 27 completed state:
 - tests cover backend-computed requirements, missing-fuel blockers, returned resources feeding local industry, legacy space lifecycle persistence, and Local Region preview wiring.
 - `SpaceSite.cargo_type` (optional `CargoType`) lets a site return its haul into `node.inventory[cargo_type]` (the train-cargo bucket) instead of `node.resource_inventory[resource_id]`. When set, mission completion reports the haul under `space_missions.returned_cargo` keyed by cargo value; sites without a `cargo_type` keep the existing resource-id auto-flow path. The new field round-trips through persistence and snapshot.
 
-## Current next step
+## Sprint 28: Mining-To-Manufacturing Gameplay Loop
 
-Sprint 28 should bridge mining missions into the player-driven train loop: scenarios that use `SpaceSite.cargo_type=CargoType.ORE` (or similar) so mining missions feed `node.inventory`, then a player-scheduled train picks up the haul and ferries it through a gate to a manufacturing world for the existing `ProductionRecipe` chain.
+Goal:
+- close the headline gameplay loop in a single playable scenario: dispatch a mining mission, watch it return cargo into a collection station, schedule a train to ferry that cargo through a gate, and consume it in a manufacturing-world `ProductionRecipe`.
 
-Recommended Sprint 28 target:
-- ship a new scenario preset that demonstrates the closed loop: spaceport with fuel + mining mission -> cargo-typed haul into `collection_station.inventory[ORE]` -> player-built schedule picks it up -> train through gate -> manufacturing world's ProductionRecipe consumes ORE and outputs PARTS/MEDICAL_SUPPLIES.
-- expose the cargo_type choice on Local Region's mining mission preview so the player can see whether the haul will land in the train-cargo bucket or the auto-flow resource bucket before dispatch.
-- keep the resource-id (auto-flow) path intact for the deeper Stage 3 industrial-chemistry chain.
+Deliverables:
+- a new scenario preset that demonstrates the closed loop end-to-end and is fully exercised by an automated test.
+- Local Region UI surfaces whether each `SpaceSite` returns into the train-cargo bucket (`cargo_type` set) or the resource-id auto-flow bucket, so the player can predict the haul's destination before dispatch.
+- A bridged "queue mining run" UX in Local Region that sequences `DispatchMiningMission` and (optional) schedule activation without leaving the panel.
+- Cargo-flow overlay/alert support for the new haul services so the live train loop is legible from the map.
 
-Deferred to a later sprint:
-- Local Region rail/signal planning controls for backend-owned alignments and track signals (preview waypoint edits, signal placement, protected block warnings, consist/cargo compatibility). Previously slotted as Sprint 28; now deferred behind closing the mining-to-train gameplay loop.
+Slice plan:
+- 28A backend scenario `mining_to_manufacturing` plus an end-to-end pytest that runs the full loop (mission -> haul -> schedule -> recipe -> PARTS).
+- 28B Local Region preview shows `cargo_type` on mining mission previews; site catalog renders cargo vs resource bucket badges.
+- 28C Local Region offers a one-click "schedule the haul run" workflow tied to the dispatched mission's expected return tick / cargo.
+- 28D bridge cargo-flow overlays + alert chips reflect the haul service so the player can monitor the loop visually.
+
+Exit criteria:
+- a player loads the scenario, dispatches one mission, activates the haul schedule, and watches PARTS appear at the manufacturing depot without manually editing state, and the same loop runs deterministically under pytest.
+
+## Deferred (post-Sprint 28)
+
+- Local Region rail/signal planning controls for backend-owned alignments and track signals (preview waypoint edits, signal placement, protected block warnings, consist/cargo compatibility). Previously slotted as Sprint 28; deferred behind closing the mining-to-train gameplay loop.
 
 3D facility presentation should still wait until after resource, power, space-extraction, outpost, rail-depth, and 2D diagnostic contracts are stable.

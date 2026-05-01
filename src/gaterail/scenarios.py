@@ -24,6 +24,7 @@ from gaterail.models import (
     PowerPlantKind,
     ResourceRecipe,
     ResourceRecipeKind,
+    SpaceSite,
     TrackPoint,
     TrainConsist,
     WorldState,
@@ -1143,6 +1144,179 @@ def build_sprint20_scenario() -> GameState:
     return state
 
 
+def build_mining_to_manufacturing_scenario() -> GameState:
+    """Closed gameplay loop: mining mission -> train haul -> manufacturing recipe.
+
+    Demonstrates the `SpaceSite.cargo_type` bridge: an asteroid belt returns
+    `CargoType.ORE` into a frontier collection station's train-cargo bucket,
+    a player-toggled schedule ferries the ore through a powered gate to a
+    core manufacturing depot, and the existing `ore_fabrication` recipe
+    consumes ORE and outputs PARTS / CONSTRUCTION_MATERIALS / MEDICAL_SUPPLIES.
+    """
+
+    state = GameState()
+    state.economic_identity_enabled = True
+    state.finance.cash = 5_000.0
+
+    state.add_world(
+        WorldState(
+            id="frontier",
+            name="Brink Frontier",
+            tier=DevelopmentTier.OUTPOST,
+            population=4_500,
+            stability=0.7,
+            power_available=200,
+            power_used=40,
+            specialization="mining",
+        )
+    )
+    state.add_world(
+        WorldState(
+            id="core",
+            name="Vesta Core",
+            tier=DevelopmentTier.CORE_WORLD,
+            population=8_000_000,
+            stability=0.95,
+            power_available=600,
+            power_used=180,
+            specialization="manufacturing",
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="frontier_spaceport",
+            name="Brink Spaceport",
+            world_id="frontier",
+            kind=NodeKind.SPACEPORT,
+            inventory={CargoType.FUEL: 200},
+            storage_capacity=2_000,
+            transfer_limit_per_tick=24,
+            layout_x=-120.0,
+            layout_y=-60.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_collection",
+            name="Brink Collection Station",
+            world_id="frontier",
+            kind=NodeKind.COLLECTION_STATION,
+            storage_capacity=600,
+            transfer_limit_per_tick=24,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="frontier_gate",
+            name="Brink Gate Hub",
+            world_id="frontier",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=400,
+            transfer_limit_per_tick=24,
+            layout_x=140.0,
+            layout_y=20.0,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="core_gate",
+            name="Vesta Gate Hub",
+            world_id="core",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=400,
+            transfer_limit_per_tick=24,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="core_yard",
+            name="Vesta Manufacturing Yard",
+            world_id="core",
+            kind=NodeKind.DEPOT,
+            inventory={CargoType.MACHINERY: 4},
+            storage_capacity=600,
+            transfer_limit_per_tick=24,
+            layout_x=160.0,
+            layout_y=0.0,
+        )
+    )
+
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_collection_gate",
+            origin="frontier_collection",
+            destination="frontier_gate",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="gate_frontier_core",
+            origin="frontier_gate",
+            destination="core_gate",
+            mode=LinkMode.GATE,
+            travel_ticks=1,
+            capacity_per_tick=8,
+            power_required=80,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_core_gate_yard",
+            origin="core_gate",
+            destination="core_yard",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+        )
+    )
+
+    state.add_space_site(
+        SpaceSite(
+            id="site_brink_belt",
+            name="Brink Asteroid Belt",
+            resource_id="mixed_ore",
+            travel_ticks=4,
+            base_yield=60,
+            cargo_type=CargoType.ORE,
+        )
+    )
+
+    state.add_train(
+        FreightTrain(
+            id="prospector",
+            name="Prospector",
+            node_id="frontier_collection",
+            capacity=24,
+            consist=TrainConsist.BULK_HOPPER,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="ore_haul_to_core",
+            train_id="prospector",
+            origin="frontier_collection",
+            destination="core_yard",
+            cargo_type=CargoType.ORE,
+            units_per_departure=20,
+            interval_ticks=14,
+            next_departure_tick=1,
+            priority=80,
+            active=False,
+        )
+    )
+
+    return state
+
+
 def build_early_build_scenario() -> GameState:
     """Build a sparse early-game sandbox for construction and first-route tests."""
 
@@ -2044,6 +2218,13 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
             title="Industrial Expansion Web",
             description="Large connected industry sandbox with extra gates, power, recipes, and multi-stop services.",
             builder=build_industrial_expansion_scenario,
+        ),
+        ScenarioDefinition(
+            key="mining_to_manufacturing",
+            aliases=("mining_loop", "mine_to_factory", "loop_demo"),
+            title="Mining-to-Manufacturing Loop",
+            description="Mine ore in space, ferry it through a gate, and feed a manufacturing recipe end to end.",
+            builder=build_mining_to_manufacturing_scenario,
         ),
     )
 
