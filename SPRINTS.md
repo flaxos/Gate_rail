@@ -845,3 +845,18 @@ Manual playtest correction:
 - the six tutorial worlds render in a backend-owned circular galaxy layout instead of a straight line.
 - the Galaxy Map one-shot dispatch form is click-filled from map selection: select a train, select a pickup node, select a dropoff node, then queue the order.
 - backend tests prove the loop can be completed by manual one-shot orders before the player later chooses to automate routes with schedules.
+
+## Sprint 30: Visual Polish And Train Order Lists
+
+Goal:
+- pull the GateRail UI handoff (`docs/ui_design_tokens.md`) into the live Godot UI without restructuring layouts, then add OpenTTD-style ordered route control on top of the existing Schedule/Order machinery.
+
+Slice plan:
+- 30A complete: `UITheme` autoload (`godot/scripts/ui_theme.gd`) holds the design tokens; `main.gd` clear color, HUD, control / operations / inspector / tutorial / alert panel backgrounds, alert chip styling, and schedule-row containers route through it. Also delivered: `docs/ui_design_tokens.md` with the icon-generation prompt and component recipes.
+- 30B backend train orders: extend `Schedule` (and one-shot orders) with an optional ordered list of `TrainStop` entries — each stop is `{node_id, action: pickup|delivery|transfer|passthrough, cargo_type, units}`. Update simulation to walk the stop list per train, persistence + snapshot to round-trip, and add tests covering single-cargo waypoints, transfer-to-warehouse, and conditional skip when origin is empty.
+- 30C train orders UI: schedule edit dialog gains an ordered stop list (per-stop cargo + action picker, reorder up/down buttons); schedule rows render `origin → wp1 → wp2 → destination` with the design's `→` and `⇶` (gate hop) arrows; Local Region inspector exposes "Send to warehouse" and "Pick up here" quick actions on inventory-bearing nodes.
+- 30D polish sweep: lift the remaining `Color(...)` literals in `local_region.gd` and `main.gd` into `UITheme` calls (status pills, contract progress bars, dispatch button states, finance deltas); align the HUD layout closer to the design's three-column shell where it can be done without rewriting the canvas-layer placement code.
+
+Exit criteria:
+- visual: live Godot run matches the design's HUD/panel/chip vocabulary; no remaining inline state-color literals in the touched files.
+- functional: a player can edit a schedule into a multi-stop run (origin → warehouse → destination) and watch the train deliver cargo at each stop; the same loop runs deterministically under pytest.
