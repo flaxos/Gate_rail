@@ -14,6 +14,11 @@ from gaterail.models import (
     FacilityPort,
     PortDirection,
 )
+from gaterail.local_rules import (
+    infer_connection_cargo,
+    transfer_link_rate_multiplier,
+    transfer_link_supports_cargo,
+)
 
 # Kinds that consume cargo inputs and emit cargo outputs (treated like FACTORY_BLOCK).
 # REACTOR, POWER_MODULE, CAPACITOR_BANK are excluded — handled by apply_facility_power.
@@ -256,28 +261,20 @@ def _connection_cargo_type(
 ) -> CargoType | None:
     """Infer the single cargo type a connection should move."""
 
-    if source_port.cargo_type is not None:
-        return source_port.cargo_type
-    if destination_port.cargo_type is not None:
-        return destination_port.cargo_type
-    source_outputs = set(source_component.outputs)
-    destination_inputs = set(destination_component.inputs)
-    matches = sorted(source_outputs & destination_inputs, key=lambda item: item.value)
-    if len(matches) == 1:
-        return matches[0]
-    if len(destination_inputs) == 1:
-        return next(iter(destination_inputs))
-    if len(source_outputs) == 1:
-        return next(iter(source_outputs))
-    return None
+    return infer_connection_cargo(source_component, source_port, destination_component, destination_port)
 
 
-def _connection_rate(source_port: FacilityPort, destination_port: FacilityPort) -> int:
+def _connection_rate(
+    source_port: FacilityPort,
+    destination_port: FacilityPort,
+    connection: InternalConnection,
+) -> int:
     """Return the per-tick movement limit for one internal connection."""
 
     rates = [int(port.rate) for port in (source_port, destination_port) if port.rate > 0]
     if rates:
-        return min(rates)
+        base_rate = min(rates)
+        return max(1, int(base_rate * transfer_link_rate_multiplier(connection.link_type)))
     return UNBOUNDED_PORT_CAPACITY
 
 
@@ -386,10 +383,12 @@ def _apply_internal_connections(
         )
         if cargo_type is None:
             continue
+        if not transfer_link_supports_cargo(connection.link_type, cargo_type):
+            continue
         available = _source_available(node, source_component, source_port, cargo_type)
         if available <= 0:
             continue
-        rate = _connection_rate(source_port, destination_port)
+        rate = _connection_rate(source_port, destination_port, connection)
         destination_room = _destination_capacity(
             node,
             destination_component,
@@ -435,6 +434,7 @@ def _apply_internal_connections(
                 "source_port": source_port.id,
                 "destination_component": destination_component.id,
                 "destination_port": destination_port.id,
+                "link_type": connection.link_type.value,
                 "cargo": cargo_type.value,
                 "units": accepted,
             }
@@ -887,6 +887,7 @@ def facility_summary(facility: Facility) -> dict[str, object]:
             "source_port_id": connection.source_port_id,
             "destination_component_id": connection.destination_component_id,
             "destination_port_id": connection.destination_port_id,
+            "link_type": connection.link_type.value,
         }
         for connection in sorted(facility.connections.values(), key=lambda item: item.id)
     ]

@@ -18,7 +18,7 @@ def test_sprint7_scenario_adds_chokepoint_and_disruption() -> None:
         start_tick=13,
         end_tick=14,
         capacity_multiplier=0.0,
-        reason="gate alignment maintenance",
+        reason="Railgate aperture alignment maintenance",
     )
 
 
@@ -53,7 +53,7 @@ def test_timed_disruption_blocks_then_recovers() -> None:
         "origin": "frontier_settlement",
         "destination": "outer_outpost",
         "link": "gate_frontier_outer",
-        "reason": "link gate_frontier_outer disrupted: gate alignment maintenance",
+            "reason": "link gate_frontier_outer disrupted: Railgate aperture alignment maintenance",
     } in disrupted_report["freight"]["queued"]
 
     recovered_report = simulation.run_ticks(2)[-1]
@@ -84,4 +84,4 @@ def test_cli_sprint7_prints_traffic() -> None:
     assert "Disruptions: frontier_outer_gate_alignment gate_frontier_outer ticks 13-14" in text
     assert "queued Civitas on rail_core_yard_gate" in text
     assert "Traffic: congested rail_core_yard_gate 1/1 capacity exhausted" in text
-    assert "Traffic: blocked gate_frontier_outer 0/0 gate alignment maintenance" in text
+    assert "Traffic: blocked gate_frontier_outer 0/0 Railgate aperture alignment maintenance" in text

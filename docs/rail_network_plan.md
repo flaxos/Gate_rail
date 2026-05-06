@@ -1,6 +1,6 @@
 # Rail Network Depth Plan
 
-The current local map treats rail links as direct A-to-B edges. That is useful for early backend validation, but it is too flat for the intended game. GateRail needs rail planning to become a real logistics layer: alignments, curves, branches, junctions, signals, train consists, cargo wagons, and underground vacuum tube constraints.
+The current local map treats rail links as direct A-to-B edges. That is useful for early backend validation, but it is too flat for the intended Railgate Age game. GateRail needs rail planning to become a real logistics layer: alignments, curves, branches, junctions, signals, train consists, cargo wagons, Railgate corridor approaches, and underground vacuum tube constraints.
 
 This work should happen alongside the industry expansion, not after it. Deeper industry creates dense yards, specialized cargo flows, and high-throughput factory districts. Those systems need better rail planning to stay readable and interesting.
 
@@ -11,6 +11,7 @@ This work should happen alongside the industry expansion, not after it. Deeper i
 - Branches and junctions should matter because industry creates competing cargo flows.
 - Signals should explain why trains wait, not become a hidden expert-only system.
 - Cargo wagons and train consists should make resource chains more concrete.
+- Railgate approaches should require exact alignment, predictable mass, controlled velocity, and standardized cargo handoff.
 - Godot should render and edit rail plans, but Python should own the authoritative geometry, validation, routing, signaling, and train rules.
 
 ## Track Geometry
@@ -52,7 +53,7 @@ Vac tubes should not become magic straight lines. They can be direct, but the pl
 Industry expansion needs branch logic:
 - mines branch into sorting yards,
 - refineries split outputs to several factories,
-- power plants and gate hubs compete for high-value inputs,
+- power plants and Railgate anchors compete for high-value inputs,
 - orbital collection stations feed multiple downstream chains.
 
 Backend concepts:
@@ -111,6 +112,7 @@ Routes should support:
 - avoid-gate or prefer-gate options,
 - cargo-specific wagon compatibility,
 - optional multi-stop service for collecting several inputs or dropping at several factories.
+- corridor-specific planning where Railgate anchors and receiving terminals behave like constrained industrial yards, not free teleport nodes.
 
 Preview results should include:
 - selected track geometry,
@@ -152,7 +154,7 @@ Pair with Sprint 19 power and gate energy.
 - Report signal blockers in freight and traffic outputs.
 - Keep the first UI simple: place signal, inspect protected block, see why a train waits.
 
-Status: first backend slice implemented after Sprint 19. `TrackSignal` stores stop/path signal metadata on rail-link endpoints, active signals protect the whole link as one block, freight dispatch queues before loading when a protected block is occupied, and save/load, snapshots, CLI reports, traffic alerts, and JSON commands expose signal/block state. Junction path reservation, multi-link block definitions, signal UI, and richer path-signal behavior remain future slices.
+Status: first backend slice implemented after Sprint 19. `TrackSignal` stores stop/path signal metadata on rail-link endpoints, active signals protect the whole link as one block, freight dispatch queues before loading when a protected block is occupied, and save/load, snapshots, CLI reports, traffic alerts, and JSON commands expose signal/block state. Local Region track inspection can now preview and place backend `TrackSignal` objects from persisted local track entities, and station-throat switch route choices persist into `local_rail` snapshots. Junction path reservation, multi-link block definitions, per-cell local blocks, and richer path-signal behavior remain future slices.
 
 ### Rail Slice R20: Consists and Cargo Wagons
 

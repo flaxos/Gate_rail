@@ -1,6 +1,6 @@
 # GateRail Construction Rules
 
-This document is the canonical rules reference for player-built local and gate infrastructure. The Python backend owns validation, pricing, pathfinding, power context, and mutation. Godot may propose positions and commands, but it should preview through the backend before committing a build.
+This document is the canonical rules reference for player-built local infrastructure and Railgate corridor infrastructure. The Python backend owns validation, pricing, pathfinding, power context, and mutation. Godot may propose positions and commands, but it should preview through the backend before committing a build.
 
 ## Build Flow
 
@@ -11,14 +11,14 @@ This document is the canonical rules reference for player-built local and gate i
 
 ## Node Roles
 
-- `settlement`: demand endpoint for people and local consumption.
-- `depot`: train-facing logistics yard with stronger transfer than a basic node.
+- `settlement`: colony logistics hub and demand endpoint for people and local consumption.
+- `depot`: train-facing rail yard with stronger transfer than a basic node.
 - `warehouse`: high-capacity buffer for smoothing supply flow and future bottleneck gameplay.
-- `extractor`: local production source such as mines, farms, or wells.
-- `industry`: processing and manufacturing node.
-- `gate_hub`: local interface to interworld gate logistics.
+- `extractor`: local extraction outpost such as mines, farms, wells, or remote receiving works.
+- `industry`: refinery, processor, factory, or industrial material node.
+- `gate_hub`: local Railgate anchor or receiving terminal for interworld corridor logistics.
 
-Default node costs and capacities are centralized in `src/gaterail/construction.py`. Current costs are settlement 800, depot 1200, warehouse 1600, extractor 1500, industry 2000, and gate hub 8000.
+Default node costs and capacities are centralized in `src/gaterail/construction.py`. Current costs are settlement 800, depot 1200, warehouse 1600, extractor 1500, industry 2000, and Railgate anchor (`gate_hub`) 8000.
 
 ## Local Layout
 
@@ -48,20 +48,20 @@ Planned rail-depth work is tracked in `docs/rail_network_plan.md`. The intended 
 - Stop signals and path signals should protect blocks, junctions, station throats, and vacuum-tube portals.
 - Train capacity should evolve toward consists and cargo wagons so bulk ore, liquids, electronics, reactor inputs, construction modules, and exotic cargo can require different wagon types.
 
-## Gate Links
+## Railgate Links
 
-- Gate links use `PreviewBuildLink` / `BuildLink` with `mode: "gate"`.
-- Gate endpoints must be different `gate_hub` nodes on different worlds.
-- Gate links are interpreted as a source-to-exit aperture from `origin` to `destination`.
-- `bidirectional: true` remains the default for legacy and simple gates. `bidirectional: false` creates a one-way aperture.
-- Duplicate links in the same direction are rejected. A reciprocal one-way gate in the opposite direction is allowed, unless either link is bidirectional.
-- If `travel_ticks` is omitted by a JSON client, the backend defaults gate travel to 1 tick.
+- Railgate links use `PreviewBuildLink` / `BuildLink` with `mode: "gate"` for stable bridge compatibility.
+- Railgate endpoints must be different `gate_hub` nodes on different worlds.
+- Railgate links are interpreted as a source-to-exit derivative aperture from `origin` to `destination`.
+- `bidirectional: true` remains the default for legacy and simple Railgates. `bidirectional: false` creates a one-way aperture corridor.
+- Duplicate links in the same direction are rejected. A reciprocal one-way Railgate in the opposite direction is allowed, unless either link is bidirectional.
+- If `travel_ticks` is omitted by a JSON client, the backend defaults Railgate travel to 1 tick.
 - If `capacity_per_tick` or `power_required` are omitted by a JSON client, the backend defaults them to 4 slots/tick and 80 MW.
 - If `power_source_world_id` is omitted, the backend uses the origin node's world.
-- Gate power source must be one of the endpoint worlds.
-- Gate preview/build results include source/exit node ids, whether the gate is directional, reverse-link availability, origin/destination world labels, power source, power required, current available power, power shortfall, and `powered_if_built`.
-- Gate links may be built even if they would be unpowered; route usage still depends on the normal gate power evaluation.
-- Current gate-link cost is 10000 and build-time metadata is `travel_ticks * 2`; construction still completes immediately.
+- Railgate power source must be one of the endpoint worlds.
+- Railgate preview/build results include source/exit node ids, whether the corridor is directional, reverse-link availability, origin/destination world labels, power source, power required, current available power, power shortfall, and `powered_if_built`.
+- Railgate links may be built even if they would be unpowered; route usage still depends on the normal Railgate power evaluation.
+- Current Railgate-link cost is 10000 and build-time metadata is `travel_ticks * 2`; construction still completes immediately.
 
 ## Trains
 
@@ -86,9 +86,9 @@ Planned rail-depth work is tracked in `docs/rail_network_plan.md`. The intended 
 - If `next_departure_tick` is omitted, the backend normalizes it to `state.tick + 1`.
 - Preview returns route travel ticks, route stop ids, route segment details, route node ids, route link ids, and a normalized `CreateSchedule` command.
 - Preview and create results also return `gate_link_ids`, `gate_handoffs`, and `route_warnings`.
-- Gate handoff context includes endpoint worlds, power state, power shortfall, effective slots, used slots, pressure, disruption reasons, and per-gate warnings.
+- Railgate handoff context includes endpoint worlds, power state, power shortfall, effective slots, used slots, pressure, disruption reasons, and per-corridor warnings.
 - Invalid previews return structured `validation_errors` and per-segment `route_segments` where possible.
-- If no operational route exists because a gate is unpowered, disrupted, or capacity-blocked, preview remains invalid but may still return structural route context and `blocked_links` so the client can explain the blocker.
+- If no operational route exists because a Railgate is unpowered, disrupted, or capacity-blocked, preview remains invalid but may still return structural route context and `blocked_links` so the client can explain the blocker.
 - `PreviewUpdateSchedule` and `UpdateSchedule` edit an existing schedule's train, origin, destination, stops, cargo, units, interval, next departure, priority, active flag, and return-to-origin flag through the same backend route and consist validation used by schedule creation.
 - Schedule edits are rejected while the schedule's train is actively running that schedule trip. Disable the schedule first to prevent future departures; wait for the active trip to complete before changing route/cargo fields.
 - `PreviewDeleteSchedule` and `DeleteSchedule` remove schedules only when no train is currently running that schedule trip.
@@ -104,6 +104,6 @@ Planned rail-depth work is tracked in `docs/rail_network_plan.md`. The intended 
 ## Deferred
 
 - Delayed construction jobs and queue simulation.
-- New-world discovery and arbitrary interworld expansion beyond linking existing gate hubs.
+- New-world discovery and arbitrary interworld expansion beyond linking existing Railgate anchors.
 - Per-tile collision, zoning, terrain costs, and bridge/tunnel rules.
 - Dedicated multi-stop route authoring UI with graphical waypoint picking.

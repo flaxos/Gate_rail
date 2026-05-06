@@ -34,32 +34,34 @@ This means:
 
 - The game fantasy combines railroad tycoon, industrial optimization, and frontier world-building.
 - Trains are the main logistics layer, especially for high-capacity freight.
-- Wormholes are strategic infrastructure with meaningful power cost.
+- Gate Horizons is the origin-era Horizon Artefact story; GateRail is the later Railgate Age consequence.
+- Railgates are derivative aperture systems: paired, route-bound, energy-hungry, throughput-limited, and valuable because trains provide exact alignment and standardized freight.
+- Transit Combines and megacorporations should read as the major contract powers, not fantasy factions.
 - Real-time play should be implemented on top of a fixed-tick backend model.
 - The first prototype should favor operational train logistics over detailed signal-level realism.
 - Engine selection is intentionally deferred until the backend proves the game loop.
 - Sprint 1 keeps the older daily colony prototype intact while adding the new fixed-tick graph foundation.
 - Sprint 2 adds operational freight trains on the fixed-tick graph while keeping dispatch simple and order-driven.
 - Sprint 3 makes world development reactive to logistics support through stability, bottlenecks, and tier promotion.
-- Sprint 4 makes gate links power-limited infrastructure that can block or enable expansion routes.
-- Sprint 5 aligns the Python backend with Stage 1 by adding recurring schedules, gate slots, finance, stockpiles, and monthly text tables.
+- Sprint 4 makes Railgate links power-limited infrastructure that can block or enable expansion corridors.
+- Sprint 5 aligns the Python backend with Stage 1 by adding recurring schedules, Railgate slots, finance, stockpiles, and monthly text tables.
 - Sprint 6 gives worlds economic identities through specialization profiles and recipe-driven exports, creating a visible mining to manufacturing to research dependency chain.
 - Sprint 7 makes network stress diagnosable through per-link capacity reservations, queue telemetry, timed disruptions, and recovery reports.
 - Sprint 8 makes the CLI usable for repeatable playtests through scenario discovery, inspection reports, focused report filters, JSON save/load, and a balanced benchmark scenario.
 - Sprint 9 slice 1 turns the sim into a goal-driven playtest via cargo-delivery contracts with due ticks, cash rewards, cash penalties, and a single integer reputation score; reputation is intentionally a single number now so it can split into per-faction standings once rival operators and other corps land in later slices.
-- Sprint 9 slices 2-4 extend the objectives layer with frontier-support contracts (progress accumulates on ticks where the target world's trend is improving or promoted), gate-recovery contracts (consecutive operational-tick streak on a target gate link, with the streak resetting when the link loses power or capacity), and three scenario presets so each contract kind has a dedicated playtest harness; contract resolution now runs after world progression so the frontier-support check reads a freshly updated trend.
+- Sprint 9 slices 2-4 extend the objectives layer with frontier-support contracts (progress accumulates on ticks where the target world's trend is improving or promoted), Railgate-recovery contracts (consecutive operational-tick streak on a target Railgate link, with the streak resetting when the link loses power or capacity), and three scenario presets so each contract kind has a dedicated playtest harness; contract resolution now runs after world progression so the frontier-support check reads a freshly updated trend.
 - Post-Sprint-9 cleanup: the legacy daily-colony simulation path (`Simulation`, `colony.py`, `world.py`, `train.py`, `schedule.py`, `finance.py`) has been removed so the fixed-tick backend is the single source of truth heading into the Stage 2 Godot 2D port.
 - Stage 2 integration will use a Python subprocess with newline-delimited JSON over stdio. The Python backend owns deterministic galaxy-scale world coordinates in `render_snapshot()` and persists local node layout metadata; Godot proposes intra-world placement and owns camera/presentation metadata.
-- Full construction remains the Stage 2 player-agency target, but it should be sliced after the bridge lands: first expand an existing galaxy through schedules/orders and existing infrastructure controls, then add build commands for stations, rails, gates, trains, and finally new worlds.
+- Full construction remains the Stage 2 player-agency target, but it should be sliced after the bridge lands: first expand an existing galaxy through schedules/orders and existing infrastructure controls, then add build commands for stations, rails, Railgate anchors, trains, and finally new worlds.
 - Local Region Construction view follows the Claude Design handoff archived at `docs/design_handoff/local_region_construction/`. Galaxy Map (`scenes/main.tscn`) and Local Region (`scenes/local_region.tscn`) are separate Godot scenes sharing the `GateRailBridge` autoload, with a `SceneNav` autoload carrying the selected `world_id` across the scene change.
 - Local construction rules are now pinned in `docs/construction_rules.md`; clients should preview node, rail, train, and route-schedule actions through Python before committing.
 - The Local Region right HUD now treats construction as a preview-driven build planner rather than a timed queue; delayed build jobs remain deferred.
 - Local Region layer overlays are presentation-only and consume backend snapshot fields for supply, demand, storage fill, shortages, recipe-blocked inputs, and transfer pressure. Godot should not infer logistics rules beyond choosing glyphs, colors, and counts.
-- Interworld gate-link construction is now backend-owned through `BuildLink(mode="gate")`; clients can propose existing gate-hub endpoints, but Python owns endpoint validation, default capacity/power, cost, power-shortfall context, and whether a newly built gate is usable.
-- Route and schedule previews now expose backend-owned gate handoff context. Clients should render the returned gate ids, endpoint worlds, power/slot/disruption state, and warnings rather than rechecking gate rules locally.
+- Interworld Railgate-link construction is now backend-owned through `BuildLink(mode="gate")`; clients can propose existing Railgate endpoints, but Python owns endpoint validation, default capacity/power, cost, power-shortfall context, and whether a newly built corridor is usable.
+- Route and schedule previews now expose backend-owned Railgate handoff context. Clients should render the returned gate ids, endpoint worlds, power/slot/disruption state, and warnings rather than rechecking corridor rules locally.
 - Local Region route creation lets the player choose cargo, units per departure, and interval before preview; Python remains authoritative for validating those values and returning normalized schedule commands.
-- The next major presentation layer should not be scoped as "3D first." It should be scoped as a backend-owned facility layer first: stations, depots, warehouses, industries, extractors, and gate hubs gain internal components, ports, loaders, unloaders, buffers, platforms, and factory blocks. A later 3D view should render that facility state rather than invent simulation rules in Godot.
-- Before any 3D facility presentation, the core industrial fantasy needs deeper backend rules: elemental resources, ore grades, smelting/refining, manufacturing tiers, semiconductors, advanced components, power-plant inputs, gate-energy inputs, space extraction, and outpost construction.
+- The next major presentation layer should not be scoped as "3D first." It should be scoped as a backend-owned facility layer first: stations, depots, warehouses, industries, extractors, and Railgate anchors gain internal components, ports, loaders, unloaders, buffers, platforms, and factory blocks. A later 3D view should render that facility state rather than invent simulation rules in Godot.
+- Before any 3D facility presentation, the core industrial fantasy needs deeper backend rules: elemental resources, ore grades, smelting/refining, manufacturing tiers, semiconductors, advanced components, power-plant inputs, Railgate-energy inputs, space extraction, and outpost construction.
 - The resource catalog should be data-driven and able to grow toward periodic-table scale, but implementation should start with a playable subset and add elements only when they create distinct logistics decisions.
 - Local rail should not remain endpoint-only. Future backend work should add track alignment geometry, underground vacuum-tube constraints, branches, junctions, stop/path signals, train consists, and cargo wagon compatibility. Godot should render and edit these plans through backend previews, not own routing or signaling rules.
 
@@ -111,15 +113,15 @@ Responsible for:
 - internal component connections,
 - facility-level throughput and blocked-flow diagnostics.
 
-### Gate layer
+### Railgate layer
 
 Responsible for:
-- wormhole hubs,
-- gate links,
-- activation logic,
+- Railgate anchors and receiving terminals,
+- paired aperture links,
+- activation and alignment logic,
 - throughput,
 - power draw and operating burden,
-- gate charge, gate-efficiency upgrades, and rare/exotic inputs once the power economy is expanded.
+- stored charge, aperture-efficiency upgrades, and rare/exotic inputs once the power economy is expanded.
 
 ### Space extraction layer
 
@@ -157,7 +159,7 @@ Underground vacuum tubes are allowed to be more direct than surface rail, but th
 
 Facilities should become the bridge between abstract local nodes and the eventual 3D station/depot/hub view. The backend should own facility components and ports before any 3D scene is built. Godot can render the facility layer in 2D first, then render the same snapshot in 3D later.
 
-Factory blocks should evolve into typed processing components. A smelter, refinery, electronics assembler, semiconductor line, and gate-component assembly bay should have distinct inputs, outputs, power draw, rates, and blocked-flow reasons.
+Factory blocks should evolve into typed processing components. A smelter, refinery, electronics assembler, semiconductor line, and aperture-control assembly bay should have distinct inputs, outputs, power draw, rates, and blocked-flow reasons.
 
 ### Resources
 
@@ -168,7 +170,7 @@ The first playable chain should prove one end-to-end path:
 - sorting or concentration,
 - smelting/refining into an element or bulk material,
 - manufacturing into parts/electronics/semiconductors,
-- advanced assembly into power or gate components.
+- advanced assembly into power systems or aperture control components.
 
 ### Space extraction
 
@@ -182,15 +184,15 @@ Power should move from a mostly static world stat toward an industrial system. P
 
 Worlds should be modeled as economic and logistical entities, not just terrain containers. A world's tier should express what it can sustain, what it demands, and what role it can play in the wider network.
 
-### Gates
+### Railgates
 
-Gates should feel powerful but expensive. They are not free teleport edges. Their purpose is to let the player reshape the logistics graph at major strategic cost.
+Railgates should feel powerful but expensive. They are not free teleport edges or mastered precursor gates. Their purpose is to let the player reshape the logistics graph at major strategic cost.
 
 ## MVP boundary
 
 The first real proof point is narrow:
 
-The player can bootstrap a frontier world into a self-sustaining industrial colony using rail logistics and one power-hungry wormhole hub to solve a major bottleneck.
+The player can bootstrap a frontier colony into a self-sustaining industrial hub using rail logistics and one power-hungry Railgate corridor to solve a major bottleneck.
 
 Anything outside that should be treated as a later expansion unless it is required to make this scenario work.
 

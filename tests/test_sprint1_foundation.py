@@ -67,7 +67,7 @@ def test_cli_runs_sprint1_scenario_and_prints_tick_reports() -> None:
 
     text = output.getvalue()
     assert result == 0
-    assert "Scenario: 2 worlds, 5 nodes, 3 rail links, 1 gate links" in text
+    assert "Scenario: 2 worlds, 5 nodes, 3 rail links, 1 Railgate link" in text
     assert "Tick 0001" in text
     assert "Tick 0002" in text
-    assert "gate power 80" in text
+    assert "railgate power 80" in text

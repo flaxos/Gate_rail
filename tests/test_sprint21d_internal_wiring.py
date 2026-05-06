@@ -131,6 +131,7 @@ def test_connection_moves_cargo_into_factory_input_port_before_processing() -> N
             "source_port": "ore_out",
             "destination_component": "fab-1",
             "destination_port": "ore_in",
+            "link_type": "conveyor",
             "cargo": "ore",
             "units": 2,
         }

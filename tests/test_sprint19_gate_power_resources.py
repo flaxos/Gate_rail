@@ -1,4 +1,4 @@
-"""Tests for Sprint 19 resource-backed gate power support."""
+"""Tests for Sprint 19 resource-backed Railgate power support."""
 
 from __future__ import annotations
 

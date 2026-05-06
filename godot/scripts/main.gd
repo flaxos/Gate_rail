@@ -208,7 +208,7 @@ func _build_control_panel(ui: CanvasLayer) -> void:
 
 	_hud_tick_value = add_hud_item.call("Tick:")
 	_hud_cash_value = add_hud_item.call("Cash:")
-	_hud_reputation_value = add_hud_item.call("Reputation:")
+	_hud_reputation_value = add_hud_item.call("Standing:")
 	_bridge_status_value = add_hud_item.call("Bridge:")
 	_bridge_source_value = add_hud_item.call("Source:")
 
@@ -333,7 +333,7 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	_operations_scroll.add_child(box)
 
 	var finance_title := Label.new()
-	finance_title.text = "Finance and Reputation"
+	finance_title.text = "Finance and Combine Standing"
 	box.add_child(finance_title)
 
 	_finance_label = Label.new()
@@ -343,7 +343,7 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	_build_tutorial_section(box)
 
 	var contract_title := Label.new()
-	contract_title.text = "Contracts"
+	contract_title.text = "Freight Contracts"
 	box.add_child(contract_title)
 
 	_contract_scroll = ScrollContainer.new()
@@ -727,6 +727,26 @@ func _on_tutorial_action_pressed() -> void:
 		var label := str(_tutorial_next_action.get("label", "Running tutorial"))
 		_error_label.text = "%s for %s tick(s)..." % [label, ticks]
 		GateRailBridge.step_ticks(ticks)
+		return
+	if kind == "command" or kind == "commands":
+		var commands: Array = []
+		if kind == "command":
+			var command_raw: Variant = _tutorial_next_action.get("command", {})
+			if typeof(command_raw) == TYPE_DICTIONARY:
+				var command: Dictionary = command_raw
+				commands.append(command.duplicate(true))
+		else:
+			for command_item in _array(_tutorial_next_action.get("commands", [])):
+				if typeof(command_item) == TYPE_DICTIONARY:
+					var command_payload: Dictionary = command_item
+					commands.append(command_payload.duplicate(true))
+		if commands.is_empty():
+			_error_label.text = "Tutorial action has no backend command."
+			return
+		var command_ticks: int = int(max(0, int(_tutorial_next_action.get("ticks", 0))))
+		var command_label := str(_tutorial_next_action.get("label", "Running tutorial command"))
+		_error_label.text = "%s..." % command_label
+		GateRailBridge.send_message({"commands": commands, "ticks": command_ticks})
 		return
 	_error_label.text = "Unsupported tutorial action: %s" % kind
 
@@ -1204,7 +1224,7 @@ func _update_finance_panel() -> void:
 	if _finance_label == null:
 		return
 	var finance: Dictionary = snapshot.get("finance", {})
-	_finance_label.text = "Cash %s | Net %s | Revenue %s | Costs %s | Reputation %s" % [
+	_finance_label.text = "Cash %s | Net %s | Revenue %s | Costs %s | Standing %s" % [
 		finance.get("cash", 0),
 		finance.get("net", 0),
 		finance.get("revenue", 0),
@@ -1249,7 +1269,7 @@ func _rebuild_tutorial_panel() -> void:
 
 	if _tutorial_action_button != null:
 		var action_kind := str(_tutorial_next_action.get("kind", ""))
-		var can_run_action := action_kind == "step_ticks"
+		var can_run_action := action_kind in ["step_ticks", "command", "commands"]
 		_tutorial_action_button.visible = can_run_action
 		_tutorial_action_button.disabled = not can_run_action
 		_tutorial_action_button.text = str(_tutorial_next_action.get("label", "Advance tutorial"))
@@ -1423,6 +1443,13 @@ func _current_tutorial_alerts() -> Array:
 	for alert in _array(tutorial.get("alerts", [])):
 		if typeof(alert) == TYPE_DICTIONARY:
 			alerts.append(alert)
+	for blocker in _array(tutorial.get("blockers", [])):
+		if typeof(blocker) == TYPE_DICTIONARY:
+			var blocker_data: Dictionary = blocker
+			alerts.append({
+				"kind": "tutorial_blocker",
+				"message": str(blocker_data.get("message", blocker_data.get("code", "Tutorial blocker"))),
+			})
 	return alerts
 
 
@@ -1454,7 +1481,7 @@ func _current_link_alerts() -> Array:
 		elif slots_used > 0 and capacity > 0 and float(slots_used) / float(capacity) >= 0.80:
 			alerts.append({
 				"kind": "congestion",
-				"message": "%s: %s/%s gate slots" % [link_id, slots_used, capacity],
+				"message": "%s: %s/%s Railgate slots" % [link_id, slots_used, capacity],
 			})
 		elif capacity < base_capacity:
 			alerts.append({

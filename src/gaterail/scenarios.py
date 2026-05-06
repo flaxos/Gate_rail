@@ -7,14 +7,20 @@ from dataclasses import dataclass, replace
 
 from gaterail.cargo import CargoType
 from gaterail.models import (
+    ConstructionProject,
     Contract,
     ContractKind,
     DevelopmentTier,
+    Facility,
+    FacilityComponent,
+    FacilityComponentKind,
+    FacilityPort,
     FreightOrder,
     FreightSchedule,
     FreightTrain,
     GameState,
     GatePowerSupport,
+    InternalConnection,
     LinkMode,
     NetworkDisruption,
     NetworkLink,
@@ -23,6 +29,7 @@ from gaterail.models import (
     NodeRecipe,
     PowerPlant,
     PowerPlantKind,
+    PortDirection,
     ResourceRecipe,
     ResourceRecipeKind,
     SpaceSite,
@@ -79,7 +86,7 @@ def build_sprint1_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="core_yard",
-            name="Core Classification Yard",
+            name="Vesta Industrial Rail Yard",
             world_id="core",
             kind=NodeKind.DEPOT,
             inventory={
@@ -96,7 +103,7 @@ def build_sprint1_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="core_gate",
-            name="Core Gate Hub",
+            name="Vesta Railgate Anchor",
             world_id="core",
             kind=NodeKind.GATE_HUB,
             storage_capacity=300,
@@ -107,7 +114,7 @@ def build_sprint1_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_gate",
-            name="Frontier Gate Hub",
+            name="Brink Railgate Terminal",
             world_id="frontier",
             kind=NodeKind.GATE_HUB,
             storage_capacity=240,
@@ -118,7 +125,7 @@ def build_sprint1_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_settlement",
-            name="Brink Landing",
+            name="Brink Colony Logistics Hub",
             world_id="frontier",
             kind=NodeKind.SETTLEMENT,
             inventory={CargoType.FOOD: 6, CargoType.CONSTRUCTION_MATERIALS: 3},
@@ -131,7 +138,7 @@ def build_sprint1_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_mine",
-            name="North Ridge Mine",
+            name="North Ridge Extraction Outpost",
             world_id="frontier",
             kind=NodeKind.EXTRACTOR,
             inventory={CargoType.ORE: 10},
@@ -409,7 +416,7 @@ def _add_resource_chain_demo(state: GameState) -> None:
     state.add_node(
         NetworkNode(
             id="frontier_gate_fabricator",
-            name="Brink Gate Fabricator",
+            name="Brink Aperture Control Works",
             world_id="frontier",
             kind=NodeKind.INDUSTRY,
             storage_capacity=420,
@@ -417,7 +424,7 @@ def _add_resource_chain_demo(state: GameState) -> None:
             layout_x=48.0,
             layout_y=112.0,
             resource_recipe=ResourceRecipe(
-                id="gate_frame_fabrication",
+                id="aperture_control_fabrication",
                 kind=ResourceRecipeKind.FABRICATION,
                 inputs={
                     "iron": 4,
@@ -621,7 +628,7 @@ def build_sprint3_scenario() -> GameState:
 
 
 def build_sprint4_scenario() -> GameState:
-    """Build a gate-pressure expansion scenario."""
+    """Build a Railgate corridor pressure expansion scenario."""
 
     state = build_sprint3_scenario()
     state.add_world(
@@ -639,7 +646,7 @@ def build_sprint4_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="outer_gate",
-            name="Ashfall Gate Skid",
+            name="Ashfall Railgate Receiving Terminal",
             world_id="outer",
             kind=NodeKind.GATE_HUB,
             storage_capacity=120,
@@ -650,7 +657,7 @@ def build_sprint4_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_outer_gate",
-            name="Frontier Outer Gate Hub",
+            name="Brink Spur Railgate Anchor",
             world_id="frontier",
             kind=NodeKind.GATE_HUB,
             storage_capacity=240,
@@ -661,7 +668,7 @@ def build_sprint4_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="outer_outpost",
-            name="Ashfall Survey Camp",
+            name="Ashfall Extraction Outpost",
             world_id="outer",
             kind=NodeKind.SETTLEMENT,
             demand={CargoType.FOOD: 1, CargoType.MEDICAL_SUPPLIES: 1},
@@ -889,7 +896,7 @@ def build_sprint7_scenario() -> GameState:
             start_tick=13,
             end_tick=14,
             capacity_multiplier=0.0,
-            reason="gate alignment maintenance",
+            reason="Railgate aperture alignment maintenance",
         )
     )
     return state
@@ -910,15 +917,15 @@ def build_sprint8_scenario() -> GameState:
         start_tick=13,
         end_tick=14,
         capacity_multiplier=0.5,
-        reason="gate alignment throttling",
+        reason="Railgate aperture alignment throttling",
     )
     _add_resource_chain_demo(state)
     state.add_contract(
         Contract(
             id="brink_food_relief",
             kind=ContractKind.CARGO_DELIVERY,
-            title="Brink Food Relief",
-            client="Brink Frontier",
+            title="Brink Colony Support Freight",
+            client="Brink Extraction Combine",
             destination_node_id="frontier_settlement",
             cargo_type=CargoType.FOOD,
             target_units=30,
@@ -933,8 +940,8 @@ def build_sprint8_scenario() -> GameState:
         Contract(
             id="core_ore_quota",
             kind=ContractKind.CARGO_DELIVERY,
-            title="Core Ore Quota",
-            client="Vesta Core",
+            title="Vesta Ore Intake Quota",
+            client="Vesta Industrial Combine",
             destination_node_id="core_yard",
             cargo_type=CargoType.ORE,
             target_units=20,
@@ -949,8 +956,8 @@ def build_sprint8_scenario() -> GameState:
         Contract(
             id="ashfall_medical_lifeline",
             kind=ContractKind.CARGO_DELIVERY,
-            title="Ashfall Medical Lifeline",
-            client="Ashfall Spur",
+            title="Ashfall Colony Support Lifeline",
+            client="Ashfall Corridor Logistics",
             destination_node_id="outer_outpost",
             cargo_type=CargoType.MEDICAL_SUPPLIES,
             target_units=10,
@@ -973,7 +980,7 @@ def build_sprint9_logistics_scenario() -> GameState:
             id="ashfall_parts_surge",
             kind=ContractKind.CARGO_DELIVERY,
             title="Ashfall Parts Surge",
-            client="Ashfall Spur",
+            client="Ashfall Corridor Logistics",
             destination_node_id="outer_outpost",
             cargo_type=CargoType.PARTS,
             target_units=10,
@@ -995,8 +1002,8 @@ def build_sprint9_frontier_scenario() -> GameState:
         Contract(
             id="brink_frontier_support",
             kind=ContractKind.FRONTIER_SUPPORT,
-            title="Brink Frontier Support Streak",
-            client="Colonial Authority",
+            title="Brink Frontier Colony Support Streak",
+            client="Frontier Transit Combine Council",
             target_world_id="frontier",
             target_units=4,
             due_tick=25,
@@ -1019,14 +1026,14 @@ def build_sprint9_recovery_scenario() -> GameState:
         start_tick=1,
         end_tick=12,
         capacity_multiplier=0.0,
-        reason="gate alignment outage",
+        reason="Railgate aperture alignment outage",
     )
     state.add_contract(
         Contract(
             id="ashfall_gate_recovery",
             kind=ContractKind.GATE_RECOVERY,
-            title="Ashfall Gate Recovery",
-            client="Ashfall Spur",
+            title="Ashfall Railgate Corridor Recovery",
+            client="Ashfall Corridor Logistics",
             target_link_id="gate_frontier_outer",
             target_units=3,
             due_tick=25,
@@ -1040,7 +1047,7 @@ def build_sprint9_recovery_scenario() -> GameState:
 
 
 def build_sprint19_scenario() -> GameState:
-    """Build the resource-supported gate power scenario."""
+    """Build the resource-supported Railgate power scenario."""
 
     state = build_sprint8_scenario()
     state.worlds["frontier"].power_available = 120
@@ -1111,7 +1118,7 @@ def build_sprint20_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_orbital",
-            name="High Orbit Platform",
+            name="Brink Orbital Yard",
             world_id="frontier",
             kind=NodeKind.SPACEPORT,
             storage_capacity=3000,
@@ -1146,18 +1153,11 @@ def build_sprint20_scenario() -> GameState:
 
 
 def build_mining_to_manufacturing_scenario() -> GameState:
-    """Closed gameplay loop: mining mission -> train haul -> manufacturing recipe.
-
-    Demonstrates the `SpaceSite.cargo_type` bridge: an asteroid belt returns
-    `CargoType.ORE` into a frontier collection station's train-cargo bucket,
-    a player-toggled schedule ferries the ore through a powered gate to a
-    core manufacturing depot, and the existing `ore_fabrication` recipe
-    consumes ORE and outputs PARTS / CONSTRUCTION_MATERIALS / MEDICAL_SUPPLIES.
-    """
+    """Canonical vertical slice: survey, extract, refine, assemble, and support a colony."""
 
     state = GameState()
     state.economic_identity_enabled = True
-    state.finance.cash = 5_000.0
+    state.finance.cash = 30_000.0
 
     state.add_world(
         WorldState(
@@ -1166,7 +1166,7 @@ def build_mining_to_manufacturing_scenario() -> GameState:
             tier=DevelopmentTier.OUTPOST,
             population=4_500,
             stability=0.7,
-            power_available=200,
+            power_available=240,
             power_used=40,
             specialization="mining",
         )
@@ -1186,21 +1186,40 @@ def build_mining_to_manufacturing_scenario() -> GameState:
 
     state.add_node(
         NetworkNode(
-            id="frontier_spaceport",
-            name="Brink Spaceport",
+            id="frontier_depot",
+            name="Brink Frontier Rail Depot",
             world_id="frontier",
-            kind=NodeKind.SPACEPORT,
-            inventory={CargoType.FUEL: 200},
+            kind=NodeKind.DEPOT,
+            inventory={
+                CargoType.CONSTRUCTION_MATERIALS: 300,
+                CargoType.ELECTRONICS: 80,
+                CargoType.PARTS: 90,
+                CargoType.FUEL: 200,
+                CargoType.FOOD: 12,
+                CargoType.MACHINERY: 4,
+            },
             storage_capacity=2_000,
-            transfer_limit_per_tick=24,
+            transfer_limit_per_tick=240,
             layout_x=-120.0,
             layout_y=-60.0,
         )
     )
     state.add_node(
         NetworkNode(
+            id="frontier_warehouse",
+            name="Brink Bulk Freight Warehouse",
+            world_id="frontier",
+            kind=NodeKind.WAREHOUSE,
+            storage_capacity=4_000,
+            transfer_limit_per_tick=48,
+            layout_x=-84.0,
+            layout_y=52.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
             id="frontier_collection",
-            name="Brink Collection Station",
+            name="Brink Receiving Terminal",
             world_id="frontier",
             kind=NodeKind.COLLECTION_STATION,
             storage_capacity=600,
@@ -1212,7 +1231,7 @@ def build_mining_to_manufacturing_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_gate",
-            name="Brink Gate Hub",
+            name="Brink Railgate Anchor",
             world_id="frontier",
             kind=NodeKind.GATE_HUB,
             storage_capacity=400,
@@ -1224,9 +1243,10 @@ def build_mining_to_manufacturing_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_settlement",
-            name="Brink Works Settlement",
+            name="Brink Colony Logistics Hub",
             world_id="frontier",
             kind=NodeKind.SETTLEMENT,
+            inventory={CargoType.FOOD: 8, CargoType.CONSTRUCTION_MATERIALS: 4},
             demand={CargoType.PARTS: 1},
             storage_capacity=500,
             transfer_limit_per_tick=16,
@@ -1238,7 +1258,7 @@ def build_mining_to_manufacturing_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="core_gate",
-            name="Vesta Gate Hub",
+            name="Vesta Railgate Receiving Terminal",
             world_id="core",
             kind=NodeKind.GATE_HUB,
             storage_capacity=400,
@@ -1279,11 +1299,32 @@ def build_mining_to_manufacturing_scenario() -> GameState:
                     CargoType.PARTS: 10,
                 },
             ),
+            pull_logic=False,
             layout_x=160.0,
             layout_y=0.0,
         )
     )
 
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_depot_warehouse",
+            origin="frontier_depot",
+            destination="frontier_warehouse",
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=18,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_frontier_depot_collection",
+            origin="frontier_depot",
+            destination="frontier_collection",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=12,
+        )
+    )
     state.add_link(
         NetworkLink(
             id="rail_frontier_collection_gate",
@@ -1343,10 +1384,20 @@ def build_mining_to_manufacturing_scenario() -> GameState:
             resource_id="mixed_ore",
             travel_ticks=4,
             base_yield=60,
+            discovered=False,
             cargo_type=CargoType.ORE,
         )
     )
 
+    state.add_train(
+        FreightTrain(
+            id="constructor",
+            name="Constructor",
+            node_id="frontier_depot",
+            capacity=220,
+            consist=TrainConsist.GENERAL,
+        )
+    )
     state.add_train(
         FreightTrain(
             id="prospector",
@@ -1354,6 +1405,15 @@ def build_mining_to_manufacturing_scenario() -> GameState:
             node_id="frontier_collection",
             capacity=24,
             consist=TrainConsist.BULK_HOPPER,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="metal_runner",
+            name="Metal Runner",
+            node_id="core_smelter",
+            capacity=20,
+            consist=TrainConsist.GENERAL,
         )
     )
     state.add_train(
@@ -1370,12 +1430,26 @@ def build_mining_to_manufacturing_scenario() -> GameState:
             id="ore_haul_to_core",
             train_id="prospector",
             origin="frontier_collection",
-            destination="core_yard",
+            destination="core_smelter",
             cargo_type=CargoType.ORE,
             units_per_departure=20,
             interval_ticks=14,
             next_departure_tick=1,
             priority=80,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="metal_to_assembly_yard",
+            train_id="metal_runner",
+            origin="core_smelter",
+            destination="core_yard",
+            cargo_type=CargoType.METAL,
+            units_per_departure=10,
+            interval_ticks=12,
+            next_departure_tick=1,
+            priority=75,
             active=False,
         )
     )
@@ -1397,16 +1471,31 @@ def build_mining_to_manufacturing_scenario() -> GameState:
         Contract(
             id="frontier_parts_upgrade",
             kind=ContractKind.CARGO_DELIVERY,
-            title="Brink Works Parts Upgrade",
-            client="Brink Works Settlement",
+            title="Brink Logistics Hub Maintenance Parts",
+            client="Brink Extraction Combine",
             destination_node_id="frontier_settlement",
             cargo_type=CargoType.PARTS,
             target_units=10,
-            due_tick=90,
-            reward_cash=6_000.0,
+            due_tick=160,
+            reward_cash=12_500.0,
             penalty_cash=1_200.0,
             reward_reputation=6,
             penalty_reputation=5,
+        )
+    )
+    state.add_contract(
+        Contract(
+            id="frontier_colony_stabilization",
+            kind=ContractKind.FRONTIER_SUPPORT,
+            title="Stabilize Brink Frontier Colony",
+            client="Brink Transit Combine",
+            target_world_id="frontier",
+            target_units=2,
+            due_tick=190,
+            reward_cash=4_000.0,
+            penalty_cash=1_000.0,
+            reward_reputation=4,
+            penalty_reputation=3,
         )
     )
 
@@ -1454,6 +1543,33 @@ def _add_tutorial_local_rail(state: GameState, world_id: str, node_id: str, *, t
     )
 
 
+def _tutorial_component(
+    component_id: str,
+    kind: FacilityComponentKind,
+    *,
+    rate: int = 0,
+    capacity: int = 0,
+    power_required: int = 0,
+    power_provided: int = 0,
+) -> FacilityComponent:
+    """Return a compact facility component for tutorial-local node summaries."""
+
+    return FacilityComponent(
+        id=component_id,
+        kind=kind,
+        rate=rate,
+        capacity=capacity,
+        power_required=power_required,
+        power_provided=power_provided,
+    )
+
+
+def _tutorial_facility(*components: FacilityComponent) -> Facility:
+    """Return facility metadata used by the tutorial local layer."""
+
+    return Facility(components={component.id: component for component in components})
+
+
 def _add_tutorial_world(
     state: GameState,
     *,
@@ -1463,7 +1579,7 @@ def _add_tutorial_world(
     specialization: str,
     position: int,
 ) -> None:
-    """Add one tutorial world with two gate hubs and stocked construction depot."""
+    """Add one tutorial world with two Railgate terminals and stocked construction depot."""
 
     state.add_world(
         WorldState(
@@ -1495,7 +1611,7 @@ def _add_tutorial_world(
     state.add_node(
         NetworkNode(
             id=f"{world_id}_gate_prev",
-            name=f"{name} Inbound Gate",
+            name=f"{name} Railgate Receiving Terminal",
             world_id=world_id,
             kind=NodeKind.GATE_HUB,
             storage_capacity=1_500,
@@ -1507,7 +1623,7 @@ def _add_tutorial_world(
     state.add_node(
         NetworkNode(
             id=f"{world_id}_gate_next",
-            name=f"{name} Outbound Gate",
+            name=f"{name} Railgate Anchor",
             world_id=world_id,
             kind=NodeKind.GATE_HUB,
             storage_capacity=1_500,
@@ -1519,7 +1635,7 @@ def _add_tutorial_world(
     state.add_node(
         NetworkNode(
             id=f"{world_id}_settlement",
-            name=f"{name} Settlement",
+            name=f"{name} Colony Logistics Hub",
             world_id=world_id,
             kind=NodeKind.SETTLEMENT,
             demand={CargoType.FOOD: 1},
@@ -1535,7 +1651,7 @@ def _add_tutorial_world(
 
 
 def build_tutorial_six_worlds_scenario() -> GameState:
-    """Six-world tutorial start with a ring of powered gates and active cargo loop."""
+    """Six-world tutorial start with a powered Railgate corridor ring and active cargo loop."""
 
     state = GameState()
     state.economic_identity_enabled = True
@@ -1562,13 +1678,27 @@ def build_tutorial_six_worlds_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="brink_mine",
-            name="Brink Tutorial Mine",
+            name="Brink Tutorial Extraction Outpost",
             world_id="brink",
             kind=NodeKind.EXTRACTOR,
             inventory={CargoType.ORE: 80},
             production={CargoType.ORE: 12},
             storage_capacity=1_200,
             transfer_limit_per_tick=24,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "brink_extractor_head",
+                    FacilityComponentKind.EXTRACTOR_HEAD,
+                    rate=12,
+                    power_required=8,
+                ),
+                _tutorial_component(
+                    "brink_loader",
+                    FacilityComponentKind.LOADER,
+                    rate=24,
+                    power_required=4,
+                ),
+            ),
             layout_x=40.0,
             layout_y=210.0,
         )
@@ -1576,11 +1706,31 @@ def build_tutorial_six_worlds_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="cinder_smelter",
-            name="Cinder Tutorial Smelter",
+            name="Cinder Tutorial Refinery",
             world_id="cinder",
             kind=NodeKind.INDUSTRY,
             storage_capacity=1_500,
             transfer_limit_per_tick=30,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "cinder_unloader",
+                    FacilityComponentKind.UNLOADER,
+                    rate=30,
+                    power_required=4,
+                ),
+                _tutorial_component(
+                    "cinder_smelter_block",
+                    FacilityComponentKind.SMELTER,
+                    rate=20,
+                    power_required=18,
+                ),
+                _tutorial_component(
+                    "cinder_loader",
+                    FacilityComponentKind.LOADER,
+                    rate=30,
+                    power_required=4,
+                ),
+            ),
             recipe=NodeRecipe(
                 inputs={CargoType.ORE: 20},
                 outputs={CargoType.METAL: 20},
@@ -1592,11 +1742,31 @@ def build_tutorial_six_worlds_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="atlas_factory",
-            name="Atlas Tutorial Factory",
+            name="Atlas Tutorial Maintenance Factory",
             world_id="atlas",
             kind=NodeKind.INDUSTRY,
             storage_capacity=1_500,
             transfer_limit_per_tick=30,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "atlas_factory_unloader",
+                    FacilityComponentKind.UNLOADER,
+                    rate=30,
+                    power_required=4,
+                ),
+                _tutorial_component(
+                    "atlas_factory_fabricator",
+                    FacilityComponentKind.FABRICATOR,
+                    rate=12,
+                    power_required=16,
+                ),
+                _tutorial_component(
+                    "atlas_factory_loader",
+                    FacilityComponentKind.LOADER,
+                    rate=30,
+                    power_required=4,
+                ),
+            ),
             recipe=NodeRecipe(
                 inputs={CargoType.METAL: 10},
                 outputs={
@@ -1606,6 +1776,75 @@ def build_tutorial_six_worlds_scenario() -> GameState:
             ),
             layout_x=120.0,
             layout_y=210.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="atlas_gate_component_line",
+            name="Atlas Aperture Control Line",
+            world_id="atlas",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=1_200,
+            transfer_limit_per_tick=24,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "atlas_gateworks_unloader",
+                    FacilityComponentKind.UNLOADER,
+                    rate=24,
+                    power_required=4,
+                ),
+                _tutorial_component(
+                    "atlas_gateworks_fabricator",
+                    FacilityComponentKind.FABRICATOR,
+                    rate=8,
+                    power_required=20,
+                ),
+                _tutorial_component(
+                    "atlas_gateworks_loader",
+                    FacilityComponentKind.LOADER,
+                    rate=24,
+                    power_required=4,
+                ),
+            ),
+            recipe=NodeRecipe(
+                inputs={CargoType.PARTS: 8, CargoType.ELECTRONICS: 4},
+                outputs={CargoType.GATE_COMPONENTS: 4},
+            ),
+            layout_x=230.0,
+            layout_y=210.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="atlas_outbound_gate",
+            name="Atlas Tutorial Outbound Railgate Terminal",
+            world_id="atlas",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=1_500,
+            transfer_limit_per_tick=30,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "atlas_outbound_unloader",
+                    FacilityComponentKind.UNLOADER,
+                    rate=24,
+                    power_required=4,
+                ),
+                _tutorial_component(
+                    "atlas_outbound_gate_interface",
+                    FacilityComponentKind.GATE_INTERFACE,
+                    rate=4,
+                    power_required=30,
+                ),
+            ),
+            layout_x=310.0,
+            layout_y=-80.0,
+        )
+    )
+    state.add_construction_project(
+        ConstructionProject(
+            id="proj_atlas_outbound_gate",
+            target_node_id="atlas_outbound_gate",
+            required_cargo={CargoType.GATE_COMPONENTS: 4},
         )
     )
     state.add_node(
@@ -1625,7 +1864,95 @@ def build_tutorial_six_worlds_scenario() -> GameState:
     _add_tutorial_local_rail(state, "brink", "brink_mine")
     _add_tutorial_local_rail(state, "cinder", "cinder_smelter")
     _add_tutorial_local_rail(state, "atlas", "atlas_factory")
+    _add_tutorial_local_rail(state, "atlas", "atlas_gate_component_line")
+    _add_tutorial_local_rail(state, "atlas", "atlas_outbound_gate")
     _add_tutorial_local_rail(state, "aurora", "aurora_farm")
+
+    state.add_world(
+        WorldState(
+            id="sable",
+            name="Sable Reach",
+            tier=DevelopmentTier.OUTPOST,
+            population=0,
+            stability=0.62,
+            power_available=180,
+            power_used=35,
+            specialization="survey_destination",
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="sable_gate_anchor",
+            name="Sable Reach Railgate Receiving Anchor",
+            world_id="sable",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=1_000,
+            transfer_limit_per_tick=24,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "sable_anchor_unloader",
+                    FacilityComponentKind.UNLOADER,
+                    rate=20,
+                    power_required=4,
+                ),
+                _tutorial_component(
+                    "sable_anchor_gate_interface",
+                    FacilityComponentKind.GATE_INTERFACE,
+                    rate=4,
+                    power_required=20,
+                ),
+            ),
+            layout_x=-80.0,
+            layout_y=-30.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="sable_settlement",
+            name="Sable Starter Logistics Camp",
+            world_id="sable",
+            kind=NodeKind.SETTLEMENT,
+            demand={CargoType.FOOD: 1},
+            storage_capacity=800,
+            transfer_limit_per_tick=20,
+            facility=_tutorial_facility(
+                _tutorial_component(
+                    "sable_camp_unloader",
+                    FacilityComponentKind.UNLOADER,
+                    rate=20,
+                    power_required=4,
+                ),
+                _tutorial_component(
+                    "sable_camp_storage",
+                    FacilityComponentKind.WAREHOUSE_BAY,
+                    capacity=800,
+                    power_required=4,
+                ),
+            ),
+            layout_x=80.0,
+            layout_y=90.0,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_sable_gate_anchor_settlement",
+            origin="sable_gate_anchor",
+            destination="sable_settlement",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=20,
+        )
+    )
+    state.add_space_site(
+        SpaceSite(
+            id="site_sable_reach",
+            name="Sable Reach Corridor Survey",
+            resource_id="gate_reactive_isotope",
+            travel_ticks=4,
+            base_yield=1,
+            discovered=False,
+        )
+    )
 
     ring = ("vesta", "brink", "cinder", "atlas", "helix", "aurora")
     for index, origin_world in enumerate(ring):
@@ -1666,6 +1993,42 @@ def build_tutorial_six_worlds_scenario() -> GameState:
             name="Tutorial Parts Runner",
             node_id="atlas_factory",
             capacity=12,
+            consist=TrainConsist.HEAVY_FLAT,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="tutorial_gateworks_parts_runner",
+            name="Tutorial Gateworks Parts Runner",
+            node_id="atlas_factory",
+            capacity=16,
+            consist=TrainConsist.HEAVY_FLAT,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="tutorial_gateworks_electronics_runner",
+            name="Tutorial Gateworks Electronics Runner",
+            node_id="atlas_depot",
+            capacity=12,
+            consist=TrainConsist.PROTECTED,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="tutorial_gate_component_runner",
+            name="Tutorial Aperture Component Runner",
+            node_id="atlas_gate_component_line",
+            capacity=8,
+            consist=TrainConsist.PROTECTED,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="tutorial_starter_runner",
+            name="Tutorial Starter Freight Runner",
+            node_id="atlas_depot",
+            capacity=40,
             consist=TrainConsist.HEAVY_FLAT,
         )
     )
@@ -1711,12 +2074,68 @@ def build_tutorial_six_worlds_scenario() -> GameState:
             active=False,
         )
     )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_parts_to_gateworks",
+            train_id="tutorial_gateworks_parts_runner",
+            origin="atlas_factory",
+            destination="atlas_gate_component_line",
+            cargo_type=CargoType.PARTS,
+            units_per_departure=8,
+            interval_ticks=10,
+            next_departure_tick=1,
+            priority=75,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_electronics_to_gateworks",
+            train_id="tutorial_gateworks_electronics_runner",
+            origin="atlas_depot",
+            destination="atlas_gate_component_line",
+            cargo_type=CargoType.ELECTRONICS,
+            units_per_departure=4,
+            interval_ticks=10,
+            next_departure_tick=1,
+            priority=74,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_components_to_gate",
+            train_id="tutorial_gate_component_runner",
+            origin="atlas_gate_component_line",
+            destination="atlas_outbound_gate",
+            cargo_type=CargoType.GATE_COMPONENTS,
+            units_per_departure=4,
+            interval_ticks=12,
+            next_departure_tick=1,
+            priority=73,
+            active=False,
+        )
+    )
+    state.add_schedule(
+        FreightSchedule(
+            id="tutorial_starter_to_sable",
+            train_id="tutorial_starter_runner",
+            origin="atlas_depot",
+            destination="sable_settlement",
+            cargo_type=CargoType.CONSTRUCTION_MATERIALS,
+            units_per_departure=40,
+            interval_ticks=14,
+            next_departure_tick=1,
+            priority=72,
+            active=False,
+        )
+    )
     state.add_contract(
         Contract(
             id="helix_parts_tutorial",
             kind=ContractKind.CARGO_DELIVERY,
-            title="Helix Starter Parts",
-            client="Helix Reach",
+            title="Helix Corridor Maintenance Parts",
+            client="Helix Transit Combine",
             destination_node_id="helix_settlement",
             cargo_type=CargoType.PARTS,
             target_units=12,
@@ -1724,6 +2143,550 @@ def build_tutorial_six_worlds_scenario() -> GameState:
             reward_cash=20_000.0,
             penalty_cash=0.0,
             reward_reputation=4,
+            penalty_reputation=0,
+        )
+    )
+    state.add_contract(
+        Contract(
+            id="sable_starter_cargo",
+            kind=ContractKind.CARGO_DELIVERY,
+            title="Sable Reach Starter Freight",
+            client="Sable Reach Charter Combine",
+            destination_node_id="sable_settlement",
+            cargo_type=CargoType.CONSTRUCTION_MATERIALS,
+            target_units=40,
+            due_tick=260,
+            reward_cash=30_000.0,
+            penalty_cash=0.0,
+            reward_reputation=6,
+            penalty_reputation=0,
+        )
+    )
+
+    return state
+
+
+def _facility_port(
+    port_id: str,
+    direction: PortDirection,
+    cargo_type: CargoType,
+    *,
+    rate: int,
+    capacity: int = 0,
+) -> FacilityPort:
+    """Return a compact typed facility port for local logistics tutorials."""
+
+    return FacilityPort(
+        id=port_id,
+        direction=direction,
+        cargo_type=cargo_type,
+        rate=rate,
+        capacity=capacity,
+    )
+
+
+def _facility_connection(
+    connection_id: str,
+    source_component_id: str,
+    source_port_id: str,
+    destination_component_id: str,
+    destination_port_id: str,
+) -> InternalConnection:
+    """Return a compact internal facility connection."""
+
+    return InternalConnection(
+        id=connection_id,
+        source_component_id=source_component_id,
+        source_port_id=source_port_id,
+        destination_component_id=destination_component_id,
+        destination_port_id=destination_port_id,
+    )
+
+
+def build_tutorial_local_logistics_scenario() -> GameState:
+    """Bottom-up local logistics tutorial from mine wiring to Railgate deployment."""
+
+    state = GameState()
+    state.finance.cash = 180_000.0
+    state.construction_inventory = {
+        CargoType.CONSTRUCTION_MATERIALS: 40,
+    }
+
+    state.add_world(
+        WorldState(
+            id="atlas",
+            name="Atlas Yards",
+            tier=DevelopmentTier.DEVELOPED_WORLD,
+            population=1_200_000,
+            stability=0.91,
+            power_available=620,
+            power_used=180,
+            specialization="manufacturing",
+        )
+    )
+    state.add_world(
+        WorldState(
+            id="sable",
+            name="Sable Reach",
+            tier=DevelopmentTier.OUTPOST,
+            population=0,
+            stability=0.62,
+            power_available=180,
+            power_used=35,
+            specialization="survey_destination",
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="atlas_depot",
+            name="Atlas Construction Depot",
+            world_id="atlas",
+            kind=NodeKind.DEPOT,
+            inventory={
+                CargoType.CONSTRUCTION_MATERIALS: 120,
+                CargoType.ELECTRONICS: 20,
+                CargoType.FOOD: 40,
+                CargoType.WATER: 40,
+            },
+            storage_capacity=2_000,
+            transfer_limit_per_tick=36,
+            layout_x=0.0,
+            layout_y=0.0,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="atlas_local_mine",
+            name="Atlas Tutorial Ore Loader",
+            world_id="atlas",
+            kind=NodeKind.EXTRACTOR,
+            storage_capacity=220,
+            transfer_limit_per_tick=24,
+            requires_facility_handling=True,
+            facility=Facility(
+                components={
+                    "mine_head": FacilityComponent(
+                        id="mine_head",
+                        kind=FacilityComponentKind.EXTRACTOR_HEAD,
+                        outputs={CargoType.ORE: 12},
+                        ports={
+                            "ore_out": _facility_port(
+                                "ore_out",
+                                PortDirection.OUTPUT,
+                                CargoType.ORE,
+                                rate=12,
+                                capacity=24,
+                            )
+                        },
+                        power_required=8,
+                    ),
+                    "mine_storage": FacilityComponent(
+                        id="mine_storage",
+                        kind=FacilityComponentKind.STORAGE_BAY,
+                        capacity=220,
+                        ports={
+                            "ore_in": _facility_port(
+                                "ore_in",
+                                PortDirection.INPUT,
+                                CargoType.ORE,
+                                rate=12,
+                            ),
+                            "ore_out": _facility_port(
+                                "ore_out",
+                                PortDirection.OUTPUT,
+                                CargoType.ORE,
+                                rate=24,
+                            ),
+                        },
+                    ),
+                }
+            ),
+            layout_x=-180.0,
+            layout_y=118.0,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="atlas_local_refinery",
+            name="Atlas Tutorial Refinery Station",
+            world_id="atlas",
+            kind=NodeKind.INDUSTRY,
+            storage_capacity=260,
+            transfer_limit_per_tick=24,
+            requires_facility_handling=True,
+            facility=Facility(
+                components={
+                    "refinery_storage": FacilityComponent(
+                        id="refinery_storage",
+                        kind=FacilityComponentKind.STORAGE_BAY,
+                        capacity=260,
+                        ports={
+                            "ore_out": _facility_port(
+                                "ore_out",
+                                PortDirection.OUTPUT,
+                                CargoType.ORE,
+                                rate=20,
+                            ),
+                            "metal_in": _facility_port(
+                                "metal_in",
+                                PortDirection.INPUT,
+                                CargoType.METAL,
+                                rate=20,
+                            ),
+                        },
+                    ),
+                    "refinery_block": FacilityComponent(
+                        id="refinery_block",
+                        kind=FacilityComponentKind.REFINERY,
+                        inputs={CargoType.ORE: 20},
+                        outputs={CargoType.METAL: 20},
+                        ports={
+                            "ore_in": _facility_port(
+                                "ore_in",
+                                PortDirection.INPUT,
+                                CargoType.ORE,
+                                rate=20,
+                                capacity=20,
+                            ),
+                            "metal_out": _facility_port(
+                                "metal_out",
+                                PortDirection.OUTPUT,
+                                CargoType.METAL,
+                                rate=20,
+                                capacity=20,
+                            ),
+                        },
+                        power_required=22,
+                    ),
+                }
+            ),
+            layout_x=-60.0,
+            layout_y=92.0,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="atlas_gateworks",
+            name="Atlas Tutorial Gateworks",
+            world_id="atlas",
+            kind=NodeKind.INDUSTRY,
+            inventory={CargoType.ELECTRONICS: 4},
+            storage_capacity=320,
+            transfer_limit_per_tick=24,
+            requires_facility_handling=True,
+            facility=Facility(
+                components={
+                    "gateworks_unloader": FacilityComponent(
+                        id="gateworks_unloader",
+                        kind=FacilityComponentKind.UNLOADER,
+                        rate=24,
+                        power_required=4,
+                    ),
+                    "gateworks_loader": FacilityComponent(
+                        id="gateworks_loader",
+                        kind=FacilityComponentKind.LOADER,
+                        rate=12,
+                        power_required=4,
+                    ),
+                    "gateworks_storage": FacilityComponent(
+                        id="gateworks_storage",
+                        kind=FacilityComponentKind.STORAGE_BAY,
+                        capacity=320,
+                        ports={
+                            "metal_out": _facility_port(
+                                "metal_out",
+                                PortDirection.OUTPUT,
+                                CargoType.METAL,
+                                rate=20,
+                            ),
+                            "machinery_in": _facility_port(
+                                "machinery_in",
+                                PortDirection.INPUT,
+                                CargoType.MACHINERY,
+                                rate=4,
+                            ),
+                            "machinery_out": _facility_port(
+                                "machinery_out",
+                                PortDirection.OUTPUT,
+                                CargoType.MACHINERY,
+                                rate=4,
+                            ),
+                            "components_in": _facility_port(
+                                "components_in",
+                                PortDirection.INPUT,
+                                CargoType.GATE_COMPONENTS,
+                                rate=4,
+                            ),
+                        },
+                    ),
+                    "gateworks_machinery_fabricator": FacilityComponent(
+                        id="gateworks_machinery_fabricator",
+                        kind=FacilityComponentKind.FABRICATOR,
+                        inputs={CargoType.METAL: 10},
+                        outputs={CargoType.MACHINERY: 4},
+                        ports={
+                            "metal_in": _facility_port(
+                                "metal_in",
+                                PortDirection.INPUT,
+                                CargoType.METAL,
+                                rate=10,
+                                capacity=10,
+                            ),
+                            "machinery_out": _facility_port(
+                                "machinery_out",
+                                PortDirection.OUTPUT,
+                                CargoType.MACHINERY,
+                                rate=4,
+                                capacity=4,
+                            ),
+                        },
+                        power_required=16,
+                    ),
+                    "gateworks_fabricator": FacilityComponent(
+                        id="gateworks_fabricator",
+                        kind=FacilityComponentKind.FABRICATOR,
+                        inputs={CargoType.METAL: 10, CargoType.MACHINERY: 4},
+                        outputs={CargoType.GATE_COMPONENTS: 4},
+                        ports={
+                            "metal_in": _facility_port(
+                                "metal_in",
+                                PortDirection.INPUT,
+                                CargoType.METAL,
+                                rate=10,
+                                capacity=10,
+                            ),
+                            "machinery_in": _facility_port(
+                                "machinery_in",
+                                PortDirection.INPUT,
+                                CargoType.MACHINERY,
+                                rate=4,
+                                capacity=4,
+                            ),
+                            "components_out": _facility_port(
+                                "components_out",
+                                PortDirection.OUTPUT,
+                                CargoType.GATE_COMPONENTS,
+                                rate=4,
+                                capacity=4,
+                            ),
+                        },
+                        power_required=20,
+                    ),
+                },
+                connections={
+                    "wire_gateworks_metal": _facility_connection(
+                        "wire_gateworks_metal",
+                        "gateworks_storage",
+                        "metal_out",
+                        "gateworks_fabricator",
+                        "metal_in",
+                    ),
+                    "wire_gateworks_machinery_metal": _facility_connection(
+                        "wire_gateworks_machinery_metal",
+                        "gateworks_storage",
+                        "metal_out",
+                        "gateworks_machinery_fabricator",
+                        "metal_in",
+                    ),
+                    "wire_gateworks_machinery_store": _facility_connection(
+                        "wire_gateworks_machinery_store",
+                        "gateworks_machinery_fabricator",
+                        "machinery_out",
+                        "gateworks_storage",
+                        "machinery_in",
+                    ),
+                    "wire_gateworks_machinery_input": _facility_connection(
+                        "wire_gateworks_machinery_input",
+                        "gateworks_storage",
+                        "machinery_out",
+                        "gateworks_fabricator",
+                        "machinery_in",
+                    ),
+                    "wire_gateworks_components": _facility_connection(
+                        "wire_gateworks_components",
+                        "gateworks_fabricator",
+                        "components_out",
+                        "gateworks_storage",
+                        "components_in",
+                    ),
+                },
+            ),
+            layout_x=86.0,
+            layout_y=86.0,
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="atlas_local_outbound_gate",
+            name="Atlas Tutorial Outbound Railgate Terminal",
+            world_id="atlas",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=240,
+            transfer_limit_per_tick=24,
+            requires_facility_handling=True,
+            facility=Facility(
+                components={
+                    "outbound_unloader": FacilityComponent(
+                        id="outbound_unloader",
+                        kind=FacilityComponentKind.UNLOADER,
+                        rate=12,
+                        power_required=4,
+                    ),
+                    "outbound_storage": FacilityComponent(
+                        id="outbound_storage",
+                        kind=FacilityComponentKind.WAREHOUSE_BAY,
+                        capacity=240,
+                        power_required=4,
+                    ),
+                    "outbound_gate_interface": FacilityComponent(
+                        id="outbound_gate_interface",
+                        kind=FacilityComponentKind.GATE_INTERFACE,
+                        rate=4,
+                        power_required=30,
+                    ),
+                }
+            ),
+            layout_x=210.0,
+            layout_y=18.0,
+        )
+    )
+    state.add_construction_project(
+        ConstructionProject(
+            id="proj_atlas_local_outbound_gate",
+            target_node_id="atlas_local_outbound_gate",
+            required_cargo={CargoType.GATE_COMPONENTS: 4},
+        )
+    )
+
+    state.add_node(
+        NetworkNode(
+            id="sable_gate_anchor",
+            name="Sable Reach Receiving Anchor",
+            world_id="sable",
+            kind=NodeKind.GATE_HUB,
+            storage_capacity=300,
+            transfer_limit_per_tick=20,
+            layout_x=-80.0,
+            layout_y=0.0,
+        )
+    )
+    state.add_node(
+        NetworkNode(
+            id="sable_settlement",
+            name="Sable Starter Logistics Camp",
+            world_id="sable",
+            kind=NodeKind.SETTLEMENT,
+            storage_capacity=360,
+            transfer_limit_per_tick=20,
+            requires_facility_handling=True,
+            facility=Facility(
+                components={
+                    "sable_unloader": FacilityComponent(
+                        id="sable_unloader",
+                        kind=FacilityComponentKind.UNLOADER,
+                        rate=20,
+                        power_required=4,
+                    ),
+                    "sable_storage": FacilityComponent(
+                        id="sable_storage",
+                        kind=FacilityComponentKind.WAREHOUSE_BAY,
+                        capacity=360,
+                        power_required=4,
+                    ),
+                }
+            ),
+            layout_x=80.0,
+            layout_y=80.0,
+        )
+    )
+
+    state.add_link(
+        NetworkLink(
+            id="rail_atlas_depot_outbound_gate",
+            origin="atlas_depot",
+            destination="atlas_local_outbound_gate",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=24,
+        )
+    )
+    state.add_link(
+        NetworkLink(
+            id="rail_sable_anchor_settlement",
+            origin="sable_gate_anchor",
+            destination="sable_settlement",
+            mode=LinkMode.RAIL,
+            travel_ticks=2,
+            capacity_per_tick=20,
+        )
+    )
+
+    state.add_space_site(
+        SpaceSite(
+            id="site_sable_reach",
+            name="Sable Reach Corridor Survey",
+            resource_id="gate_reactive_isotope",
+            travel_ticks=4,
+            base_yield=1,
+            discovered=False,
+        )
+    )
+
+    state.add_train(
+        FreightTrain(
+            id="local_ore_runner",
+            name="Local Ore Runner",
+            node_id="atlas_local_mine",
+            capacity=20,
+            consist=TrainConsist.BULK_HOPPER,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="local_metal_runner",
+            name="Local Metal Runner",
+            node_id="atlas_local_refinery",
+            capacity=20,
+            consist=TrainConsist.GENERAL,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="local_component_runner",
+            name="Local Railgate Component Runner",
+            node_id="atlas_gateworks",
+            capacity=4,
+            consist=TrainConsist.PROTECTED,
+        )
+    )
+    state.add_train(
+        FreightTrain(
+            id="local_starter_runner",
+            name="Local Starter Freight Runner",
+            node_id="atlas_depot",
+            capacity=40,
+            consist=TrainConsist.HEAVY_FLAT,
+        )
+    )
+
+    state.add_contract(
+        Contract(
+            id="local_sable_starter_cargo",
+            kind=ContractKind.CARGO_DELIVERY,
+            title="Sable Reach Starter Freight",
+            client="Sable Reach Charter Combine",
+            destination_node_id="sable_settlement",
+            cargo_type=CargoType.CONSTRUCTION_MATERIALS,
+            target_units=40,
+            due_tick=900,
+            reward_cash=30_000.0,
+            penalty_cash=0.0,
+            reward_reputation=6,
             penalty_reputation=0,
         )
     )
@@ -1787,7 +2750,7 @@ def build_early_build_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="core_yard",
-            name="Core Starter Yard",
+            name="Vesta Starter Rail Yard",
             world_id="core",
             kind=NodeKind.DEPOT,
             inventory={
@@ -1806,7 +2769,7 @@ def build_early_build_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="core_gate",
-            name="Core Starter Gate",
+            name="Vesta Starter Railgate Anchor",
             world_id="core",
             kind=NodeKind.GATE_HUB,
             storage_capacity=160,
@@ -1818,7 +2781,7 @@ def build_early_build_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_gate",
-            name="Frontier Starter Gate",
+            name="Brink Starter Railgate Terminal",
             world_id="frontier",
             kind=NodeKind.GATE_HUB,
             storage_capacity=140,
@@ -1830,7 +2793,7 @@ def build_early_build_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="frontier_landing",
-            name="Brink Starter Landing",
+            name="Brink Starter Colony Logistics Hub",
             world_id="frontier",
             kind=NodeKind.SETTLEMENT,
             inventory={CargoType.FOOD: 6, CargoType.CONSTRUCTION_MATERIALS: 3},
@@ -2010,7 +2973,7 @@ def build_industrial_expansion_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="forge_gate",
-            name="Cinder Gate Hub",
+            name="Cinder Railgate Anchor",
             world_id="forge",
             kind=NodeKind.GATE_HUB,
             storage_capacity=420,
@@ -2099,7 +3062,7 @@ def build_industrial_expansion_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="forge_gate_component_line",
-            name="Cinder Gate Component Line",
+            name="Cinder Aperture Control Line",
             world_id="forge",
             kind=NodeKind.INDUSTRY,
             storage_capacity=420,
@@ -2133,7 +3096,7 @@ def build_industrial_expansion_scenario() -> GameState:
     state.add_node(
         NetworkNode(
             id="research_gate",
-            name="Helix Gate Hub",
+            name="Helix Railgate Receiving Terminal",
             world_id="research",
             kind=NodeKind.GATE_HUB,
             storage_capacity=360,
@@ -2524,8 +3487,8 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
         ScenarioDefinition(
             key="sprint1",
             aliases=("foundation",),
-            title="Simulation Foundation",
-            description="Two-world logistics graph with production, demand, rail, and one gate.",
+            title="Railgate Age Foundation",
+            description="Two-world logistics graph with production, demand, rail, and one route-bound Railgate corridor.",
             builder=build_sprint1_scenario,
         ),
         ScenarioDefinition(
@@ -2545,15 +3508,15 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
         ScenarioDefinition(
             key="sprint4",
             aliases=("gate", "expansion"),
-            title="Gate Pressure and Expansion",
-            description="An outer world depends on a frontier-powered wormhole link.",
+            title="Railgate Pressure and Expansion",
+            description="An extraction outpost depends on a frontier-powered derivative aperture corridor.",
             builder=build_sprint4_scenario,
         ),
         ScenarioDefinition(
             key="sprint5",
             aliases=("stage1", "operations"),
             title="Stage 1 Operations Ledger",
-            description="Recurring schedules, gate slots, finance, stockpiles, and monthly tables.",
+            description="Recurring schedules, Railgate slots, finance, stockpiles, and monthly tables.",
             builder=build_sprint5_scenario,
         ),
         ScenarioDefinition(
@@ -2594,22 +3557,22 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
         ScenarioDefinition(
             key="sprint9_recovery",
             aliases=("recovery", "gate_recovery"),
-            title="Gate Recovery",
-            description="Sprint 8 with a full gate outage and a GATE_RECOVERY contract to restore it.",
+            title="Railgate Corridor Recovery",
+            description="Sprint 8 with a full Railgate outage and a GATE_RECOVERY contract to restore it.",
             builder=build_sprint9_recovery_scenario,
         ),
         ScenarioDefinition(
             key="sprint19",
             aliases=("power", "gate_power", "resource_power"),
-            title="Resource-backed Gate Power",
-            description="A frontier gate recovers when upstream industry fabricates gate components.",
+            title="Resource-backed Railgate Power",
+            description="A frontier Railgate recovers when upstream industry fabricates aperture control components.",
             builder=build_sprint19_scenario,
         ),
         ScenarioDefinition(
             key="sprint19b",
             aliases=("power_generation", "plants", "generation"),
             title="Resource-backed Power Generation",
-            description="A carbon-fed thermal plant adds generated world power before gate operation.",
+            description="A carbon-fed thermal plant adds generated world power before Railgate operation.",
             builder=build_sprint19b_scenario,
         ),
         ScenarioDefinition(
@@ -2630,22 +3593,29 @@ def scenario_definitions() -> tuple[ScenarioDefinition, ...]:
             key="industrial_expansion",
             aliases=("industrial", "expanded", "large_industry"),
             title="Industrial Expansion Web",
-            description="Large connected industry sandbox with extra gates, power, recipes, and multi-stop services.",
+            description="Large connected industry sandbox with extra Railgate corridors, power, recipes, and multi-stop services.",
             builder=build_industrial_expansion_scenario,
         ),
         ScenarioDefinition(
             key="mining_to_manufacturing",
             aliases=("mining_loop", "mine_to_factory", "loop_demo"),
             title="Mining-to-Manufacturing Loop",
-            description="Mine ore in space, ferry it through a gate, and feed a manufacturing recipe end to end.",
+            description="Mine ore in space, ferry it through a Railgate corridor, and feed a manufacturing recipe end to end.",
             builder=build_mining_to_manufacturing_scenario,
         ),
         ScenarioDefinition(
             key="tutorial_six_worlds",
             aliases=("tutorial_start", "six_world_tutorial", "starter_ring"),
-            title="Six-World Tutorial Start",
-            description="Six stocked worlds in a powered gate ring with active ore, metal, and parts tutorial hauls.",
+            title="Railgate Age Tutorial Start",
+            description="Tutorial corridor with local manufacturing, aperture components, destination survey, and a second-world Railgate shipment.",
             builder=build_tutorial_six_worlds_scenario,
+        ),
+        ScenarioDefinition(
+            key="tutorial_local_logistics",
+            aliases=("local_logistics", "bottom_up_logistics", "railgate_bootstrap"),
+            title="Bottom-Up Local Logistics Tutorial",
+            description="Build tracks, loaders, unloaders, internal transfer links, factory flow, and then feed a new Railgate corridor.",
+            builder=build_tutorial_local_logistics_scenario,
         ),
     )
 

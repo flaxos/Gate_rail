@@ -63,7 +63,7 @@ def _plain_buffer_distribution(
 
 
 def _plain_gate_status_map(mapping: dict[str, GatePowerStatus]) -> dict[str, dict[str, object]]:
-    """Convert gate power statuses to stable report dictionaries."""
+    """Convert Railgate power statuses to stable report dictionaries."""
 
     return {
         link_id: {

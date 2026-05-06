@@ -13,7 +13,10 @@ def test_sprint8_scenario_balances_the_default_benchmark() -> None:
 
     assert state.links["rail_core_yard_gate"].capacity_per_tick == 2
     assert state.disruptions["frontier_outer_gate_alignment"].capacity_multiplier == 0.5
-    assert state.disruptions["frontier_outer_gate_alignment"].reason == "gate alignment throttling"
+    assert (
+        state.disruptions["frontier_outer_gate_alignment"].reason
+        == "Railgate aperture alignment throttling"
+    )
 
 
 def test_cli_lists_scenarios_and_marks_sprint8_default() -> None:

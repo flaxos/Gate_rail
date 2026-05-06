@@ -1,4 +1,4 @@
-"""Wormhole gate power and slot logic for the tick simulation."""
+"""Railgate power and slot logic for the tick simulation."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def _gate_status_for_link(
 
 
 def preview_gate_power(state: GameState) -> dict[str, GatePowerStatus]:
-    """Return gate power status without mutating world reservations."""
+    """Return Railgate power status without mutating world reservations."""
 
     allocated_by_world: dict[str, int] = {}
     statuses: dict[str, GatePowerStatus] = {}

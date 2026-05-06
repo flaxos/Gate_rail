@@ -42,6 +42,20 @@ class LinkMode(StrEnum):
     GATE = "gate"
 
 
+class TransferLinkKind(StrEnum):
+    """Local facility transfer link implementations.
+
+    The first simulation slice treats these as one deterministic transfer
+    mechanic; the kind is preserved for UI, save files, and later specialization.
+    """
+
+    CONVEYOR = "conveyor"
+    HOPPER = "hopper"
+    PIPE = "pipe"
+    VAC_TUBE = "vac_tube"
+    MAG_TUBE = "mag_tube"
+
+
 class TrackSignalKind(StrEnum):
     """Track signal roles for backend-owned rail blocks."""
 
@@ -120,9 +134,27 @@ class PowerPlantKind(StrEnum):
     FUSION = "fusion"
 
 
+class StopAction(StrEnum):
+    """Action to perform at a multi-stop train waypoint."""
+
+    PICKUP = "pickup"
+    DELIVERY = "delivery"
+    TRANSFER = "transfer"
+    PASSTHROUGH = "passthrough"
+
+
+class WaitCondition(StrEnum):
+    """Logic governing when a train may depart a stop."""
+
+    NONE = "none"  # Depart as soon as action is performed
+    FULL = "full"  # Wait until cargo is at capacity
+    EMPTY = "empty"  # Wait until cargo is zero
+    TIME = "time"  # Wait for a fixed duration
+
+
 @dataclass(frozen=True, slots=True)
 class GatePowerSupport:
-    """Resource-chain support that reduces one gate link's effective power draw."""
+    """Resource-chain support that reduces one Railgate link's effective power draw."""
 
     id: str
     link_id: str
@@ -343,6 +375,31 @@ class PortDirection(StrEnum):
     OUTPUT = "output"
 
 
+class OperationalEntityType(StrEnum):
+    """Persisted local operational construction entity roles."""
+
+    EXTRACTOR = "extractor"
+    TRACK_SEGMENT = "track_segment"
+    STATION_PLATFORM = "station_platform"
+    LOADER = "loader"
+    UNLOADER = "unloader"
+    HOPPER = "hopper"
+    STORAGE = "storage"
+    TRANSFER_LINK = "transfer_link"
+    REFINERY = "refinery"
+    FACTORY = "factory"
+    RAILGATE_TERMINAL = "railgate_terminal"
+    POWER_CONNECTOR = "power_connector"
+
+
+class OperationalConstructionState(StrEnum):
+    """Persisted local build lifecycle used by operational grid snapshots."""
+
+    PLANNED = "planned"
+    ACTIVE = "active"
+    BLOCKED = "blocked"
+
+
 @dataclass(frozen=True, slots=True)
 class FacilityPort:
     """Typed input or output connector on a facility component."""
@@ -377,13 +434,14 @@ class FacilityComponent:
 
 @dataclass(frozen=True, slots=True)
 class InternalConnection:
-    """A wire between two ports inside one facility."""
+    """A typed transfer link between two ports inside one facility."""
 
     id: str
     source_component_id: str
     source_port_id: str
     destination_component_id: str
     destination_port_id: str
+    link_type: TransferLinkKind = TransferLinkKind.CONVEYOR
 
 
 @dataclass(slots=True)
@@ -445,6 +503,81 @@ class Facility:
 
 
 @dataclass(slots=True)
+class OperationalPlacedEntity:
+    """One persisted entity placed on a local operational grid."""
+
+    id: str
+    entity_type: OperationalEntityType
+    world_id: str
+    x: int
+    y: int
+    rotation: int = 0
+    width: int = 1
+    height: int = 1
+    z: int = 0
+    owner_node_id: str | None = None
+    component_id: str | None = None
+    link_id: str | None = None
+    link_type: str | None = None
+    path_cells: tuple[tuple[int, int, int], ...] = ()
+    platform_side: str | None = None
+    adjacent_to_entity_id: str | None = None
+    adjacent_port_id: str | None = None
+    input_ports: tuple[str, ...] = ()
+    output_ports: tuple[str, ...] = ()
+    connection_ports: tuple[str, ...] = ()
+    blocked_reasons: tuple[str, ...] = ()
+    construction_state: OperationalConstructionState = OperationalConstructionState.ACTIVE
+    visual_hint: str | None = None
+    blocks_occupancy: bool = True
+
+    def footprint_size(self, rotation: int | None = None) -> tuple[int, int]:
+        """Return width/height after applying a cardinal rotation."""
+
+        angle = self.rotation if rotation is None else int(rotation)
+        if int(angle) % 180 == 90:
+            return max(1, int(self.height)), max(1, int(self.width))
+        return max(1, int(self.width)), max(1, int(self.height))
+
+    def occupied_cells(self, rotation: int | None = None) -> tuple[tuple[int, int, int], ...]:
+        """Return all cells occupied by this entity."""
+
+        if self.path_cells:
+            return self.path_cells
+        width, height = self.footprint_size(rotation)
+        return tuple(
+            (int(self.x) + dx, int(self.y) + dy, int(self.z))
+            for dy in range(height)
+            for dx in range(width)
+        )
+
+
+@dataclass(slots=True)
+class OperationalAreaState:
+    """Persisted local construction grid for one world or region."""
+
+    id: str
+    world_id: str
+    width: int
+    height: int
+    cell_size: int = 24
+    entities: dict[str, OperationalPlacedEntity] = field(default_factory=dict)
+
+    def occupied_cells(self, *, exclude_entity_id: str | None = None) -> dict[tuple[int, int, int], str]:
+        """Return a cell->entity occupancy map."""
+
+        occupied: dict[tuple[int, int, int], str] = {}
+        for entity in self.entities.values():
+            if exclude_entity_id is not None and entity.id == exclude_entity_id:
+                continue
+            if not entity.blocks_occupancy:
+                continue
+            for cell in entity.occupied_cells():
+                occupied[cell] = entity.id
+        return occupied
+
+
+@dataclass(slots=True)
 class NetworkNode:
     """A logistics point on a world."""
 
@@ -472,6 +605,7 @@ class NetworkNode:
     buffer_priority: int = 0
     push_logic: bool = True
     pull_logic: bool = True
+    requires_facility_handling: bool = False
 
     def effective_storage_capacity(self) -> int:
         """Return active storage cap, derived from facility bays when present."""
@@ -489,6 +623,8 @@ class NetworkNode:
             override = self.facility.loader_rate_override()
             if override is not None:
                 return override
+            if self.requires_facility_handling:
+                return 0
         return self.transfer_limit_per_tick
 
     def effective_inbound_rate(self) -> int:
@@ -498,6 +634,8 @@ class NetworkNode:
             override = self.facility.unloader_rate_override()
             if override is not None:
                 return override
+            if self.requires_facility_handling:
+                return 0
         return self.transfer_limit_per_tick
 
     def effective_combined_rate(self) -> int:
@@ -508,6 +646,8 @@ class NetworkNode:
         loader = self.facility.loader_rate_override()
         unloader = self.facility.unloader_rate_override()
         if loader is None and unloader is None:
+            if self.requires_facility_handling:
+                return 0
             return self.transfer_limit_per_tick
         return max(loader or 0, unloader or 0)
 
@@ -605,7 +745,7 @@ class TrackSignal:
 
 @dataclass(frozen=True, slots=True)
 class NetworkLink:
-    """A rail or gate edge between network nodes."""
+    """A rail or Railgate edge between network nodes."""
 
     id: str
     origin: str
@@ -653,6 +793,18 @@ class NetworkDisruption:
         return self.start_tick <= tick <= self.end_tick
 
 
+@dataclass(frozen=True, slots=True)
+class TrainStop:
+    """One waypoint in a multi-stop train order."""
+
+    node_id: str
+    action: StopAction
+    cargo_type: CargoType | None = None
+    units: int = 0
+    wait_condition: WaitCondition = WaitCondition.NONE
+    wait_ticks: int = 0
+
+
 @dataclass(slots=True)
 class FreightTrain:
     """A fixed-tick train assigned to the logistics graph."""
@@ -671,6 +823,8 @@ class FreightTrain:
     remaining_ticks: int = 0
     order_id: str | None = None
     blocked_reason: str | None = None
+    current_stop_index: int = 0
+    arrival_tick: int | None = None
     dispatch_cost: float = 60.0
     variable_cost_per_unit: float = 1.0
     revenue_modifier: float = 1.0
@@ -695,6 +849,7 @@ class FreightOrder:
     priority: int = 100
     delivered_units: int = 0
     active: bool = True
+    train_stops: tuple[TrainStop, ...] = ()
 
     @property
     def remaining_units(self) -> int:
@@ -719,6 +874,7 @@ class FreightSchedule:
     active: bool = True
     return_to_origin: bool = True
     stops: tuple[str, ...] = ()
+    train_stops: tuple[TrainStop, ...] = ()
     delivered_units: int = 0
     trips_completed: int = 0
     trips_dispatched: int = 0
@@ -767,7 +923,7 @@ class Contract:
 
 @dataclass(slots=True)
 class GatePowerStatus:
-    """Resolved power status for a gate link."""
+    """Resolved power status for a Railgate link."""
 
     link_id: str
     source_world_id: str
@@ -843,6 +999,7 @@ class GameState:
     power_plants: dict[str, PowerPlant] = field(default_factory=dict)
     track_signals: dict[str, TrackSignal] = field(default_factory=dict)
     construction_projects: dict[str, ConstructionProject] = field(default_factory=dict)
+    construction_inventory: dict[CargoType, int] = field(default_factory=dict)
     shortages: dict[str, dict[CargoType, int]] = field(default_factory=dict)
     buffer_distribution: dict[str, dict[str, dict[CargoType, int]]] = field(default_factory=dict)
     recipe_blocked: dict[str, dict[CargoType, int]] = field(default_factory=dict)
@@ -859,9 +1016,11 @@ class GameState:
     power_generation_this_tick: dict[str, int] = field(default_factory=dict)
     power_plant_blocked: dict[str, dict[str, int]] = field(default_factory=dict)
     gate_statuses: dict[str, GatePowerStatus] = field(default_factory=dict)
+    operational_areas: dict[str, OperationalAreaState] = field(default_factory=dict)
     link_usage_this_tick: dict[str, int] = field(default_factory=dict)
     rail_block_reservations: dict[str, str] = field(default_factory=dict)
     rail_block_blocked_this_tick: list[dict[str, object]] = field(default_factory=list)
+    local_switch_routes: dict[str, str] = field(default_factory=dict)
     finance: FinanceState = field(default_factory=FinanceState)
     contracts: dict[str, Contract] = field(default_factory=dict)
     space_sites: dict[str, SpaceSite] = field(default_factory=dict)
