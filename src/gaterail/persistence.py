@@ -34,6 +34,10 @@ from gaterail.models import (
     NetworkNode,
     NodeKind,
     NodeRecipe,
+    OperationalAreaState,
+    OperationalConstructionState,
+    OperationalEntityType,
+    OperationalPlacedEntity,
     OutpostKind,
     PortDirection,
     PowerPlant,
@@ -42,11 +46,15 @@ from gaterail.models import (
     ResourceRecipe,
     ResourceRecipeKind,
     SpaceSite,
+    StopAction,
     TrackPoint,
     TrackSignal,
     TrackSignalKind,
     TrainConsist,
     TrainStatus,
+    TrainStop,
+    TransferLinkKind,
+    WaitCondition,
     WorldState,
 )
 from gaterail.resources import ResourceDeposit
@@ -280,6 +288,7 @@ def _connection_to_dict(connection: InternalConnection) -> dict[str, object]:
         "source_port_id": connection.source_port_id,
         "destination_component_id": connection.destination_component_id,
         "destination_port_id": connection.destination_port_id,
+        "link_type": connection.link_type.value,
     }
 
 
@@ -292,6 +301,7 @@ def _connection_from_dict(data: dict[str, Any]) -> InternalConnection:
         source_port_id=str(data["source_port_id"]),
         destination_component_id=str(data["destination_component_id"]),
         destination_port_id=str(data["destination_port_id"]),
+        link_type=TransferLinkKind(str(data.get("link_type", TransferLinkKind.CONVEYOR.value))),
     )
 
 
@@ -356,6 +366,7 @@ def _node_to_dict(node: NetworkNode) -> dict[str, object]:
         "buffer_priority": node.buffer_priority,
         "push_logic": node.push_logic,
         "pull_logic": node.pull_logic,
+        "requires_facility_handling": node.requires_facility_handling,
     }
 
 
@@ -391,6 +402,7 @@ def _node_from_dict(data: dict[str, Any]) -> NetworkNode:
         buffer_priority=int(data.get("buffer_priority", 0)),
         push_logic=bool(data.get("push_logic", True)),
         pull_logic=bool(data.get("pull_logic", True)),
+        requires_facility_handling=bool(data.get("requires_facility_handling", False)),
     )
 
 
@@ -456,6 +468,118 @@ def _track_signal_from_dict(data: dict[str, Any]) -> TrackSignal:
         node_id=None if data.get("node_id") is None else str(data["node_id"]),
         active=bool(data.get("active", True)),
     )
+
+
+def _operational_entity_to_dict(entity: OperationalPlacedEntity) -> dict[str, object]:
+    """Serialize a persisted local operational-grid entity."""
+
+    return {
+        "id": entity.id,
+        "entity_type": entity.entity_type.value,
+        "world_id": entity.world_id,
+        "x": int(entity.x),
+        "y": int(entity.y),
+        "z": int(entity.z),
+        "rotation": int(entity.rotation),
+        "width": int(entity.width),
+        "height": int(entity.height),
+        "owner_node_id": entity.owner_node_id,
+        "component_id": entity.component_id,
+        "link_id": entity.link_id,
+        "link_type": entity.link_type,
+        "path_cells": [
+            {"x": int(x), "y": int(y), "z": int(z)}
+            for x, y, z in entity.path_cells
+        ],
+        "platform_side": entity.platform_side,
+        "adjacent_to_entity_id": entity.adjacent_to_entity_id,
+        "adjacent_port_id": entity.adjacent_port_id,
+        "input_ports": list(entity.input_ports),
+        "output_ports": list(entity.output_ports),
+        "connection_ports": list(entity.connection_ports),
+        "blocked_reasons": list(entity.blocked_reasons),
+        "construction_state": entity.construction_state.value,
+        "visual_hint": entity.visual_hint,
+        "blocks_occupancy": entity.blocks_occupancy,
+    }
+
+
+def _operational_entity_from_dict(data: dict[str, Any], *, default_world_id: str) -> OperationalPlacedEntity:
+    """Deserialize a persisted local operational-grid entity."""
+
+    entity_type = OperationalEntityType(str(data["entity_type"]))
+    return OperationalPlacedEntity(
+        id=str(data["id"]),
+        entity_type=entity_type,
+        world_id=str(data.get("world_id", default_world_id)),
+        x=int(data["x"]),
+        y=int(data["y"]),
+        z=int(data.get("z", 0)),
+        rotation=int(data.get("rotation", 0)),
+        width=int(data.get("width", 1)),
+        height=int(data.get("height", 1)),
+        owner_node_id=None if data.get("owner_node_id") is None else str(data["owner_node_id"]),
+        component_id=None if data.get("component_id") is None else str(data["component_id"]),
+        link_id=None if data.get("link_id") is None else str(data["link_id"]),
+        link_type=None if data.get("link_type") is None else str(data["link_type"]),
+        path_cells=tuple(
+            (
+                int(item.get("x", 0)),
+                int(item.get("y", 0)),
+                int(item.get("z", 0)),
+            )
+            for item in data.get("path_cells", [])
+            if isinstance(item, dict)
+        ),
+        platform_side=None if data.get("platform_side") is None else str(data["platform_side"]),
+        adjacent_to_entity_id=(
+            None if data.get("adjacent_to_entity_id") is None else str(data["adjacent_to_entity_id"])
+        ),
+        adjacent_port_id=None if data.get("adjacent_port_id") is None else str(data["adjacent_port_id"]),
+        input_ports=tuple(str(item) for item in data.get("input_ports", [])),
+        output_ports=tuple(str(item) for item in data.get("output_ports", [])),
+        connection_ports=tuple(str(item) for item in data.get("connection_ports", [])),
+        blocked_reasons=tuple(str(item) for item in data.get("blocked_reasons", [])),
+        construction_state=OperationalConstructionState(
+            str(data.get("construction_state", OperationalConstructionState.ACTIVE.value))
+        ),
+        visual_hint=None if data.get("visual_hint") is None else str(data["visual_hint"]),
+        blocks_occupancy=bool(data.get("blocks_occupancy", True)),
+    )
+
+
+def _operational_area_to_dict(area: OperationalAreaState) -> dict[str, object]:
+    """Serialize a persisted local operational area."""
+
+    return {
+        "id": area.id,
+        "world_id": area.world_id,
+        "width": int(area.width),
+        "height": int(area.height),
+        "cell_size": int(area.cell_size),
+        "entities": [
+            _operational_entity_to_dict(entity)
+            for entity in sorted(area.entities.values(), key=lambda item: item.id)
+        ],
+    }
+
+
+def _operational_area_from_dict(data: dict[str, Any]) -> OperationalAreaState:
+    """Deserialize a persisted local operational area."""
+
+    area = OperationalAreaState(
+        id=str(data["id"]),
+        world_id=str(data["world_id"]),
+        width=int(data.get("width", 48)),
+        height=int(data.get("height", 32)),
+        cell_size=int(data.get("cell_size", 24)),
+    )
+    for entity_data in data.get("entities", []):
+        if not isinstance(entity_data, dict):
+            continue
+        entity = _operational_entity_from_dict(entity_data, default_world_id=area.world_id)
+        area.entities[entity.id] = entity
+    return area
 
 
 def _resource_deposit_to_dict(deposit: ResourceDeposit) -> dict[str, object]:
@@ -557,7 +681,7 @@ def _mining_mission_from_dict(data: dict[str, Any]) -> MiningMission:
 
 
 def _gate_support_to_dict(support: GatePowerSupport) -> dict[str, object]:
-    """Serialize a gate power support rule."""
+    """Serialize a Railgate power support rule."""
 
     return {
         "id": support.id,
@@ -570,7 +694,7 @@ def _gate_support_to_dict(support: GatePowerSupport) -> dict[str, object]:
 
 
 def _gate_support_from_dict(data: dict[str, Any]) -> GatePowerSupport:
-    """Deserialize a gate power support rule."""
+    """Deserialize a Railgate power support rule."""
 
     return GatePowerSupport(
         id=str(data["id"]),
@@ -676,6 +800,33 @@ def _disruption_from_dict(data: dict[str, Any]) -> NetworkDisruption:
     )
 
 
+def _train_stop_to_dict(stop: TrainStop) -> dict[str, object]:
+    """Serialize a TrainStop dataclass."""
+
+    return {
+        "node_id": stop.node_id,
+        "action": stop.action.value,
+        "cargo_type": _cargo_key(stop.cargo_type),
+        "units": stop.units,
+        "wait_condition": stop.wait_condition.value,
+        "wait_ticks": stop.wait_ticks,
+    }
+
+
+def _train_stop_from_dict(data: dict[str, Any]) -> TrainStop:
+    """Deserialize a TrainStop dataclass."""
+
+    cargo = data.get("cargo_type")
+    return TrainStop(
+        node_id=str(data["node_id"]),
+        action=StopAction(str(data.get("action", StopAction.PASSTHROUGH.value))),
+        cargo_type=None if cargo is None else CargoType(str(cargo)),
+        units=int(data.get("units", 0)),
+        wait_condition=WaitCondition(str(data.get("wait_condition", WaitCondition.NONE.value))),
+        wait_ticks=int(data.get("wait_ticks", 0)),
+    )
+
+
 def _train_to_dict(train: FreightTrain) -> dict[str, object]:
     """Serialize a freight train."""
 
@@ -694,6 +845,8 @@ def _train_to_dict(train: FreightTrain) -> dict[str, object]:
         "remaining_ticks": train.remaining_ticks,
         "order_id": train.order_id,
         "blocked_reason": train.blocked_reason,
+        "current_stop_index": train.current_stop_index,
+        "arrival_tick": train.arrival_tick,
         "dispatch_cost": train.dispatch_cost,
         "variable_cost_per_unit": train.variable_cost_per_unit,
         "revenue_modifier": train.revenue_modifier,
@@ -719,6 +872,10 @@ def _train_from_dict(data: dict[str, Any]) -> FreightTrain:
         remaining_ticks=int(data.get("remaining_ticks", 0)),
         order_id=data.get("order_id"),
         blocked_reason=data.get("blocked_reason"),
+        current_stop_index=int(data.get("current_stop_index", 0)),
+        arrival_tick=(
+            None if data.get("arrival_tick") is None else int(data["arrival_tick"])
+        ),
         dispatch_cost=float(data.get("dispatch_cost", 60.0)),
         variable_cost_per_unit=float(data.get("variable_cost_per_unit", 1.0)),
         revenue_modifier=float(data.get("revenue_modifier", 1.0)),
@@ -738,6 +895,7 @@ def _order_to_dict(order: FreightOrder) -> dict[str, object]:
         "priority": order.priority,
         "delivered_units": order.delivered_units,
         "active": order.active,
+        "train_stops": [_train_stop_to_dict(s) for s in order.train_stops],
     }
 
 
@@ -754,6 +912,9 @@ def _order_from_dict(data: dict[str, Any]) -> FreightOrder:
         priority=int(data.get("priority", 100)),
         delivered_units=int(data.get("delivered_units", 0)),
         active=bool(data.get("active", True)),
+        train_stops=tuple(
+            _train_stop_from_dict(item) for item in data.get("train_stops", [])
+        ),
     )
 
 
@@ -766,6 +927,7 @@ def _schedule_to_dict(schedule: FreightSchedule) -> dict[str, object]:
         "origin": schedule.origin,
         "destination": schedule.destination,
         "stops": list(schedule.stops),
+        "train_stops": [_train_stop_to_dict(s) for s in schedule.train_stops],
         "cargo_type": schedule.cargo_type.value,
         "units_per_departure": schedule.units_per_departure,
         "interval_ticks": schedule.interval_ticks,
@@ -788,6 +950,9 @@ def _schedule_from_dict(data: dict[str, Any]) -> FreightSchedule:
         origin=str(data["origin"]),
         destination=str(data["destination"]),
         stops=tuple(str(item) for item in data.get("stops", [])),
+        train_stops=tuple(
+            _train_stop_from_dict(item) for item in data.get("train_stops", [])
+        ),
         cargo_type=CargoType(str(data["cargo_type"])),
         units_per_departure=int(data["units_per_departure"]),
         interval_ticks=int(data["interval_ticks"]),
@@ -802,7 +967,7 @@ def _schedule_from_dict(data: dict[str, Any]) -> FreightSchedule:
 
 
 def _gate_status_to_dict(status: GatePowerStatus) -> dict[str, object]:
-    """Serialize a gate power status."""
+    """Serialize a Railgate power status."""
 
     return {
         "link_id": status.link_id,
@@ -830,7 +995,7 @@ def _gate_status_to_dict(status: GatePowerStatus) -> dict[str, object]:
 
 
 def _gate_status_from_dict(data: dict[str, Any]) -> GatePowerStatus:
-    """Deserialize a gate power status."""
+    """Deserialize a Railgate power status."""
 
     return GatePowerStatus(
         link_id=str(data["link_id"]),
@@ -1002,6 +1167,9 @@ def _facility_block_entries_from_dict(data: object) -> list[dict[str, object]]:
 def state_to_dict(state: GameState) -> dict[str, object]:
     """Serialize game state to JSON-safe data."""
 
+    from gaterail.operational import ensure_operational_areas
+
+    ensure_operational_areas(state)
     return {
         "tick": state.tick,
         "worlds": [_world_to_dict(world) for world in sorted(state.worlds.values(), key=lambda item: item.id)],
@@ -1031,10 +1199,15 @@ def state_to_dict(state: GameState) -> dict[str, object]:
             _track_signal_to_dict(signal)
             for signal in sorted(state.track_signals.values(), key=lambda item: item.id)
         ],
+        "operational_areas": [
+            _operational_area_to_dict(area)
+            for area in sorted(state.operational_areas.values(), key=lambda item: item.id)
+        ],
         "construction_projects": [
             _construction_project_to_dict(project)
             for project in sorted(state.construction_projects.values(), key=lambda item: item.id)
         ],
+        "construction_inventory": _cargo_map_to_dict(state.construction_inventory),
         "trains": [_train_to_dict(train) for train in sorted(state.trains.values(), key=lambda item: item.id)],
         "orders": [_order_to_dict(order) for order in sorted(state.orders.values(), key=lambda item: item.id)],
         "schedules": [
@@ -1077,6 +1250,10 @@ def state_to_dict(state: GameState) -> dict[str, object]:
             link_id: str(train_id)
             for link_id, train_id in sorted(state.rail_block_reservations.items())
         },
+        "local_switch_routes": {
+            switch_id: str(link_id)
+            for switch_id, link_id in sorted(state.local_switch_routes.items())
+        },
         "finance": _finance_to_dict(state.finance),
         "contracts": [
             _contract_to_dict(contract)
@@ -1098,6 +1275,7 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
         month_length=int(data.get("month_length", 30)),
         economic_identity_enabled=bool(data.get("economic_identity_enabled", False)),
     )
+    state.construction_inventory = _cargo_map_from_dict(data.get("construction_inventory", {}))
     for world_data in data.get("worlds", []):
         state.add_world(_world_from_dict(world_data))
     for deposit_data in data.get("resource_deposits", []):
@@ -1114,6 +1292,11 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
         state.add_link(_link_from_dict(link_data))
     for signal_data in data.get("track_signals", []):
         state.add_track_signal(_track_signal_from_dict(signal_data))
+    for area_data in data.get("operational_areas", []):
+        if not isinstance(area_data, dict):
+            continue
+        area = _operational_area_from_dict(area_data)
+        state.operational_areas[area.id] = area
     for support_data in data.get("gate_supports", []):
         state.add_gate_support(_gate_support_from_dict(support_data))
     for plant_data in data.get("power_plants", []):
@@ -1175,6 +1358,16 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
             str(link_id): str(train_id)
             for link_id, train_id in rail_block_reservations.items()
         }
+    local_switch_routes = data.get("local_switch_routes", {})
+    if isinstance(local_switch_routes, dict):
+        state.local_switch_routes = {
+            str(switch_id): str(link_id)
+            for switch_id, link_id in local_switch_routes.items()
+        }
+    if not state.operational_areas:
+        from gaterail.operational import ensure_operational_areas
+
+        ensure_operational_areas(state)
     return state
 
 

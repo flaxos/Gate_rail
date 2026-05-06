@@ -73,4 +73,4 @@ def test_cli_sprint5_prints_monthly_table() -> None:
     assert "Schedules: core_food_service food" in text
     assert "Month 01 Operations Ledger" in text
     assert "Finance\nRevenue | Costs" in text
-    assert "Gate Use\nGate" in text
+    assert "Railgate Use\nRailgate" in text

@@ -87,7 +87,7 @@ def test_preview_schedule_warns_when_gate_is_degraded_by_disruption() -> None:
         warning for warning in result["route_warnings"] if warning["link_id"] == "gate_frontier_outer"
     )
     assert warning["severity"] == "degraded"
-    assert warning["reason"] == "gate alignment throttling"
+    assert warning["reason"] == "Railgate aperture alignment throttling"
     handoff = next(
         handoff for handoff in result["gate_handoffs"] if handoff["link_id"] == "gate_frontier_outer"
     )

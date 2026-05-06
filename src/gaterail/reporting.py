@@ -20,7 +20,7 @@ def _contract_summary_target(contract: Contract) -> str:
     if contract.kind == ContractKind.FRONTIER_SUPPORT:
         return f"support streak {contract.target_units} on {contract.target_world_id}"
     if contract.kind == ContractKind.GATE_RECOVERY:
-        return f"recover {contract.target_link_id} for {contract.target_units} ticks"
+        return f"stabilize corridor {contract.target_link_id} for {contract.target_units} ticks"
     return f"target {contract.target_units}"
 
 
@@ -58,6 +58,13 @@ def _ticks_label(ticks: object) -> str:
 
     count = int(ticks)
     unit = "tick" if count == 1 else "ticks"
+    return f"{count} {unit}"
+
+
+def _count_label(count: int, singular: str, plural: str | None = None) -> str:
+    """Format a counted noun with stable singular/plural wording."""
+
+    unit = singular if count == 1 else plural or f"{singular}s"
     return f"{count} {unit}"
 
 
@@ -231,9 +238,13 @@ def format_state_summary(state: GameState) -> str:
         for world in state.worlds.values()
     ]
     lines = [
-        f"Scenario: {len(state.worlds)} worlds, {len(state.nodes)} nodes, "
-        f"{len(rail_links)} rail links, {len(gate_links)} gate links, "
-        f"{len(state.trains)} trains, {len(state.orders)} orders",
+        "Scenario: "
+        f"{_count_label(len(state.worlds), 'world')}, "
+        f"{_count_label(len(state.nodes), 'node')}, "
+        f"{_count_label(len(rail_links), 'rail link')}, "
+        f"{_count_label(len(gate_links), 'Railgate link')}, "
+        f"{_count_label(len(state.trains), 'train')}, "
+        f"{_count_label(len(state.orders), 'order')}",
         "Worlds: " + "; ".join(world_lines),
     ]
     if state.resource_deposits:
@@ -253,7 +264,7 @@ def format_state_summary(state: GameState) -> str:
                 f"{link_id} {state_label} from {status.source_world_name} "
                 f"requires {status.power_required}"
             )
-        lines.append("Gates: " + "; ".join(gate_lines))
+        lines.append("Railgates: " + "; ".join(gate_lines))
     if state.orders:
         order_lines: list[str] = []
         for order in state.orders.values():
@@ -580,7 +591,7 @@ def format_scenario_inspection(state: GameState, sections: ReportSections = None
                 "",
                 "World Power",
                 _format_table(
-                    ("World", "Name", "Static", "Generated", "Used", "Gate Used", "Margin"),
+                    ("World", "Name", "Static", "Generated", "Used", "Railgate Used", "Margin"),
                     power_rows,
                 ),
                 "",
@@ -759,9 +770,9 @@ def format_tick_report(report: dict[str, object], sections: ReportSections = Non
     lines = [
         f"Tick {int(report['tick']):04d} | "
         f"rail {network.get('rail_links', 0)} | "
-        f"gates {network.get('powered_gate_links', 0)}/{network.get('gate_links', 0)} powered | "
+        f"railgates {network.get('powered_gate_links', 0)}/{network.get('gate_links', 0)} powered | "
         f"trains {network.get('trains', 0)} | "
-        f"gate power {network.get('gate_power_required', 0)}",
+        f"railgate power {network.get('gate_power_required', 0)}",
     ]
     if _section_enabled(sections, "production"):
         lines.append(_format_node_rollup("Produced", report.get("produced")))
@@ -843,10 +854,10 @@ def _format_contracts_rollup(contracts: object) -> str:
 
 
 def _format_gate_rollup(gates: object) -> str:
-    """Format powered and underpowered gate links."""
+    """Format powered and underpowered Railgate links."""
 
     if not isinstance(gates, dict) or not gates:
-        return "Gates: none"
+        return "Railgates: none"
     parts: list[str] = []
     for link_id, status in gates.items():
         if not isinstance(status, dict):
@@ -871,7 +882,7 @@ def _format_gate_rollup(gates: object) -> str:
             parts.append(
                 f"{link_id} underpowered by {source} short {status.get('power_shortfall', 0)}{support}"
             )
-    return "Gates: " + ("; ".join(parts) if parts else "none")
+    return "Railgates: " + ("; ".join(parts) if parts else "none")
 
 
 def _format_power_generation_rollup(power_generation: object) -> str:
@@ -1243,7 +1254,7 @@ def format_monthly_report(report: dict[str, object], sections: ReportSections = 
     if _section_enabled(sections, "shortages"):
         lines.extend(["", "Shortages", _format_table(("Cargo", "Units"), shortage_rows)])
     if _section_enabled(sections, "gates"):
-        lines.extend(["", "Gate Use", _format_table(("Gate", "Slots", "Powered", "Underpowered"), gate_rows)])
+        lines.extend(["", "Railgate Use", _format_table(("Railgate", "Slots", "Powered", "Underpowered"), gate_rows)])
     if _section_enabled(sections, "economy"):
         lines.extend(["", "Specialized Output", _format_table(("Cargo", "Units"), specialized_rows)])
     if _section_enabled(sections, "traffic"):

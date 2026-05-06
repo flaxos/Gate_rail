@@ -113,7 +113,7 @@ var _is_panning := false
 func _ready() -> void:
 	_camera = Camera2D.new()
 	add_child(_camera)
-	RenderingServer.set_default_clear_color(Color(0.055, 0.075, 0.08, 1.0))
+	RenderingServer.set_default_clear_color(UITheme.BG_0)
 	_load_placeholder_assets()
 	_build_ui()
 	get_viewport().size_changed.connect(_on_viewport_size_changed)
@@ -165,6 +165,7 @@ func _build_ui() -> void:
 func _build_control_panel(ui: CanvasLayer) -> void:
 	_control_panel = PanelContainer.new()
 	_control_panel.custom_minimum_size = Vector2(LEFT_PANEL_WIDTH, CONTROL_PANEL_HEIGHT)
+	_control_panel.add_theme_stylebox_override("panel", UITheme.panel_style())
 	ui.add_child(_control_panel)
 
 	var margin := MarginContainer.new()
@@ -178,12 +179,7 @@ func _build_control_panel(ui: CanvasLayer) -> void:
 	margin.add_child(box)
 
 	var top_panel = PanelContainer.new()
-	var top_style = StyleBoxFlat.new()
-	top_style.bg_color = Color(0.12, 0.14, 0.16)
-	top_style.set_border_width_all(1)
-	top_style.border_color = Color(0.2, 0.25, 0.3)
-	top_style.set_corner_radius_all(6)
-	top_panel.add_theme_stylebox_override("panel", top_style)
+	top_panel.add_theme_stylebox_override("panel", UITheme.panel_style("hud"))
 	box.add_child(top_panel)
 
 	var top_margin = MarginContainer.new()
@@ -201,17 +197,18 @@ func _build_control_panel(ui: CanvasLayer) -> void:
 
 	var add_hud_item = func(label_text: String) -> Label:
 		var lbl = Label.new()
-		lbl.text = label_text
-		lbl.modulate = Color(0.6, 0.7, 0.75)
+		lbl.text = label_text.to_upper()
+		UITheme.style_label_caption(lbl)
 		top_grid.add_child(lbl)
 		var val = Label.new()
 		val.text = "-"
+		UITheme.style_label_value(val, true)
 		top_grid.add_child(val)
 		return val
 
 	_hud_tick_value = add_hud_item.call("Tick:")
 	_hud_cash_value = add_hud_item.call("Cash:")
-	_hud_reputation_value = add_hud_item.call("Reputation:")
+	_hud_reputation_value = add_hud_item.call("Standing:")
 	_bridge_status_value = add_hud_item.call("Bridge:")
 	_bridge_source_value = add_hud_item.call("Source:")
 
@@ -316,6 +313,7 @@ func _build_control_panel(ui: CanvasLayer) -> void:
 func _build_operations_panel(ui: CanvasLayer) -> void:
 	_operations_panel = PanelContainer.new()
 	_operations_panel.custom_minimum_size = Vector2(RIGHT_PANEL_WIDTH, 640)
+	_operations_panel.add_theme_stylebox_override("panel", UITheme.panel_style())
 	ui.add_child(_operations_panel)
 
 	var margin := MarginContainer.new()
@@ -335,7 +333,7 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	_operations_scroll.add_child(box)
 
 	var finance_title := Label.new()
-	finance_title.text = "Finance and Reputation"
+	finance_title.text = "Finance and Combine Standing"
 	box.add_child(finance_title)
 
 	_finance_label = Label.new()
@@ -345,7 +343,7 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 	_build_tutorial_section(box)
 
 	var contract_title := Label.new()
-	contract_title.text = "Contracts"
+	contract_title.text = "Freight Contracts"
 	box.add_child(contract_title)
 
 	_contract_scroll = ScrollContainer.new()
@@ -399,12 +397,7 @@ func _build_operations_panel(ui: CanvasLayer) -> void:
 func _build_tutorial_section(box: VBoxContainer) -> void:
 	_tutorial_panel = PanelContainer.new()
 	_tutorial_panel.visible = false
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.08, 0.12, 0.14, 0.94)
-	panel_style.border_color = Color(0.20, 0.42, 0.44)
-	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(6)
-	_tutorial_panel.add_theme_stylebox_override("panel", panel_style)
+	_tutorial_panel.add_theme_stylebox_override("panel", UITheme.panel_style("tutorial"))
 	box.add_child(_tutorial_panel)
 
 	var margin := MarginContainer.new()
@@ -418,14 +411,14 @@ func _build_tutorial_section(box: VBoxContainer) -> void:
 	margin.add_child(content)
 
 	var title := Label.new()
-	title.text = "Tutorial Loop"
-	title.modulate = Color(0.78, 0.94, 0.92)
+	title.text = "TUTORIAL LOOP"
+	title.add_theme_color_override("font_color", UITheme.ACCENT)
+	title.add_theme_font_size_override("font_size", 11)
 	content.add_child(title)
 
 	_tutorial_summary = Label.new()
 	_tutorial_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_tutorial_summary.add_theme_font_size_override("font_size", 12)
-	_tutorial_summary.modulate = Color(0.70, 0.82, 0.84)
+	UITheme.style_label_body(_tutorial_summary)
 	content.add_child(_tutorial_summary)
 
 	_tutorial_list = VBoxContainer.new()
@@ -442,6 +435,7 @@ func _build_tutorial_section(box: VBoxContainer) -> void:
 func _build_inspector_panel(ui: CanvasLayer) -> void:
 	_inspector_panel = PanelContainer.new()
 	_inspector_panel.custom_minimum_size = Vector2(LEFT_PANEL_WIDTH, 296)
+	_inspector_panel.add_theme_stylebox_override("panel", UITheme.panel_style("inspector"))
 	ui.add_child(_inspector_panel)
 
 	var margin := MarginContainer.new()
@@ -474,12 +468,7 @@ func _build_inspector_panel(ui: CanvasLayer) -> void:
 func _build_alert_strip(ui: CanvasLayer) -> void:
 	_alert_panel = PanelContainer.new()
 	_alert_panel.custom_minimum_size = Vector2(1248, ALERT_STRIP_HEIGHT)
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.035, 0.055, 0.07, 0.94)
-	panel_style.border_color = Color(0.24, 0.38, 0.42)
-	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(10)
-	_alert_panel.add_theme_stylebox_override("panel", panel_style)
+	_alert_panel.add_theme_stylebox_override("panel", UITheme.panel_style("alert"))
 	ui.add_child(_alert_panel)
 
 	var margin := MarginContainer.new()
@@ -494,9 +483,9 @@ func _build_alert_strip(ui: CanvasLayer) -> void:
 	margin.add_child(row)
 
 	var title := Label.new()
-	title.text = "Status"
-	title.custom_minimum_size = Vector2(58, 0)
-	title.modulate = Color(0.70, 0.88, 0.86)
+	title.text = "STATUS FEED"
+	title.custom_minimum_size = Vector2(96, 0)
+	UITheme.style_label_caption(title)
 	row.add_child(title)
 
 	_alert_scroll = ScrollContainer.new()
@@ -738,6 +727,26 @@ func _on_tutorial_action_pressed() -> void:
 		var label := str(_tutorial_next_action.get("label", "Running tutorial"))
 		_error_label.text = "%s for %s tick(s)..." % [label, ticks]
 		GateRailBridge.step_ticks(ticks)
+		return
+	if kind == "command" or kind == "commands":
+		var commands: Array = []
+		if kind == "command":
+			var command_raw: Variant = _tutorial_next_action.get("command", {})
+			if typeof(command_raw) == TYPE_DICTIONARY:
+				var command: Dictionary = command_raw
+				commands.append(command.duplicate(true))
+		else:
+			for command_item in _array(_tutorial_next_action.get("commands", [])):
+				if typeof(command_item) == TYPE_DICTIONARY:
+					var command_payload: Dictionary = command_item
+					commands.append(command_payload.duplicate(true))
+		if commands.is_empty():
+			_error_label.text = "Tutorial action has no backend command."
+			return
+		var command_ticks: int = int(max(0, int(_tutorial_next_action.get("ticks", 0))))
+		var command_label := str(_tutorial_next_action.get("label", "Running tutorial command"))
+		_error_label.text = "%s..." % command_label
+		GateRailBridge.send_message({"commands": commands, "ticks": command_ticks})
 		return
 	_error_label.text = "Unsupported tutorial action: %s" % kind
 
@@ -1215,7 +1224,7 @@ func _update_finance_panel() -> void:
 	if _finance_label == null:
 		return
 	var finance: Dictionary = snapshot.get("finance", {})
-	_finance_label.text = "Cash %s | Net %s | Revenue %s | Costs %s | Reputation %s" % [
+	_finance_label.text = "Cash %s | Net %s | Revenue %s | Costs %s | Standing %s" % [
 		finance.get("cash", 0),
 		finance.get("net", 0),
 		finance.get("revenue", 0),
@@ -1260,7 +1269,7 @@ func _rebuild_tutorial_panel() -> void:
 
 	if _tutorial_action_button != null:
 		var action_kind := str(_tutorial_next_action.get("kind", ""))
-		var can_run_action := action_kind == "step_ticks"
+		var can_run_action := action_kind in ["step_ticks", "command", "commands"]
 		_tutorial_action_button.visible = can_run_action
 		_tutorial_action_button.disabled = not can_run_action
 		_tutorial_action_button.text = str(_tutorial_next_action.get("label", "Advance tutorial"))
@@ -1434,6 +1443,13 @@ func _current_tutorial_alerts() -> Array:
 	for alert in _array(tutorial.get("alerts", [])):
 		if typeof(alert) == TYPE_DICTIONARY:
 			alerts.append(alert)
+	for blocker in _array(tutorial.get("blockers", [])):
+		if typeof(blocker) == TYPE_DICTIONARY:
+			var blocker_data: Dictionary = blocker
+			alerts.append({
+				"kind": "tutorial_blocker",
+				"message": str(blocker_data.get("message", blocker_data.get("code", "Tutorial blocker"))),
+			})
 	return alerts
 
 
@@ -1465,7 +1481,7 @@ func _current_link_alerts() -> Array:
 		elif slots_used > 0 and capacity > 0 and float(slots_used) / float(capacity) >= 0.80:
 			alerts.append({
 				"kind": "congestion",
-				"message": "%s: %s/%s gate slots" % [link_id, slots_used, capacity],
+				"message": "%s: %s/%s Railgate slots" % [link_id, slots_used, capacity],
 			})
 		elif capacity < base_capacity:
 			alerts.append({
@@ -1476,27 +1492,23 @@ func _current_link_alerts() -> Array:
 
 
 func _build_alert_chip(alert: Dictionary) -> Control:
-	var panel := PanelContainer.new()
-	var style := StyleBoxFlat.new()
 	var kind := str(alert.get("kind", "info"))
-	style.bg_color = _alert_fill_color(kind)
-	style.border_color = _alert_border_color(kind)
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(9)
-	panel.add_theme_stylebox_override("panel", style)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UITheme.alert_chip_style(kind))
 
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 8)
-	margin.add_theme_constant_override("margin_top", 4)
-	margin.add_theme_constant_override("margin_right", 8)
-	margin.add_theme_constant_override("margin_bottom", 4)
-	panel.add_child(margin)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 7)
+	panel.add_child(row)
+
+	var prefix := Label.new()
+	prefix.text = _alert_prefix(kind)
+	UITheme.style_label_mono(prefix, UITheme.alert_chip_accent_color(kind))
+	row.add_child(prefix)
 
 	var label := Label.new()
-	label.text = "%s %s" % [_alert_prefix(kind), str(alert.get("message", ""))]
-	label.add_theme_font_size_override("font_size", 12)
-	label.modulate = Color(0.94, 0.97, 0.95)
-	margin.add_child(label)
+	label.text = str(alert.get("message", ""))
+	UITheme.style_label_mono(label, UITheme.INK_1)
+	row.add_child(label)
 	return panel
 
 
@@ -1630,10 +1642,7 @@ func _rebuild_schedule_list() -> void:
 
 func _build_schedule_row(schedule: Dictionary) -> Control:
 	var panel = PanelContainer.new()
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.15, 0.17, 0.20)
-	style.set_corner_radius_all(4)
-	panel.add_theme_stylebox_override("panel", style)
+	panel.add_theme_stylebox_override("panel", UITheme.sched_row_style("default"))
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 6)
@@ -1648,7 +1657,7 @@ func _build_schedule_row(schedule: Dictionary) -> Control:
 	var status_label := Label.new()
 	status_label.custom_minimum_size = Vector2(36, 0)
 	status_label.text = "ON" if enabled else "OFF"
-	status_label.modulate = Color(0.50, 0.90, 0.55) if enabled else Color(0.95, 0.45, 0.35)
+	UITheme.style_label_mono(status_label, UITheme.GOOD if enabled else UITheme.INK_3)
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	row.add_child(status_label)
 

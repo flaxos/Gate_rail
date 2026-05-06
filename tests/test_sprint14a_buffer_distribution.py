@@ -235,7 +235,7 @@ def test_non_buffer_kinds_do_not_auto_feed() -> None:
 
 
 def test_buffer_does_not_cross_gate_links() -> None:
-    """Cargo never auto-jumps a gate even if the gate hub has a settlement-side neighbour."""
+    """Cargo never auto-jumps a Railgate even if the anchor has a settlement-side neighbour."""
 
     state = GameState()
     for world_id in ("core", "frontier"):

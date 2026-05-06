@@ -2,24 +2,28 @@
 
 ## Premise
 
-GateRail is a logistics and development game set in a future where trains have re-emerged as the dominant infrastructure for moving people and freight at scale. Advances in tunneling, mag-rail, vacuum transit, cargo handling, and wormhole technology have made rail networks the backbone of civilization again.
+GateRail is a logistics and development game set decades after Gate Horizons. The origin-era story discovered the ancient Horizon Artefact and triggered the Horizon Event: proof that true precursor gate technology existed. By the time GateRail begins, corporations still have not mastered the original system. They have reverse-engineered smaller **derivative aperture systems** called **Railgates**.
 
-The player expands from local rail systems to inter-world logistics networks, building frontier worlds into major industrial, civic, and research centers. Wormholes are not a replacement for logistics planning. They are strategic infrastructure that compresses distance at a major energy cost.
+The Railgate Age is industrial, corporate, and constrained. Railgates are paired, route-bound, energy-hungry, throughput-limited corridors. They work best for fixed freight because trains provide exact alignment, predictable mass, controlled velocity, standardized cargo, and safe automated throughput.
+
+The first gate was a miracle. Railgates are a business model.
+
+The player expands from local rail systems to interworld logistics networks, building extraction outposts and frontier colonies into major industrial, civic, and research hubs. Railgates are not a replacement for logistics planning. They are strategic aperture corridors that compress distance at a major energy cost.
 
 ## Player fantasy
 
 The game should support all three of these fantasies at once:
 - railroad tycoon across impossible space,
 - industrial optimizer chaining extraction, production, and delivery,
-- frontier builder restoring and growing worlds into higher-tier civilizations.
+- frontier builder growing colonies and industrial hubs under corporate pressure.
 
 ## Player optimization targets
 
 The player is optimizing:
-- throughput across rail and gate networks,
+- throughput across rail and Railgate networks,
 - world development and promotion,
 - supply stability under growing complexity,
-- strategic use of expensive wormhole power,
+- strategic use of expensive aperture power,
 - economic scaling through specialization and interdependence,
 - the transformation of raw elements into higher-order industrial capability.
 
@@ -27,11 +31,11 @@ The player is optimizing:
 
 GateRail is defined by the interaction between:
 - trains as the main physical logistics layer on each world,
-- wormholes as high-cost topology-changing infrastructure,
+- Railgates as high-cost topology-changing corridor infrastructure,
 - worlds as evolving economic actors rather than static maps,
-- recursive expansion where mature worlds help bootstrap frontier worlds.
+- recursive expansion where industrial hubs help bootstrap frontier colonies.
 
-This should feel different from a conventional rail sim because the objective is not only route profit or station coverage. The player is building a multi-world civilization network.
+This should feel different from a conventional rail sim because the objective is not only route profit or station coverage. The player is building a multi-world industrial network for Transit Combines and megacorporations.
 
 ## World model
 
@@ -61,7 +65,7 @@ Transport should be modeled in layers:
 - local rail between mines, farms, refineries, factories, depots, and population centers,
 - long-haul rail on dense developed worlds,
 - underground vacuum tubes for expensive high-speed corridors that still require portals, power, maintainable curves, and signal control,
-- gate hubs for near-instant inter-world movement,
+- Railgate anchors and receiving terminals for near-instant interworld freight corridors,
 - orbital yards, mining missions, and collection stations for remote extraction,
 - optional space lanes or orbital transfer nodes later if needed.
 
@@ -72,16 +76,16 @@ For the backend MVP, train simulation should stay operational rather than hyper-
 - rail links should evolve from straight A-to-B edges into backend-owned alignments with curves, branches, junctions, stop signals, and path signals,
 - detailed block signaling can start simple and diagnostic, then deepen only when dense industry traffic needs it.
 
-## Wormholes in gameplay terms
+## Railgates in gameplay terms
 
-Wormholes are player-built or player-activated infrastructure edges that:
+Railgates are player-built or player-activated derivative aperture corridors that:
 - consume large amounts of power,
 - greatly reduce effective travel time,
 - relieve distance-driven bottlenecks,
-- create strategic decisions around where to place gate hubs,
+- create strategic decisions around where to place Railgate anchors and receiving terminals,
 - should never feel free.
 
-Wormholes solve logistics problems, but they also create new ones through energy demand and hub concentration.
+Railgates solve logistics problems, but they also create new ones through energy demand, corridor capacity, aperture alignment, and hub concentration. The original Horizon Artefact remains beyond corporate mastery; Railgates are the limited business-facing technology that emerged after it.
 
 ## Resource and industry model
 
@@ -92,8 +96,8 @@ Resource layers:
 - refined elements and bulk materials: iron, copper, aluminum, silicon, carbon, hydrogen, oxygen, titanium, lithium, cobalt, uranium, thorium, helium-3, rare earth concentrate, noble metal concentrate, glass, and industrial chemicals
 - industrial materials: steel, alloys, wire, composites, ceramics, battery chemicals, reactor fuel, coolant, precision substrates, doped silicon, and superconducting wire
 - manufactured goods: machine parts, heavy machinery, motors, cargo equipment, power cells, circuit boards, sensors, semiconductors, control systems, construction modules, rail equipment, and habitat modules
-- advanced systems: reactor parts, high-capacity capacitors, gate field coils, gate lenses, stabilizers, navigation cores, research equipment, mining packages, and orbital collection arrays
-- discoverable exotics: gate-reactive isotopes, unusual catalysts, vacuum-grown crystals, folded-matter samples, and other original setting-specific materials
+- advanced systems: reactor assemblies, high-capacity capacitors, aperture field coils, aperture lenses, stabilizers, navigation cores, research equipment, mining packages, and orbital collection arrays
+- discoverable exotics: Horizon-reactive isotopes, unusual catalysts, vacuum-grown crystals, folded-matter samples, and other original setting-specific materials
 
 The core industrial ladder should be:
 
@@ -103,27 +107,27 @@ The core industrial ladder should be:
 4. Smelt or refine into elements and feedstocks.
 5. Alloy, process, and chemically prepare industrial materials.
 6. Manufacture parts, electronics, semiconductors, machinery, and construction modules.
-7. Assemble reactor parts, gate components, advanced mining systems, and research equipment.
-8. Deploy those outputs to power plants, outposts, facilities, trains, and gate hubs.
+7. Assemble reactor assemblies, aperture control components, advanced mining systems, and research equipment.
+8. Deploy those outputs to power plants, outposts, facilities, trains, and Railgate anchors.
 
 This industrial ladder is now a core design target, not a late-game visual flourish.
 
 ## Space extraction and outposts
 
-Wormholes should eventually open access not only to settled worlds but also to belts, moons, debris fields, gas pockets, and anomalies. Mining ships can be modeled as fixed-tick logistics actors launched from orbital yards or gate hubs. They return cargo to collection stations, which then feed the rail and gate network.
+Railgates should eventually open access not only to settled worlds but also to belts, moons, debris fields, gas pockets, and anomalies. Mining ships can be modeled as fixed-tick logistics actors launched from orbital yards or Railgate anchors. They return cargo to collection stations, which then feed the rail and Railgate network.
 
 Outposts and ore collection stations should be built by deliveries of construction modules, machinery, power equipment, electronics, food, water, and habitat supplies. Cash can authorize construction, but supply chains should make it real.
 
-## Power and gates
+## Power and Railgates
 
 Power should become a resource economy:
 - early plants consume fuel or carbon feedstock,
 - fission plants consume refined fissile materials and reactor parts,
 - fusion plants consume hydrogen isotopes, helium-3, coolant, and advanced components,
-- gate hubs reserve power capacity and may consume stored charge for high-throughput operation,
-- rare elements and discoverable exotics can improve gate efficiency or unlock stronger gate infrastructure.
+- Railgate anchors reserve power capacity and may consume stored charge for high-throughput operation,
+- rare elements and discoverable exotics can improve aperture efficiency or unlock stronger Railgate infrastructure.
 
-The player should have to decide whether to move power inputs, build local generation, upgrade gate efficiency, or avoid gate use.
+The player should have to decide whether to move power inputs, build local generation, upgrade Railgate efficiency, or route cargo around the corridor.
 
 ## Core constraints
 
@@ -138,7 +142,7 @@ Interesting problems should emerge from:
 - ore grade and refining yield,
 - multi-stage manufacturing dependencies,
 - power shortages,
-- gate activation and upkeep cost,
+- Railgate activation and upkeep cost,
 - link congestion,
 - terrain and infrastructure cost,
 - uneven resource distribution across worlds.
@@ -147,7 +151,7 @@ Interesting problems should emerge from:
 
 The first playable prototype should prove this:
 
-The player can bootstrap a frontier world into a self-sustaining industrial colony by building a rail network, extracting and refining raw resources, manufacturing key parts, powering local industry and gates, and using a costly wormhole hub to solve a major logistics bottleneck.
+The player can bootstrap a frontier colony into a self-sustaining industrial hub by building a rail network, extracting and refining raw resources, manufacturing key maintenance parts and aperture control components, powering local industry and Railgates, and using a costly corridor to solve a major logistics bottleneck.
 
 ## Engine strategy
 

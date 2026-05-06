@@ -50,12 +50,25 @@ from gaterail.models import (
     NetworkLink,
     NetworkNode,
     NodeKind,
+    OperationalAreaState,
+    OperationalEntityType,
+    OperationalPlacedEntity,
     OutpostKind,
     PortDirection,
+    StopAction,
     TrackPoint,
     TrackSignal,
     TrackSignalKind,
     TrainConsist,
+    TrainStop,
+    TransferLinkKind,
+    WaitCondition,
+)
+from gaterail.local_rules import (
+    infer_connection_cargo,
+    transfer_link_profile_payload,
+    transfer_link_profiles_payload,
+    transfer_link_supports_cargo,
 )
 from gaterail.space import mission_fuel_required, mission_power_required, mission_return_capacity
 from gaterail.traffic import effective_link_capacity
@@ -82,6 +95,7 @@ class DispatchOrder:
     cargo_type: CargoType
     requested_units: int
     priority: int = 100
+    train_stops: tuple[TrainStop, ...] = ()
     type: Literal["DispatchOrder"] = "DispatchOrder"
 
 
@@ -229,6 +243,7 @@ class CreateSchedule:
     active: bool = True
     return_to_origin: bool = True
     stops: tuple[str, ...] = ()
+    train_stops: tuple[TrainStop, ...] = ()
     type: Literal["CreateSchedule"] = "CreateSchedule"
 
 
@@ -248,6 +263,7 @@ class PreviewCreateSchedule:
     active: bool = True
     return_to_origin: bool = True
     stops: tuple[str, ...] = ()
+    train_stops: tuple[TrainStop, ...] = ()
     type: Literal["PreviewCreateSchedule"] = "PreviewCreateSchedule"
 
 
@@ -267,6 +283,7 @@ class UpdateSchedule:
     active: bool | None = None
     return_to_origin: bool | None = None
     stops: tuple[str, ...] | None = None
+    train_stops: tuple[TrainStop, ...] | None = None
     type: Literal["UpdateSchedule"] = "UpdateSchedule"
 
 
@@ -286,6 +303,7 @@ class PreviewUpdateSchedule:
     active: bool | None = None
     return_to_origin: bool | None = None
     stops: tuple[str, ...] | None = None
+    train_stops: tuple[TrainStop, ...] | None = None
     type: Literal["PreviewUpdateSchedule"] = "PreviewUpdateSchedule"
 
 
@@ -328,6 +346,7 @@ class BuildFacilityComponent:
     power_provided: int = 0
     inputs: dict[CargoType, int] | None = None
     outputs: dict[CargoType, int] | None = None
+    construction_cargo: dict[CargoType, int] | None = None
     train_capacity: int = 0
     concurrent_loading_limit: int = 1
     stored_charge: int = 0
@@ -350,6 +369,7 @@ class PreviewBuildFacilityComponent:
     power_provided: int = 0
     inputs: dict[CargoType, int] | None = None
     outputs: dict[CargoType, int] | None = None
+    construction_cargo: dict[CargoType, int] | None = None
     train_capacity: int = 0
     concurrent_loading_limit: int = 1
     stored_charge: int = 0
@@ -387,6 +407,7 @@ class BuildInternalConnection:
     source_port_id: str
     destination_component_id: str
     destination_port_id: str
+    link_type: TransferLinkKind | str = TransferLinkKind.CONVEYOR
     type: Literal["BuildInternalConnection"] = "BuildInternalConnection"
 
 
@@ -400,6 +421,7 @@ class PreviewBuildInternalConnection:
     source_port_id: str
     destination_component_id: str
     destination_port_id: str
+    link_type: TransferLinkKind | str = TransferLinkKind.CONVEYOR
     type: Literal["PreviewBuildInternalConnection"] = "PreviewBuildInternalConnection"
 
 
@@ -419,6 +441,22 @@ class PreviewRemoveInternalConnection:
     node_id: str
     connection_id: str
     type: Literal["PreviewRemoveInternalConnection"] = "PreviewRemoveInternalConnection"
+
+
+@dataclass(frozen=True, slots=True)
+class SurveySpaceSite:
+    """Mark a remote resource site as surveyed and eligible for missions."""
+
+    site_id: str
+    type: Literal["SurveySpaceSite"] = "SurveySpaceSite"
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewSurveySpaceSite:
+    """Preview surveying a remote resource site without mutating state."""
+
+    site_id: str
+    type: Literal["PreviewSurveySpaceSite"] = "PreviewSurveySpaceSite"
 
 
 @dataclass(frozen=True, slots=True)
@@ -487,6 +525,170 @@ class PreviewCancelOutpost:
     type: Literal["PreviewCancelOutpost"] = "PreviewCancelOutpost"
 
 
+@dataclass(frozen=True, slots=True)
+class LocalGetOperationalArea:
+    """Return one backend-authoritative local operational area."""
+
+    operational_area_id: str
+    type: Literal["local.get_operational_area"] = "local.get_operational_area"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalListBuildOptions:
+    """Return local construction options for an operational area."""
+
+    operational_area_id: str
+    type: Literal["local.list_build_options"] = "local.list_build_options"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalValidatePlacement:
+    """Validate local operational-grid placement without mutating state."""
+
+    operational_area_id: str
+    entity_type: str
+    x: int
+    y: int
+    entity_id: str = ""
+    rotation: int = 0
+    width: int = 0
+    height: int = 0
+    path_cells: tuple[tuple[int, int, int], ...] = ()
+    platform_side: str | None = None
+    adjacent_to_entity_id: str | None = None
+    adjacent_port_id: str | None = None
+    owner_node_id: str | None = None
+    component_id: str | None = None
+    link_id: str | None = None
+    origin_node_id: str | None = None
+    destination_node_id: str | None = None
+    rate: int = 0
+    capacity: int = 0
+    power_required: int = 0
+    power_provided: int = 0
+    construction_cargo: dict[CargoType, int] | None = None
+    inputs: dict[CargoType, int] | None = None
+    outputs: dict[CargoType, int] | None = None
+    type: Literal["local.validate_placement"] = "local.validate_placement"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalPlaceEntity:
+    """Place one local operational-grid entity after validation."""
+
+    operational_area_id: str
+    entity_type: str
+    x: int
+    y: int
+    entity_id: str = ""
+    rotation: int = 0
+    width: int = 0
+    height: int = 0
+    path_cells: tuple[tuple[int, int, int], ...] = ()
+    platform_side: str | None = None
+    adjacent_to_entity_id: str | None = None
+    adjacent_port_id: str | None = None
+    owner_node_id: str | None = None
+    component_id: str | None = None
+    link_id: str | None = None
+    origin_node_id: str | None = None
+    destination_node_id: str | None = None
+    name: str = ""
+    rate: int = 0
+    capacity: int = 0
+    power_required: int = 0
+    power_provided: int = 0
+    construction_cargo: dict[CargoType, int] | None = None
+    inputs: dict[CargoType, int] | None = None
+    outputs: dict[CargoType, int] | None = None
+    type: Literal["local.place_entity"] = "local.place_entity"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalRotateEntity:
+    """Rotate a persisted local operational-grid entity."""
+
+    operational_area_id: str
+    entity_id: str
+    rotation: int
+    type: Literal["local.rotate_entity"] = "local.rotate_entity"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalDeleteEntity:
+    """Delete a persisted local operational-grid entity and its backed object when safe."""
+
+    operational_area_id: str
+    entity_id: str
+    type: Literal["local.delete_entity"] = "local.delete_entity"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalInspectEntity:
+    """Inspect a persisted local operational-grid entity."""
+
+    operational_area_id: str
+    entity_id: str
+    type: Literal["local.inspect_entity"] = "local.inspect_entity"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalConnectEntities:
+    """Create a backend facility transfer link and persisted local transfer entity."""
+
+    operational_area_id: str
+    owner_node_id: str
+    source_component_id: str
+    source_port_id: str
+    destination_component_id: str
+    destination_port_id: str
+    connection_id: str = ""
+    entity_id: str = ""
+    link_type: TransferLinkKind | str = TransferLinkKind.CONVEYOR
+    x: int | None = None
+    y: int | None = None
+    type: Literal["local.connect_entities"] = "local.connect_entities"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalValidateSignal:
+    """Validate local track-signal placement against a persisted track entity."""
+
+    operational_area_id: str
+    track_entity_id: str = ""
+    link_id: str = ""
+    signal_id: str = ""
+    kind: TrackSignalKind = TrackSignalKind.STOP
+    node_id: str | None = None
+    active: bool = True
+    type: Literal["local.validate_signal"] = "local.validate_signal"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalPlaceSignal:
+    """Place a backend TrackSignal through local track tooling."""
+
+    operational_area_id: str
+    track_entity_id: str = ""
+    link_id: str = ""
+    signal_id: str = ""
+    kind: TrackSignalKind = TrackSignalKind.STOP
+    node_id: str | None = None
+    active: bool = True
+    type: Literal["local.place_signal"] = "local.place_signal"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSetSwitchRoute:
+    """Persist the selected outgoing route for an abstract local switch."""
+
+    operational_area_id: str
+    selected_link_id: str
+    node_id: str = ""
+    switch_id: str = ""
+    type: Literal["local.set_switch_route"] = "local.set_switch_route"
+
+
 PlayerCommand: TypeAlias = (
     SetScheduleEnabled
     | DispatchOrder
@@ -515,12 +717,25 @@ PlayerCommand: TypeAlias = (
     | PreviewBuildInternalConnection
     | RemoveInternalConnection
     | PreviewRemoveInternalConnection
+    | SurveySpaceSite
+    | PreviewSurveySpaceSite
     | DispatchMiningMission
     | PreviewDispatchMiningMission
     | BuildOutpost
     | PreviewBuildOutpost
     | CancelOutpost
     | PreviewCancelOutpost
+    | LocalGetOperationalArea
+    | LocalListBuildOptions
+    | LocalValidatePlacement
+    | LocalPlaceEntity
+    | LocalRotateEntity
+    | LocalDeleteEntity
+    | LocalInspectEntity
+    | LocalConnectEntities
+    | LocalValidateSignal
+    | LocalPlaceSignal
+    | LocalSetSwitchRoute
 )
 
 
@@ -593,6 +808,44 @@ def _node_id_tuple(value: object) -> tuple[str, ...]:
     raise ValueError("schedule stops must be a string or list of strings")
 
 
+def _train_stop_from_payload(value: object) -> TrainStop:
+    """Decode a TrainStop from a JSON-like payload."""
+
+    if not isinstance(value, dict):
+        raise ValueError("train stop must be a dictionary")
+    cargo = value.get("cargo_type")
+    return TrainStop(
+        node_id=str(value["node_id"]),
+        action=StopAction(str(value.get("action", StopAction.PASSTHROUGH.value))),
+        cargo_type=None if cargo is None else CargoType(str(cargo)),
+        units=int(value.get("units", 0)),
+        wait_condition=WaitCondition(
+            str(value.get("wait_condition", WaitCondition.NONE.value))
+        ),
+        wait_ticks=int(value.get("wait_ticks", 0)),
+    )
+
+
+def _train_stop_tuple(value: object) -> tuple[TrainStop, ...]:
+    """Decode a tuple of train stops from JSON-like input."""
+
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(_train_stop_from_payload(item) for item in value)
+    raise ValueError("train_stops must be a list of stop dictionaries")
+
+
+def _optional_train_stop_tuple(
+    data: dict[str, Any],
+) -> tuple[TrainStop, ...] | None:
+    """Return optional train_stops, preserving absent as no change."""
+
+    if "train_stops" not in data:
+        return None
+    return _train_stop_tuple(data.get("train_stops"))
+
+
 def _optional_node_id_tuple(data: dict[str, Any]) -> tuple[str, ...] | None:
     """Return optional schedule stops, preserving absent as no change."""
 
@@ -632,10 +885,120 @@ def _optional_str_field(data: dict[str, Any], key: str) -> str | None:
     return str(raw)
 
 
+def _path_cells_from_data(data: object) -> tuple[tuple[int, int, int], ...]:
+    """Parse optional local path-cell payloads from JSON-safe command data."""
+
+    if data is None:
+        return ()
+    if not isinstance(data, list):
+        raise ValueError("path_cells must be a list")
+    cells: list[tuple[int, int, int]] = []
+    seen: set[tuple[int, int, int]] = set()
+    for item in data:
+        if isinstance(item, dict):
+            cell = (int(item["x"]), int(item["y"]), int(item.get("z", 0)))
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            cell = (int(item[0]), int(item[1]), int(item[2]) if len(item) >= 3 else 0)
+        else:
+            raise ValueError("path_cells entries must be {x,y,z?} objects")
+        if cell in seen:
+            continue
+        seen.add(cell)
+        cells.append(cell)
+    return tuple(cells)
+
+
 def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
     """Build a player command from JSON-safe data."""
 
     command_type = _command_type(data)
+    if command_type == "local.get_operational_area":
+        return LocalGetOperationalArea(operational_area_id=str(data["operational_area_id"]))
+    if command_type == "local.list_build_options":
+        return LocalListBuildOptions(operational_area_id=str(data["operational_area_id"]))
+    if command_type in {"local.validate_placement", "local.place_entity"}:
+        command_cls = LocalValidatePlacement if command_type == "local.validate_placement" else LocalPlaceEntity
+        construction_cargo_data = data.get("construction_cargo", data.get("cargo_cost"))
+        return command_cls(
+            operational_area_id=str(data["operational_area_id"]),
+            entity_id=str(data.get("entity_id", "")),
+            entity_type=str(data["entity_type"]),
+            x=int(data["x"]),
+            y=int(data["y"]),
+            rotation=int(data.get("rotation", 0)),
+            width=int(data.get("width", 0)),
+            height=int(data.get("height", 0)),
+            path_cells=_path_cells_from_data(data.get("path_cells")),
+            platform_side=_optional_str_field(data, "platform_side"),
+            adjacent_to_entity_id=_optional_str_field(data, "adjacent_to_entity_id"),
+            adjacent_port_id=_optional_str_field(data, "adjacent_port_id"),
+            owner_node_id=_optional_str_field(data, "owner_node_id"),
+            component_id=_optional_str_field(data, "component_id"),
+            link_id=_optional_str_field(data, "link_id"),
+            origin_node_id=_optional_str_field(data, "origin_node_id"),
+            destination_node_id=_optional_str_field(data, "destination_node_id"),
+            rate=int(data.get("rate", 0)),
+            capacity=int(data.get("capacity", 0)),
+            power_required=int(data.get("power_required", 0)),
+            power_provided=int(data.get("power_provided", 0)),
+            construction_cargo=(
+                None if construction_cargo_data is None else _facility_cargo_map_from_dict(construction_cargo_data)
+            ),
+            inputs=None if data.get("inputs") is None else _facility_cargo_map_from_dict(data.get("inputs")),
+            outputs=None if data.get("outputs") is None else _facility_cargo_map_from_dict(data.get("outputs")),
+            **({"name": str(data.get("name", ""))} if command_cls is LocalPlaceEntity else {}),
+        )
+    if command_type == "local.rotate_entity":
+        return LocalRotateEntity(
+            operational_area_id=str(data["operational_area_id"]),
+            entity_id=str(data["entity_id"]),
+            rotation=int(data["rotation"]),
+        )
+    if command_type == "local.delete_entity":
+        return LocalDeleteEntity(
+            operational_area_id=str(data["operational_area_id"]),
+            entity_id=str(data["entity_id"]),
+        )
+    if command_type == "local.inspect_entity":
+        return LocalInspectEntity(
+            operational_area_id=str(data["operational_area_id"]),
+            entity_id=str(data["entity_id"]),
+        )
+    if command_type in {"local.connect_entities", "local.place_transfer_link"}:
+        return LocalConnectEntities(
+            operational_area_id=str(data["operational_area_id"]),
+            entity_id=str(data.get("entity_id", "")),
+            connection_id=str(data.get("connection_id", "")),
+            owner_node_id=str(data["owner_node_id"]),
+            source_component_id=str(data["source_component_id"]),
+            source_port_id=str(data["source_port_id"]),
+            destination_component_id=str(data["destination_component_id"]),
+            destination_port_id=str(data["destination_port_id"]),
+            link_type=_resolve_transfer_link_kind(
+                data.get("link_type", data.get("transfer_type", TransferLinkKind.CONVEYOR.value))
+            ),
+            x=None if data.get("x") is None else int(data["x"]),
+            y=None if data.get("y") is None else int(data["y"]),
+        )
+    if command_type in {"local.validate_signal", "local.place_signal"}:
+        signal_command = LocalValidateSignal if command_type == "local.validate_signal" else LocalPlaceSignal
+        node_id = data.get("node_id")
+        return signal_command(
+            operational_area_id=str(data["operational_area_id"]),
+            track_entity_id=str(data.get("track_entity_id", data.get("entity_id", ""))),
+            link_id=str(data.get("link_id", "")),
+            signal_id=str(data.get("signal_id", data.get("id", ""))),
+            kind=TrackSignalKind(str(data.get("kind", TrackSignalKind.STOP.value))),
+            node_id=None if node_id is None else str(node_id),
+            active=bool(data.get("active", True)),
+        )
+    if command_type == "local.set_switch_route":
+        return LocalSetSwitchRoute(
+            operational_area_id=str(data["operational_area_id"]),
+            switch_id=str(data.get("switch_id", "")),
+            node_id=str(data.get("node_id", "")),
+            selected_link_id=str(data["selected_link_id"]),
+        )
     if command_type == "SetScheduleEnabled":
         return SetScheduleEnabled(
             schedule_id=str(data["schedule_id"]),
@@ -650,6 +1013,7 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             cargo_type=CargoType(str(data["cargo_type"])),
             requested_units=int(data["requested_units"]),
             priority=int(data.get("priority", 100)),
+            train_stops=_train_stop_tuple(data.get("train_stops")),
         )
     if command_type == "CancelOrder":
         return CancelOrder(order_id=str(data["order_id"]))
@@ -732,6 +1096,7 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             active=bool(data.get("active", True)),
             return_to_origin=bool(data.get("return_to_origin", True)),
             stops=_node_id_tuple(data.get("stops", data.get("stop_ids", data.get("waypoint_node_ids")))),
+            train_stops=_train_stop_tuple(data.get("train_stops")),
         )
     if command_type in {"UpdateSchedule", "PreviewUpdateSchedule"}:
         schedule_command = UpdateSchedule if command_type == "UpdateSchedule" else PreviewUpdateSchedule
@@ -760,6 +1125,7 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             active=_optional_bool_field(data, "active"),
             return_to_origin=_optional_bool_field(data, "return_to_origin"),
             stops=_optional_node_id_tuple(data),
+            train_stops=_optional_train_stop_tuple(data),
         )
     if command_type == "DeleteSchedule":
         return DeleteSchedule(schedule_id=str(data["schedule_id"]))
@@ -778,6 +1144,7 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
         connections = tuple(_internal_connection_from_dict(item) for item in connections_payload)
         inputs_data = data.get("inputs")
         outputs_data = data.get("outputs")
+        construction_cargo_data = data.get("construction_cargo", data.get("cargo_cost"))
         raw_kind = str(data["kind"])
         try:
             parsed_kind: FacilityComponentKind | str = FacilityComponentKind(raw_kind)
@@ -798,6 +1165,11 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             power_provided=int(data.get("power_provided", 0)),
             inputs=None if inputs_data is None else _facility_cargo_map_from_dict(inputs_data),
             outputs=None if outputs_data is None else _facility_cargo_map_from_dict(outputs_data),
+            construction_cargo=(
+                None
+                if construction_cargo_data is None
+                else _facility_cargo_map_from_dict(construction_cargo_data)
+            ),
             train_capacity=int(data.get("train_capacity", 0)),
             concurrent_loading_limit=int(data.get("concurrent_loading_limit", 1)),
             stored_charge=int(data.get("stored_charge", 0)),
@@ -828,6 +1200,9 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             source_port_id=str(data["source_port_id"]),
             destination_component_id=str(data["destination_component_id"]),
             destination_port_id=str(data["destination_port_id"]),
+            link_type=_resolve_transfer_link_kind(
+                data.get("link_type", data.get("transfer_type", TransferLinkKind.CONVEYOR.value))
+            ),
         )
     if command_type in {"RemoveInternalConnection", "PreviewRemoveInternalConnection"}:
         connection_command = (
@@ -839,6 +1214,11 @@ def command_from_dict(data: dict[str, Any]) -> PlayerCommand:
             node_id=str(data["node_id"]),
             connection_id=str(data["connection_id"]),
         )
+    if command_type in {"SurveySpaceSite", "PreviewSurveySpaceSite"}:
+        survey_command = (
+            SurveySpaceSite if command_type == "SurveySpaceSite" else PreviewSurveySpaceSite
+        )
+        return survey_command(site_id=str(data["site_id"]))
     if command_type in {"DispatchMiningMission", "PreviewDispatchMiningMission"}:
         mission_command = (
             DispatchMiningMission
@@ -899,6 +1279,9 @@ def _internal_connection_from_dict(data: dict[str, Any]) -> InternalConnection:
         source_port_id=str(data["source_port_id"]),
         destination_component_id=str(data["destination_component_id"]),
         destination_port_id=str(data["destination_port_id"]),
+        link_type=_resolve_transfer_link_kind(
+            data.get("link_type", data.get("transfer_type", TransferLinkKind.CONVEYOR.value))
+        ),
     )
 
 
@@ -1075,6 +1458,14 @@ def _validate_track_alignment(alignment: tuple[TrackPoint, ...]) -> None:
             raise ValueError("alignment points must be finite numbers")
 
 
+class CommandValidationError(ValueError):
+    """Validation error with structured fields for preview results."""
+
+    def __init__(self, reason: str, **extra: object) -> None:
+        super().__init__(reason)
+        self.extra = extra
+
+
 def _track_alignment_payload(alignment: tuple[TrackPoint, ...]) -> list[dict[str, float]]:
     """Return a normalized alignment payload for command previews."""
 
@@ -1134,6 +1525,22 @@ def _validate_build_link(
         destination_kind = state.nodes[command.destination].kind
         if origin_kind != NodeKind.GATE_HUB or destination_kind != NodeKind.GATE_HUB:
             raise ValueError("gate links require gate_hub endpoints")
+        for endpoint_node in (origin_node, destination_node):
+            if endpoint_node.construction_project_id is not None:
+                raise CommandValidationError(
+                    "gate_endpoint_under_construction",
+                    node_id=endpoint_node.id,
+                    construction_project_id=endpoint_node.construction_project_id,
+                )
+        for endpoint_world_id in sorted({origin_world_id, destination_world_id}):
+            site_id = f"site_{endpoint_world_id}_reach"
+            site = getattr(state, "space_sites", {}).get(site_id)
+            if site is not None and not site.discovered:
+                raise CommandValidationError(
+                    "destination_not_surveyed",
+                    site_id=site_id,
+                    world_id=endpoint_world_id,
+                )
         travel_ticks = command.travel_ticks if command.travel_ticks is not None else DEFAULT_GATE_TRAVEL_TICKS
         power_required = (
             command.power_required
@@ -1142,9 +1549,9 @@ def _validate_build_link(
         )
         power_source_world_id = command.power_source_world_id or origin_world_id
         if power_source_world_id not in state.worlds:
-            raise ValueError(f"unknown gate power source: {power_source_world_id}")
+            raise ValueError(f"unknown Railgate power source: {power_source_world_id}")
         if power_source_world_id not in {origin_world_id, destination_world_id}:
-            raise ValueError("gate power source must be one of the endpoint worlds")
+            raise ValueError("Railgate power source must be one of the endpoint worlds")
     else:
         raise ValueError(f"unsupported link mode: {command.mode.value}")
 
@@ -1241,12 +1648,12 @@ def _gate_preview_payload(
     power_required: int,
     power_source_world_id: str | None,
 ) -> dict[str, object]:
-    """Return UI-friendly gate context for previews and build results."""
+    """Return UI-friendly Railgate context for previews and build results."""
 
     if command.mode != LinkMode.GATE:
         return {}
     if power_source_world_id is None:
-        raise ValueError("gate power source is required")
+        raise ValueError("Railgate power source is required")
 
     from gaterail.gate import preview_gate_power
 
@@ -1341,7 +1748,34 @@ def _effective_update_next_departure_tick(state: object, schedule: FreightSchedu
 def _schedule_route_stop_ids(command: CreateSchedule | PreviewCreateSchedule) -> tuple[str, ...]:
     """Return the exact required stop sequence for a schedule command."""
 
-    return (command.origin, *command.stops, command.destination)
+    if not command.train_stops:
+        return (command.origin, *command.stops, command.destination)
+
+    stop_ids = [command.origin]
+    stop_ids.extend(stop.node_id for stop in command.train_stops)
+    stop_ids.append(command.destination)
+
+    collapsed: list[str] = []
+    for stop_id in stop_ids:
+        if collapsed and collapsed[-1] == stop_id:
+            continue
+        collapsed.append(stop_id)
+    return tuple(collapsed)
+
+
+def _route_for_schedule_command(state: object, command: CreateSchedule | PreviewCreateSchedule, *, require_operational: bool = True) -> object | None:
+    """Resolve a schedule route using train-stop waypoints when present."""
+
+    stop_ids = _schedule_route_stop_ids(command)
+    if len(stop_ids) < 2:
+        return None
+    return route_through_stops(
+        state,
+        stop_ids[0],
+        tuple(stop_ids[1:-1]),
+        stop_ids[-1],
+        require_operational=require_operational,
+    )
 
 
 def _validate_schedule_stops(state: object, command: CreateSchedule | PreviewCreateSchedule) -> None:
@@ -1350,6 +1784,13 @@ def _validate_schedule_stops(state: object, command: CreateSchedule | PreviewCre
     for stop_id in command.stops:
         if stop_id not in state.nodes:
             raise ValueError(f"unknown schedule stop: {stop_id}")
+    for stop in command.train_stops:
+        if stop.node_id not in state.nodes:
+            raise ValueError(f"unknown schedule stop: {stop.node_id}")
+        if stop.units < 0:
+            raise ValueError("train stop units cannot be negative")
+        if stop.wait_ticks < 0:
+            raise ValueError("train stop wait_ticks cannot be negative")
     stop_ids = _schedule_route_stop_ids(command)
     for index in range(len(stop_ids) - 1):
         if stop_ids[index] == stop_ids[index + 1]:
@@ -1401,7 +1842,7 @@ def _validate_schedule_fields(
     next_departure_tick = _effective_next_departure_tick(state, command)
     if next_departure_tick <= state.tick:
         raise ValueError("schedule next_departure_tick must be in the future")
-    route = route_through_stops(state, command.origin, command.stops, command.destination)
+    route = _route_for_schedule_command(state, command)
     if route is None:
         raise ValueError(f"no route {'->'.join(_schedule_route_stop_ids(command))}")
     if route.travel_ticks <= 0:
@@ -1422,10 +1863,11 @@ def _schedule_payload(
     command: CreateSchedule | PreviewCreateSchedule,
     *,
     next_departure_tick: int,
+    include_empty_train_stops: bool = False,
 ) -> dict[str, object]:
     """Return a normalized CreateSchedule command payload."""
 
-    return {
+    payload: dict[str, object] = {
         "type": "CreateSchedule",
         "schedule_id": command.schedule_id,
         "train_id": command.train_id,
@@ -1440,6 +1882,19 @@ def _schedule_payload(
         "return_to_origin": command.return_to_origin,
         "stops": list(command.stops),
     }
+    if command.train_stops or include_empty_train_stops:
+        payload["train_stops"] = [
+            {
+                "node_id": s.node_id,
+                "action": s.action.value,
+                "cargo_type": None if s.cargo_type is None else s.cargo_type.value,
+                "units": s.units,
+                "wait_condition": s.wait_condition.value,
+                "wait_ticks": s.wait_ticks,
+            }
+            for s in command.train_stops
+        ]
+    return payload
 
 
 def _schedule_update_draft(
@@ -1474,6 +1929,9 @@ def _schedule_update_draft(
             else command.return_to_origin
         ),
         stops=schedule.stops if command.stops is None else command.stops,
+        train_stops=(
+            schedule.train_stops if command.train_stops is None else command.train_stops
+        ),
     )
 
 
@@ -1485,7 +1943,11 @@ def _schedule_update_payload(
 ) -> dict[str, object]:
     """Return a normalized UpdateSchedule command payload."""
 
-    payload = _schedule_payload(draft, next_departure_tick=next_departure_tick)
+    payload = _schedule_payload(
+        draft,
+        next_departure_tick=next_departure_tick,
+        include_empty_train_stops=command.train_stops is not None,
+    )
     payload["type"] = "UpdateSchedule"
     payload["schedule_id"] = command.schedule_id
     return payload
@@ -1816,11 +2278,9 @@ def _schedule_route_debug_payload(
         payload["validation_errors"] = _schedule_validation_errors(reason)
 
     if all(node_id in state.nodes for node_id in stop_ids):
-        structural_route = route_through_stops(
+        structural_route = _route_for_schedule_command(
             state,
-            command.origin,
-            command.stops,
-            command.destination,
+            command,
             require_operational=False,
         )
         if structural_route is not None and structural_route.travel_ticks > 0:
@@ -1839,12 +2299,14 @@ def _preview_error(command_type: str, target_id: str, exc: ValueError) -> dict[s
     """Return a non-mutating invalid preview result."""
 
     reason = str(exc)
+    extra = exc.extra if isinstance(exc, CommandValidationError) else {}
     return command_result(
         command_type,
         ok=False,
         target_id=target_id,
         message=reason,
         reason=reason,
+        **extra,
     )
 
 
@@ -1866,6 +2328,26 @@ def _facility_kind_value(kind: FacilityComponentKind | str) -> str:
     if isinstance(kind, FacilityComponentKind):
         return kind.value
     return str(kind)
+
+
+def _transfer_link_kind_value(kind: TransferLinkKind | str) -> str:
+    """Return a stable string value for one transfer-link kind payload."""
+
+    if isinstance(kind, TransferLinkKind):
+        return kind.value
+    return str(kind)
+
+
+def _resolve_transfer_link_kind(kind: TransferLinkKind | str) -> TransferLinkKind:
+    """Parse a transfer-link kind or raise a command-facing validation error."""
+
+    if isinstance(kind, TransferLinkKind):
+        return kind
+    raw_kind = str(kind)
+    try:
+        return TransferLinkKind(raw_kind)
+    except ValueError as exc:
+        raise ValueError(f"unknown transfer link kind: {raw_kind}") from exc
 
 
 def _resolve_facility_component_kind(kind: FacilityComponentKind | str) -> FacilityComponentKind:
@@ -1919,6 +2401,40 @@ def _command_failure(
         message=message,
         reason=reason,
         **extra,
+    )
+
+
+def _survey_site_payload(
+    state: object,
+    command: SurveySpaceSite | PreviewSurveySpaceSite,
+) -> tuple[dict[str, object] | None, dict[str, object]]:
+    """Validate a site survey command and return command-facing payload fields."""
+
+    site = getattr(state, "space_sites", {}).get(command.site_id)
+    if site is None:
+        return (
+            _command_failure(
+                command.type,
+                command.site_id,
+                reason="unknown_space_site",
+                message=f"unknown space site: {command.site_id}",
+            ),
+            {},
+        )
+    return (
+        None,
+        {
+            "site": site,
+            "resource_id": site.resource_id,
+            "travel_ticks": int(site.travel_ticks),
+            "base_yield": int(site.base_yield),
+            "discovered": bool(site.discovered),
+            "site_cargo_type": site.cargo_type.value if site.cargo_type is not None else None,
+            "normalized_command": {
+                "type": "SurveySpaceSite",
+                "site_id": command.site_id,
+            },
+        },
     )
 
 
@@ -2092,6 +2608,21 @@ def _validate_mining_mission(
             ),
             {},
         )
+    if not site.discovered:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="site_not_surveyed",
+                message=f"space site not surveyed: {command.site_id}",
+                site_id=command.site_id,
+                normalized_command={
+                    "type": "SurveySpaceSite",
+                    "site_id": command.site_id,
+                },
+            ),
+            {},
+        )
     launch_node = state.nodes.get(command.launch_node_id)
     if launch_node is None:
         return (
@@ -2111,6 +2642,30 @@ def _validate_mining_mission(
                 target_id,
                 reason="unknown_return_node",
                 message=f"unknown return node: {command.return_node_id}",
+            ),
+            {},
+        )
+    if launch_node.construction_project_id is not None:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="extraction_under_construction",
+                message=f"launch node under construction: {command.launch_node_id}",
+                node_id=command.launch_node_id,
+                construction_project_id=launch_node.construction_project_id,
+            ),
+            {},
+        )
+    if return_node.construction_project_id is not None:
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="return_under_construction",
+                message=f"return node under construction: {command.return_node_id}",
+                node_id=command.return_node_id,
+                construction_project_id=return_node.construction_project_id,
             ),
             {},
         )
@@ -2212,15 +2767,17 @@ def _validate_mining_mission(
 
 
 def _missing_component_build_cargo(
+    state: object,
     node: NetworkNode,
     required_cargo: dict[CargoType, int],
 ) -> dict[CargoType, int]:
-    """Return any node inventory shortfall for an immediate component build."""
+    """Return build-cargo shortfall from construction inventory plus node stock."""
 
+    construction_inventory = getattr(state, "construction_inventory", {})
     return {
-        cargo_type: units - node.stock(cargo_type)
+        cargo_type: units - node.stock(cargo_type) - int(construction_inventory.get(cargo_type, 0))
         for cargo_type, units in required_cargo.items()
-        if node.stock(cargo_type) < units
+        if node.stock(cargo_type) + int(construction_inventory.get(cargo_type, 0)) < units
     }
 
 
@@ -2228,13 +2785,35 @@ def _insufficient_component_cargo_message(
     kind: FacilityComponentKind,
     missing: dict[CargoType, int],
 ) -> str:
-    """Return a stable error string for component cargo shortages."""
+    """Return a stable error string for component construction-cargo shortages."""
 
     parts = ", ".join(
         f"{cargo_type.value} {units}"
         for cargo_type, units in sorted(missing.items(), key=lambda item: item[0].value)
     )
-    return f"insufficient node inventory for {kind.value}: missing {parts}"
+    return f"insufficient construction parts for {kind.value}: missing {parts}"
+
+
+def _consume_construction_cargo(
+    state: object,
+    node: NetworkNode,
+    required_cargo: dict[CargoType, int],
+) -> None:
+    """Consume construction cargo, preferring the player construction inventory."""
+
+    construction_inventory = getattr(state, "construction_inventory", {})
+    for cargo_type, units in required_cargo.items():
+        remaining = int(units)
+        from_inventory = min(remaining, int(construction_inventory.get(cargo_type, 0)))
+        if from_inventory > 0:
+            updated = int(construction_inventory.get(cargo_type, 0)) - from_inventory
+            if updated:
+                construction_inventory[cargo_type] = updated
+            else:
+                construction_inventory.pop(cargo_type, None)
+            remaining -= from_inventory
+        if remaining > 0:
+            node.remove_inventory(cargo_type, remaining)
 
 
 def _validate_facility_component(
@@ -2271,7 +2850,11 @@ def _validate_facility_component(
 
     inputs = dict(command.inputs or {})
     outputs = dict(command.outputs or {})
-    cargo_cost = facility_component_build_cargo(kind)
+    cargo_cost = (
+        dict(command.construction_cargo)
+        if command.construction_cargo is not None
+        else facility_component_build_cargo(kind)
+    )
     _validate_facility_cargo_quantities(inputs, "input")
     _validate_facility_cargo_quantities(outputs, "output")
 
@@ -2342,7 +2925,7 @@ def _validate_facility_component(
         build_cost=float(facility_component_build_cost(kind)),
     )
     _validate_inline_facility_connections(node, component, command.connections)
-    missing_cargo = _missing_component_build_cargo(node, cargo_cost)
+    missing_cargo = _missing_component_build_cargo(state, node, cargo_cost)
     if missing_cargo:
         raise ValueError(_insufficient_component_cargo_message(kind, missing_cargo))
     return component, facility_component_build_cost(kind), cargo_cost, command.connections
@@ -2403,6 +2986,7 @@ def _facility_component_payload(
         "stored_charge": int(component.stored_charge),
         "discharge_per_tick": int(component.discharge_per_tick),
         "cargo_cost": _plain_cargo_cost(cargo_cost),
+        "construction_cargo": _plain_cargo_cost(cargo_cost),
         "inputs": _plain_cargo_cost(component.inputs),
         "outputs": _plain_cargo_cost(component.outputs),
         "ports": [
@@ -2422,6 +3006,7 @@ def _facility_component_payload(
                 "source_port_id": connection.source_port_id,
                 "destination_component_id": connection.destination_component_id,
                 "destination_port_id": connection.destination_port_id,
+                "link_type": _transfer_link_kind_value(connection.link_type),
             }
             for connection in connections
         ],
@@ -2603,6 +3188,7 @@ def _connection_from_command(
         source_port_id=command.source_port_id,
         destination_component_id=command.destination_component_id,
         destination_port_id=command.destination_port_id,
+        link_type=_resolve_transfer_link_kind(command.link_type),
     )
 
 
@@ -2616,6 +3202,8 @@ def _connection_payload(connection: InternalConnection, command_type: str = "Bui
         "source_port_id": connection.source_port_id,
         "destination_component_id": connection.destination_component_id,
         "destination_port_id": connection.destination_port_id,
+        "link_type": _transfer_link_kind_value(connection.link_type),
+        "transfer_profile": transfer_link_profile_payload(connection.link_type),
     }
 
 
@@ -2663,6 +3251,9 @@ def _validate_internal_connection(facility: Facility, connection: InternalConnec
         and source_port.cargo_type != destination_port.cargo_type
     ):
         raise ValueError("internal connection cargo types must match")
+    cargo_type = infer_connection_cargo(source_component, source_port, destination_component, destination_port)
+    if cargo_type is not None and not transfer_link_supports_cargo(connection.link_type, cargo_type):
+        raise ValueError(f"{_transfer_link_kind_value(connection.link_type)} cannot move {cargo_type.value}")
 
     destination_endpoint = (connection.destination_component_id, connection.destination_port_id)
     for existing in facility.connections.values():
@@ -2682,8 +3273,1344 @@ def _validate_remove_internal_connection(
     return node, facility, facility.connections[command.connection_id]
 
 
+def _require_operational_area(state: object, area_id: str) -> OperationalAreaState:
+    """Return a persisted operational area, creating migrated grids when needed."""
+
+    from gaterail.operational import ensure_operational_areas
+
+    ensure_operational_areas(state)
+    area = state.operational_areas.get(area_id)
+    if area is None:
+        raise ValueError(f"unknown operational area: {area_id}")
+    return area
+
+
+def _local_area_payload(state: object, area: OperationalAreaState) -> dict[str, object]:
+    """Return one local operational area command payload."""
+
+    from gaterail.operational import operational_area_payload
+
+    return operational_area_payload(state, area)
+
+
+def _local_entity_payload(
+    state: object,
+    area: OperationalAreaState,
+    entity: OperationalPlacedEntity,
+) -> dict[str, object]:
+    """Return one local operational entity command payload."""
+
+    from gaterail.operational import operational_entity_payload
+
+    return operational_entity_payload(state, area, entity)
+
+
+def _slug_identifier(value: str) -> str:
+    """Return a conservative id fragment for generated local commands."""
+
+    slug = "".join(ch if ch.isalnum() else "_" for ch in value.strip().lower())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_") or "item"
+
+
+def _local_signal_default_node_id(
+    state: object,
+    entity: OperationalPlacedEntity,
+    link_id: str,
+) -> str | None:
+    """Choose the local track entry node when Godot only supplies a track entity."""
+
+    if entity.input_ports:
+        return entity.input_ports[0]
+    link = state.links.get(link_id)
+    return None if link is None else link.origin
+
+
+def _local_signal_id(
+    state: object,
+    command: LocalValidateSignal | LocalPlaceSignal,
+    link_id: str,
+    node_id: str | None,
+) -> str:
+    """Return an explicit or generated signal id."""
+
+    if command.signal_id.strip():
+        return command.signal_id.strip()
+    base = "%s_%s_%s_signal" % (
+        _slug_identifier(link_id),
+        _slug_identifier(node_id or "block"),
+        command.kind.value,
+    )
+    signal_id = base
+    index = 2
+    while signal_id in state.track_signals:
+        signal_id = f"{base}_{index}"
+        index += 1
+    return signal_id
+
+
+def _local_signal_place_payload(
+    area: OperationalAreaState,
+    entity: OperationalPlacedEntity,
+    signal: TrackSignal,
+) -> dict[str, object]:
+    """Return the local commit command for a validated signal preview."""
+
+    return {
+        "type": "local.place_signal",
+        "operational_area_id": area.id,
+        "track_entity_id": entity.id,
+        "signal_id": signal.id,
+        "kind": signal.kind.value,
+        "node_id": signal.node_id,
+        "active": signal.active,
+    }
+
+
+def _validate_local_signal(
+    state: object,
+    command: LocalValidateSignal | LocalPlaceSignal,
+) -> tuple[dict[str, object] | None, OperationalAreaState | None, OperationalPlacedEntity | None, TrackSignal | None]:
+    """Validate a local track-signal command and normalize it to TrackSignal."""
+
+    try:
+        area = _require_operational_area(state, command.operational_area_id)
+    except ValueError as exc:
+        return (
+            _command_failure(
+                command.type,
+                command.operational_area_id,
+                reason="unknown_operational_area",
+                message=str(exc),
+            ),
+            None,
+            None,
+            None,
+        )
+
+    entity: OperationalPlacedEntity | None = None
+    if command.track_entity_id.strip():
+        entity = area.entities.get(command.track_entity_id.strip())
+    elif command.link_id.strip():
+        for candidate in area.entities.values():
+            if candidate.link_id == command.link_id.strip():
+                entity = candidate
+                break
+    if entity is None:
+        target_id = command.track_entity_id.strip() or command.link_id.strip() or area.id
+        return (
+            _command_failure(
+                command.type,
+                target_id,
+                reason="unknown_track_entity",
+                message=f"unknown local track entity: {target_id}",
+            ),
+            area,
+            None,
+            None,
+        )
+    if entity.entity_type != OperationalEntityType.TRACK_SEGMENT or entity.link_id is None:
+        return (
+            _command_failure(
+                command.type,
+                entity.id,
+                reason="not_track_entity",
+                message=f"local entity {entity.id} is not a track segment",
+            ),
+            area,
+            entity,
+            None,
+        )
+    link_id = command.link_id.strip() or entity.link_id
+    if link_id != entity.link_id:
+        return (
+            _command_failure(
+                command.type,
+                entity.id,
+                reason="track_link_mismatch",
+                message=f"local track {entity.id} backs {entity.link_id}, not {link_id}",
+            ),
+            area,
+            entity,
+            None,
+        )
+
+    node_id = command.node_id or _local_signal_default_node_id(state, entity, link_id)
+    signal_id = _local_signal_id(state, command, link_id, node_id)
+    if signal_id in state.track_signals:
+        return (
+            _command_failure(
+                command.type,
+                signal_id,
+                reason="duplicate_track_signal_id",
+                message=f"duplicate track signal id: {signal_id}",
+            ),
+            area,
+            entity,
+            None,
+        )
+
+    try:
+        signal = _validate_track_signal(
+            state,
+            BuildTrackSignal(
+                signal_id=signal_id,
+                link_id=link_id,
+                kind=command.kind,
+                node_id=node_id,
+                active=command.active,
+            ),
+        )
+    except ValueError as exc:
+        return (
+            _command_failure(
+                command.type,
+                signal_id,
+                reason="invalid_track_signal",
+                message=str(exc),
+            ),
+            area,
+            entity,
+            None,
+        )
+    return None, area, entity, signal
+
+
+def _local_switch_payloads(state: object) -> list[dict[str, object]]:
+    """Return current local rail switch diagnostics."""
+
+    from gaterail.local_rail import build_local_rail_diagnostics
+
+    local_rail = build_local_rail_diagnostics(state)
+    switches = local_rail.get("switches", [])
+    if not isinstance(switches, list):
+        return []
+    return [dict(item) for item in switches if isinstance(item, dict)]
+
+
+def _find_local_switch(
+    state: object,
+    command: LocalSetSwitchRoute,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Find the abstract local switch targeted by a route-control command."""
+
+    requested_switch_id = command.switch_id.strip()
+    requested_node_id = command.node_id.strip()
+    if not requested_switch_id and requested_node_id:
+        requested_switch_id = f"{command.operational_area_id}:{requested_node_id}:switch"
+    if not requested_switch_id:
+        return (
+            _command_failure(
+                command.type,
+                command.operational_area_id,
+                reason="missing_switch",
+                message="local switch route command requires switch_id or node_id",
+            ),
+            None,
+        )
+    for switch in _local_switch_payloads(state):
+        if str(switch.get("operational_area_id", "")) != command.operational_area_id:
+            continue
+        if str(switch.get("id", "")) == requested_switch_id:
+            return None, switch
+    return (
+        _command_failure(
+            command.type,
+            requested_switch_id,
+            reason="unknown_switch",
+            message=f"unknown local switch: {requested_switch_id}",
+        ),
+        None,
+    )
+
+
+def _validate_local_switch_route(
+    state: object,
+    command: LocalSetSwitchRoute,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Validate a selected route for one local switch."""
+
+    failure, switch = _find_local_switch(state, command)
+    if failure is not None or switch is None:
+        return failure, None
+    link_ids = switch.get("link_ids", [])
+    if not isinstance(link_ids, list) or command.selected_link_id not in [str(item) for item in link_ids]:
+        return (
+            _command_failure(
+                command.type,
+                str(switch.get("id", command.operational_area_id)),
+                reason="invalid_switch_route",
+                message=(
+                    f"link {command.selected_link_id} is not a route option for "
+                    f"local switch {switch.get('id', '')}"
+                ),
+            ),
+            switch,
+        )
+    return None, switch
+
+
+def _resolve_local_entity_type(raw: str) -> OperationalEntityType:
+    """Parse local entity type aliases used by Godot and stdio clients."""
+
+    aliases = {
+        "mine": OperationalEntityType.EXTRACTOR,
+        "extractor": OperationalEntityType.EXTRACTOR,
+        "rail_track": OperationalEntityType.TRACK_SEGMENT,
+        "track": OperationalEntityType.TRACK_SEGMENT,
+        "track_segment": OperationalEntityType.TRACK_SEGMENT,
+        "station": OperationalEntityType.STATION_PLATFORM,
+        "station_platform": OperationalEntityType.STATION_PLATFORM,
+        "loader": OperationalEntityType.LOADER,
+        "unloader": OperationalEntityType.UNLOADER,
+        "hopper": OperationalEntityType.HOPPER,
+        "buffer": OperationalEntityType.HOPPER,
+        "storage": OperationalEntityType.STORAGE,
+        "warehouse": OperationalEntityType.STORAGE,
+        "transfer_link": OperationalEntityType.TRANSFER_LINK,
+        "conveyor": OperationalEntityType.TRANSFER_LINK,
+        "refinery": OperationalEntityType.REFINERY,
+        "factory": OperationalEntityType.FACTORY,
+        "assembler": OperationalEntityType.FACTORY,
+        "railgate_terminal": OperationalEntityType.RAILGATE_TERMINAL,
+        "terminal": OperationalEntityType.RAILGATE_TERMINAL,
+    }
+    key = str(raw).strip().lower()
+    if key in aliases:
+        return aliases[key]
+    try:
+        return OperationalEntityType(key)
+    except ValueError as exc:
+        raise ValueError(f"unknown local entity type: {raw}") from exc
+
+
+def _local_default_footprint(entity_type: OperationalEntityType) -> tuple[int, int]:
+    """Return default local footprint for command placement."""
+
+    if entity_type in {
+        OperationalEntityType.EXTRACTOR,
+        OperationalEntityType.STATION_PLATFORM,
+        OperationalEntityType.REFINERY,
+        OperationalEntityType.FACTORY,
+        OperationalEntityType.RAILGATE_TERMINAL,
+    }:
+        return 2, 2
+    return 1, 1
+
+
+def _local_default_rate(entity_type: OperationalEntityType) -> int:
+    """Return a conservative default build rate for local components."""
+
+    if entity_type in {OperationalEntityType.LOADER, OperationalEntityType.UNLOADER}:
+        return 20
+    if entity_type in {OperationalEntityType.HOPPER, OperationalEntityType.STORAGE}:
+        return 12
+    if entity_type == OperationalEntityType.RAILGATE_TERMINAL:
+        return 4
+    return 0
+
+
+def _local_visual_hint(entity_type: OperationalEntityType) -> str:
+    """Return the legacy visual kind to preserve existing Godot/readout contracts."""
+
+    return {
+        OperationalEntityType.TRACK_SEGMENT: "rail_track",
+        OperationalEntityType.STORAGE: "warehouse",
+    }.get(entity_type, entity_type.value)
+
+
+_VALID_LOCAL_PLATFORM_SIDES: frozenset[str] = frozenset({"north", "east", "south", "west"})
+
+
+def _local_path_cells_payload(
+    cells: tuple[tuple[int, int, int], ...],
+    *,
+    include_z: bool,
+) -> list[dict[str, int]]:
+    """Return JSON-safe path cells."""
+
+    payload: list[dict[str, int]] = []
+    for x, y, z in cells:
+        cell = {"x": int(x), "y": int(y)}
+        if include_z:
+            cell["z"] = int(z)
+        payload.append(cell)
+    return payload
+
+
+def _local_build_options() -> list[dict[str, object]]:
+    """Return static local build options exposed to clients."""
+
+    options: list[tuple[OperationalEntityType, str]] = [
+        (OperationalEntityType.EXTRACTOR, "Mine / extractor"),
+        (OperationalEntityType.TRACK_SEGMENT, "Track segment"),
+        (OperationalEntityType.STATION_PLATFORM, "Station platform"),
+        (OperationalEntityType.LOADER, "Loader"),
+        (OperationalEntityType.UNLOADER, "Unloader"),
+        (OperationalEntityType.HOPPER, "Hopper / buffer"),
+        (OperationalEntityType.STORAGE, "Storage / warehouse"),
+        (OperationalEntityType.TRANSFER_LINK, "Transfer link / conveyor"),
+        (OperationalEntityType.REFINERY, "Refinery"),
+        (OperationalEntityType.FACTORY, "Factory / assembler"),
+        (OperationalEntityType.RAILGATE_TERMINAL, "Railgate terminal"),
+    ]
+    payload: list[dict[str, object]] = []
+    for entity_type, label in options:
+        width, height = _local_default_footprint(entity_type)
+        component_kind = _local_component_kind(entity_type)
+        payload.append(
+            {
+                "entity_type": entity_type.value,
+                "label": label,
+                "footprint": {"width": width, "height": height},
+                "valid_rotations": [0, 90, 180, 270],
+                "kind": _local_visual_hint(entity_type),
+                "component_kind": None if component_kind is None else component_kind.value,
+                "valid_platform_sides": ["north", "east", "south", "west"],
+                "cash_cost": 0.0 if component_kind is None else facility_component_build_cost(component_kind),
+                "cargo_cost": (
+                    {}
+                    if component_kind is None
+                    else _plain_cargo_cost(facility_component_build_cargo(component_kind))
+                ),
+            }
+        )
+    return payload
+
+
+def _local_component_kind(entity_type: OperationalEntityType) -> FacilityComponentKind | None:
+    """Return the facility component kind backed by one local entity type."""
+
+    return {
+        OperationalEntityType.LOADER: FacilityComponentKind.LOADER,
+        OperationalEntityType.UNLOADER: FacilityComponentKind.UNLOADER,
+        OperationalEntityType.HOPPER: FacilityComponentKind.STORAGE_BAY,
+        OperationalEntityType.STORAGE: FacilityComponentKind.WAREHOUSE_BAY,
+        OperationalEntityType.REFINERY: FacilityComponentKind.REFINERY,
+        OperationalEntityType.FACTORY: FacilityComponentKind.FABRICATOR,
+        OperationalEntityType.RAILGATE_TERMINAL: FacilityComponentKind.GATE_INTERFACE,
+        OperationalEntityType.STATION_PLATFORM: FacilityComponentKind.PLATFORM,
+        OperationalEntityType.EXTRACTOR: FacilityComponentKind.EXTRACTOR_HEAD,
+    }.get(entity_type)
+
+
+def _local_node_kind(entity_type: OperationalEntityType) -> NodeKind:
+    """Return a macro-safe node kind for standalone local placements."""
+
+    if entity_type == OperationalEntityType.EXTRACTOR:
+        return NodeKind.EXTRACTOR
+    if entity_type == OperationalEntityType.RAILGATE_TERMINAL:
+        return NodeKind.GATE_HUB
+    if entity_type == OperationalEntityType.STORAGE:
+        return NodeKind.WAREHOUSE
+    if entity_type in {OperationalEntityType.REFINERY, OperationalEntityType.FACTORY}:
+        return NodeKind.INDUSTRY
+    return NodeKind.DEPOT
+
+
+def _local_placement_entity_id(command: LocalValidatePlacement | LocalPlaceEntity, entity_type: OperationalEntityType) -> str:
+    """Return a stable id for one local placement command."""
+
+    if command.entity_id.strip():
+        return command.entity_id.strip()
+    if command.component_id:
+        return command.component_id
+    if command.link_id:
+        return f"{command.link_id}:track" if entity_type == OperationalEntityType.TRACK_SEGMENT else command.link_id
+    return f"{entity_type.value}_{command.x}_{command.y}"
+
+
+def _local_component_id(command: LocalValidatePlacement | LocalPlaceEntity, entity_id: str) -> str:
+    """Return component id used by component-backed local placements."""
+
+    return command.component_id.strip() if command.component_id else entity_id
+
+
+def _local_entity_for_command(
+    state: object,
+    area: OperationalAreaState,
+    command: LocalValidatePlacement | LocalPlaceEntity,
+    entity_type: OperationalEntityType,
+    entity_id: str,
+) -> OperationalPlacedEntity:
+    """Build a prospective persisted entity from one local placement command."""
+
+    width, height = _local_default_footprint(entity_type)
+    if command.width > 0:
+        width = command.width
+    if command.height > 0:
+        height = command.height
+    owner_node_id = command.owner_node_id
+    component_id: str | None = None
+    link_id = command.link_id
+    input_ports: tuple[str, ...] = ()
+    output_ports: tuple[str, ...] = ()
+    blocks_occupancy = entity_type != OperationalEntityType.TRANSFER_LINK
+
+    component_kind = _local_component_kind(entity_type)
+    if owner_node_id is not None and component_kind is not None:
+        component_id = _local_component_id(command, entity_id)
+        ports = facility_component_default_ports(component_kind, component_id)
+        input_ports = tuple(port.id for port in ports if port.direction == PortDirection.INPUT)
+        output_ports = tuple(port.id for port in ports if port.direction == PortDirection.OUTPUT)
+    if entity_type == OperationalEntityType.TRACK_SEGMENT:
+        link_id = command.link_id or entity_id
+        input_ports = (command.origin_node_id,) if command.origin_node_id else ()
+        output_ports = (command.destination_node_id,) if command.destination_node_id else ()
+
+    return OperationalPlacedEntity(
+        id=entity_id,
+        entity_type=entity_type,
+        world_id=area.world_id,
+        x=int(command.x),
+        y=int(command.y),
+        rotation=int(command.rotation),
+        width=width,
+        height=height,
+        path_cells=command.path_cells if entity_type == OperationalEntityType.TRACK_SEGMENT else (),
+        platform_side=None if command.platform_side is None else command.platform_side.strip().lower(),
+        adjacent_to_entity_id=command.adjacent_to_entity_id,
+        adjacent_port_id=command.adjacent_port_id,
+        owner_node_id=owner_node_id,
+        component_id=component_id,
+        link_id=link_id,
+        input_ports=input_ports,
+        output_ports=output_ports,
+        visual_hint=_local_visual_hint(entity_type),
+        blocks_occupancy=blocks_occupancy,
+    )
+
+
+def _local_cells_outside(area: OperationalAreaState, entity: OperationalPlacedEntity) -> bool:
+    """Return whether an entity footprint extends beyond an area."""
+
+    return any(
+        x < 0 or y < 0 or x >= area.width or y >= area.height
+        for x, y, _ in entity.occupied_cells()
+    )
+
+
+def _local_overlap(
+    area: OperationalAreaState,
+    entity: OperationalPlacedEntity,
+    *,
+    exclude_entity_id: str | None = None,
+) -> list[dict[str, object]]:
+    """Return occupied-cell conflicts for a prospective entity."""
+
+    if not entity.blocks_occupancy:
+        return []
+    occupied = area.occupied_cells(exclude_entity_id=exclude_entity_id)
+    conflicts: list[dict[str, object]] = []
+    for x, y, z in entity.occupied_cells():
+        blocker = occupied.get((x, y, z))
+        if blocker is not None:
+            conflicts.append({"x": x, "y": y, "z": z, "entity_id": blocker})
+    return conflicts
+
+
+def _local_adjacent_side(
+    entity: OperationalPlacedEntity,
+    anchor: OperationalPlacedEntity,
+) -> str | None:
+    """Return the side of ``anchor`` touched by ``entity`` cells, if any."""
+
+    anchor_cells = set(anchor.occupied_cells())
+    for x, y, z in entity.occupied_cells():
+        for ax, ay, az in anchor_cells:
+            if z != az:
+                continue
+            if x == ax - 1 and y == ay:
+                return "west"
+            if x == ax + 1 and y == ay:
+                return "east"
+            if y == ay - 1 and x == ax:
+                return "north"
+            if y == ay + 1 and x == ax:
+                return "south"
+    return None
+
+
+def _local_entity_port_ids(entity: OperationalPlacedEntity) -> set[str]:
+    """Return exposed local port ids for adjacency validation."""
+
+    return set(entity.input_ports) | set(entity.output_ports) | set(entity.connection_ports)
+
+
+def _validate_local_adjacency(
+    command_type: str,
+    entity: OperationalPlacedEntity,
+    area: OperationalAreaState,
+) -> dict[str, object] | None:
+    """Validate optional port-adjacent placement hints."""
+
+    if entity.platform_side is not None and entity.platform_side not in _VALID_LOCAL_PLATFORM_SIDES:
+        return _local_validation_failure(
+            command_type,
+            entity.id,
+            "invalid_platform_side",
+            "platform_side must be one of north, east, south, or west",
+        )
+    if entity.adjacent_to_entity_id is None:
+        return None
+    anchor = area.entities.get(entity.adjacent_to_entity_id)
+    if anchor is None:
+        return _local_validation_failure(
+            command_type,
+            entity.id,
+            "unknown_adjacent_entity",
+            f"unknown adjacent local entity: {entity.adjacent_to_entity_id}",
+        )
+    if entity.adjacent_port_id is not None and entity.adjacent_port_id not in _local_entity_port_ids(anchor):
+        return _local_validation_failure(
+            command_type,
+            entity.id,
+            "unknown_adjacent_port",
+            f"unknown adjacent port: {entity.adjacent_port_id}",
+        )
+    actual_side = _local_adjacent_side(entity, anchor)
+    if actual_side is None:
+        return _local_validation_failure(
+            command_type,
+            entity.id,
+            "not_port_adjacent",
+            f"local entity {entity.id} is not adjacent to {anchor.id}",
+        )
+    if entity.platform_side is None:
+        entity.platform_side = actual_side
+    elif entity.platform_side != actual_side:
+        return _local_validation_failure(
+            command_type,
+            entity.id,
+            "not_port_adjacent",
+            f"local entity {entity.id} is on {actual_side}, not {entity.platform_side}",
+        )
+    return None
+
+
+def _local_node_storage_like(node: NetworkNode) -> bool:
+    """Return whether a node has local storage/buffer components for handling."""
+
+    if node.facility is None:
+        return False
+    return any(
+        component.kind
+        in {
+            FacilityComponentKind.STORAGE_BAY,
+            FacilityComponentKind.WAREHOUSE_BAY,
+            FacilityComponentKind.EXTRACTOR_HEAD,
+            FacilityComponentKind.GATE_INTERFACE,
+            FacilityComponentKind.REFINERY,
+            FacilityComponentKind.FABRICATOR,
+        }
+        for component in node.facility.components.values()
+    )
+
+
+def _local_validation_failure(
+    command_type: str,
+    target_id: str,
+    reason: str,
+    message: str,
+    **extra: object,
+) -> dict[str, object]:
+    """Return a structured local placement failure."""
+
+    return _command_failure(command_type, target_id, reason=reason, message=message, **extra)
+
+
+def _validate_local_placement(
+    state: object,
+    command: LocalValidatePlacement | LocalPlaceEntity,
+) -> tuple[dict[str, object] | None, OperationalAreaState | None, OperationalPlacedEntity | None, float, dict[CargoType, int], object | None]:
+    """Validate local placement and return backing command metadata."""
+
+    try:
+        area = _require_operational_area(state, command.operational_area_id)
+        entity_type = _resolve_local_entity_type(command.entity_type)
+    except ValueError as exc:
+        target = command.entity_id or command.entity_type
+        return _local_validation_failure(command.type, target, str(exc), str(exc)), None, None, 0.0, {}, None
+
+    entity_id = _local_placement_entity_id(command, entity_type)
+    if entity_id in area.entities:
+        return (
+            _local_validation_failure(
+                command.type,
+                entity_id,
+                "duplicate_entity_id",
+                f"duplicate local entity id: {entity_id}",
+            ),
+            area,
+            None,
+            0.0,
+            {},
+            None,
+        )
+    if int(command.rotation) % 90 != 0:
+        return (
+            _local_validation_failure(
+                command.type,
+                entity_id,
+                "invalid_rotation",
+                "local entity rotation must be one of 0, 90, 180, or 270",
+            ),
+            area,
+            None,
+            0.0,
+            {},
+            None,
+        )
+
+    entity = _local_entity_for_command(state, area, command, entity_type, entity_id)
+    if _local_cells_outside(area, entity):
+        return (
+            _local_validation_failure(
+                command.type,
+                entity_id,
+                "outside_grid",
+                "local entity footprint is outside the operational grid",
+            ),
+            area,
+            entity,
+            0.0,
+            {},
+            None,
+        )
+    conflicts = _local_overlap(area, entity)
+    if conflicts:
+        return (
+            _local_validation_failure(
+                command.type,
+                entity_id,
+                "occupied_cells",
+                "local entity overlaps occupied cells",
+                occupied_cells=conflicts,
+            ),
+            area,
+            entity,
+            0.0,
+            {},
+            None,
+            )
+    adjacency_failure = _validate_local_adjacency(command.type, entity, area)
+    if adjacency_failure is not None:
+        return adjacency_failure, area, entity, 0.0, {}, None
+
+    cost = 0.0
+    cargo_cost: dict[CargoType, int] = {}
+    backing_command: object | None = None
+
+    if entity_type == OperationalEntityType.TRACK_SEGMENT:
+        if not command.origin_node_id or not command.destination_node_id:
+            return (
+                _local_validation_failure(
+                    command.type,
+                    entity_id,
+                    "missing_track_endpoints",
+                    "track segment placement requires origin_node_id and destination_node_id",
+                ),
+                area,
+                entity,
+                0.0,
+                {},
+                None,
+            )
+        backing_command = BuildLink(
+            link_id=command.link_id or entity_id,
+            origin=command.origin_node_id,
+            destination=command.destination_node_id,
+            mode=LinkMode.RAIL,
+            travel_ticks=1,
+            capacity_per_tick=DEFAULT_RAIL_CAPACITY_PER_TICK,
+        )
+        try:
+            _, _, _, _, cost, _ = _validate_build_link(state, backing_command)
+        except ValueError as exc:
+            return _local_validation_failure(command.type, entity_id, "invalid_track", str(exc)), area, entity, 0.0, {}, None
+    elif entity.owner_node_id is not None:
+        if entity.owner_node_id not in state.nodes:
+            return (
+                _local_validation_failure(
+                    command.type,
+                    entity_id,
+                    "unknown_owner_node",
+                    f"unknown owner node: {entity.owner_node_id}",
+                ),
+                area,
+                entity,
+                0.0,
+                {},
+                None,
+            )
+        node = state.nodes[entity.owner_node_id]
+        if node.world_id != area.world_id:
+            return (
+                _local_validation_failure(
+                    command.type,
+                    entity_id,
+                    "owner_node_wrong_area",
+                    f"owner node {node.id} is not in operational area {area.id}",
+                ),
+                area,
+                entity,
+                0.0,
+                {},
+                None,
+            )
+        component_kind = _local_component_kind(entity_type)
+        if component_kind is None:
+            return (
+                _local_validation_failure(
+                    command.type,
+                    entity_id,
+                    "unsupported_owner_placement",
+                    f"{entity_type.value} cannot be placed on an existing owner node",
+                ),
+                area,
+                entity,
+                0.0,
+                {},
+                None,
+            )
+        if entity_type in {OperationalEntityType.LOADER, OperationalEntityType.UNLOADER} and not _local_node_storage_like(node):
+            return (
+                _local_validation_failure(
+                    command.type,
+                    entity_id,
+                    "missing_storage_side",
+                    f"{entity_type.value} requires a storage/source side on {node.id}",
+                ),
+                area,
+                entity,
+                0.0,
+                {},
+                None,
+            )
+        backing_command = BuildFacilityComponent(
+            component_id=entity.component_id or entity_id,
+            node_id=node.id,
+            kind=component_kind,
+            capacity=command.capacity,
+            rate=command.rate if command.rate > 0 else _local_default_rate(entity_type),
+            power_required=command.power_required,
+            power_provided=command.power_provided,
+            inputs=command.inputs,
+            outputs=command.outputs,
+            construction_cargo=command.construction_cargo,
+        )
+        try:
+            _, cost, cargo_cost, _ = _validate_facility_component(state, backing_command)
+        except ValueError as exc:
+            return _local_validation_failure(command.type, entity_id, "invalid_component", str(exc)), area, entity, 0.0, {}, None
+    else:
+        node_kind = _local_node_kind(entity_type)
+        backing_command = BuildNode(
+            node_id=entity_id,
+            world_id=area.world_id,
+            kind=node_kind,
+            name=command.name or entity_id.replace("_", " ").title(),
+            layout_x=float((entity.x - area.width // 2) * area.cell_size),
+            layout_y=float((entity.y - area.height // 3) * area.cell_size),
+        )
+        try:
+            cost, _, _, _ = _validate_build_node(state, backing_command)
+        except ValueError as exc:
+            return _local_validation_failure(command.type, entity_id, "invalid_node", str(exc)), area, entity, 0.0, {}, None
+
+    if not _cash_available(state, cost):
+        return (
+            _local_validation_failure(
+                command.type,
+                entity_id,
+                "insufficient_cash",
+                _insufficient_cash_message(state, entity_type.value, cost),
+                cost=cost,
+                cargo_cost=_plain_cargo_cost(cargo_cost),
+            ),
+            area,
+            entity,
+            cost,
+            cargo_cost,
+            backing_command,
+        )
+    return None, area, entity, cost, cargo_cost, backing_command
+
+
+def _place_local_entity(
+    state: object,
+    area: OperationalAreaState,
+    entity: OperationalPlacedEntity,
+    cost: float,
+    cargo_cost: dict[CargoType, int],
+    backing_command: object | None,
+) -> None:
+    """Commit a validated local entity and its backing macro/facility state."""
+
+    if isinstance(backing_command, BuildFacilityComponent):
+        component, _, _, connections = _validate_facility_component(state, backing_command)
+        node = state.nodes[backing_command.node_id]
+        if node.facility is None:
+            node.facility = Facility()
+        _consume_construction_cargo(state, node, cargo_cost)
+        node.facility.components[component.id] = component
+        for connection in connections:
+            node.facility.connections[connection.id] = connection
+        state.finance.record_cost(cost)
+    elif isinstance(backing_command, BuildLink):
+        travel_ticks, capacity_per_tick, power_required, power_source_world_id, _, build_time = _validate_build_link(
+            state,
+            backing_command,
+        )
+        link = NetworkLink(
+            id=backing_command.link_id,
+            origin=backing_command.origin,
+            destination=backing_command.destination,
+            mode=backing_command.mode,
+            travel_ticks=travel_ticks,
+            capacity_per_tick=capacity_per_tick,
+            power_required=power_required,
+            power_source_world_id=power_source_world_id,
+            bidirectional=backing_command.bidirectional,
+            build_cost=cost,
+            build_time=build_time,
+            alignment=backing_command.alignment,
+        )
+        state.add_link(link)
+        state.finance.record_cost(cost)
+        entity.link_id = link.id
+    elif isinstance(backing_command, BuildNode):
+        _, storage, transfer, _ = _validate_build_node(state, backing_command)
+        node = NetworkNode(
+            id=backing_command.node_id,
+            name=backing_command.name,
+            world_id=backing_command.world_id,
+            kind=backing_command.kind,
+            storage_capacity=storage,
+            transfer_limit_per_tick=transfer,
+            layout_x=backing_command.layout_x,
+            layout_y=backing_command.layout_y,
+        )
+        state.add_node(node)
+        state.finance.record_cost(cost)
+        entity.owner_node_id = node.id
+    area.entities[entity.id] = entity
+
+
+def _local_normalized_place_command(
+    command: LocalValidatePlacement,
+    area: OperationalAreaState,
+    entity: OperationalPlacedEntity,
+) -> dict[str, object]:
+    """Return the commit command for a validated local placement."""
+
+    normalized: dict[str, object] = {
+        "type": "local.place_entity",
+        "operational_area_id": area.id,
+        "entity_id": entity.id,
+        "entity_type": entity.entity_type.value,
+        "x": entity.x,
+        "y": entity.y,
+        "rotation": entity.rotation,
+        "width": entity.width,
+        "height": entity.height,
+    }
+    optional_fields: dict[str, object | None] = {
+        "owner_node_id": entity.owner_node_id,
+        "component_id": entity.component_id,
+        "link_id": entity.link_id,
+        "origin_node_id": command.origin_node_id,
+        "destination_node_id": command.destination_node_id,
+        "platform_side": entity.platform_side,
+        "adjacent_to_entity_id": entity.adjacent_to_entity_id,
+        "adjacent_port_id": entity.adjacent_port_id,
+    }
+    for key, value in optional_fields.items():
+        if value is not None:
+            normalized[key] = value
+    if command.rate > 0:
+        normalized["rate"] = command.rate
+    if command.capacity > 0:
+        normalized["capacity"] = command.capacity
+    if command.power_required > 0:
+        normalized["power_required"] = command.power_required
+    if command.power_provided > 0:
+        normalized["power_provided"] = command.power_provided
+    if command.construction_cargo:
+        normalized["construction_cargo"] = _plain_cargo_cost(command.construction_cargo)
+    if command.inputs:
+        normalized["inputs"] = _plain_cargo_cost(command.inputs)
+    if command.outputs:
+        normalized["outputs"] = _plain_cargo_cost(command.outputs)
+    if entity.path_cells:
+        normalized["path_cells"] = _local_path_cells_payload(entity.path_cells, include_z=False)
+    return normalized
+
+
 def apply_player_command(state: object, command: PlayerCommand) -> dict[str, object]:
     """Apply one player command to a GameState-like object."""
+
+    if isinstance(command, LocalGetOperationalArea):
+        try:
+            area = _require_operational_area(state, command.operational_area_id)
+        except ValueError as exc:
+            return _command_failure(
+                command.type,
+                command.operational_area_id,
+                reason="unknown_operational_area",
+                message=str(exc),
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=area.id,
+            message=f"loaded operational area {area.id}",
+            operational_area=_local_area_payload(state, area),
+        )
+
+    if isinstance(command, LocalListBuildOptions):
+        try:
+            area = _require_operational_area(state, command.operational_area_id)
+        except ValueError as exc:
+            return _command_failure(
+                command.type,
+                command.operational_area_id,
+                reason="unknown_operational_area",
+                message=str(exc),
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=area.id,
+            message=f"listed local build options for {area.id}",
+            build_options=_local_build_options(),
+            transfer_link_profiles=transfer_link_profiles_payload(),
+            construction_inventory=_plain_cargo_cost(getattr(state, "construction_inventory", {})),
+            cash=round(float(state.finance.cash), 2),
+        )
+
+    if isinstance(command, LocalValidatePlacement):
+        failure, area, entity, cost, cargo_cost, backing_command = _validate_local_placement(state, command)
+        if failure is not None:
+            return failure
+        assert area is not None and entity is not None
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=entity.id,
+            message=f"valid local placement for {entity.entity_type.value} {entity.id}",
+            entity=_local_entity_payload(state, area, entity),
+            cost=cost,
+            cargo_cost=_plain_cargo_cost(cargo_cost),
+            normalized_command=_local_normalized_place_command(command, area, entity),
+        )
+
+    if isinstance(command, LocalPlaceEntity):
+        failure, area, entity, cost, cargo_cost, backing_command = _validate_local_placement(state, command)
+        if failure is not None:
+            return failure
+        assert area is not None and entity is not None
+        _place_local_entity(state, area, entity, cost, cargo_cost, backing_command)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=entity.id,
+            message=f"placed {entity.entity_type.value} {entity.id}",
+            entity=_local_entity_payload(state, area, entity),
+            cost=cost,
+            cargo_cost=_plain_cargo_cost(cargo_cost),
+            operational_area=_local_area_payload(state, area),
+        )
+
+    if isinstance(command, LocalRotateEntity):
+        try:
+            area = _require_operational_area(state, command.operational_area_id)
+        except ValueError as exc:
+            return _command_failure(command.type, command.entity_id, reason="unknown_operational_area", message=str(exc))
+        entity = area.entities.get(command.entity_id)
+        if entity is None:
+            return _command_failure(
+                command.type,
+                command.entity_id,
+                reason="unknown_entity",
+                message=f"unknown local entity: {command.entity_id}",
+            )
+        if int(command.rotation) % 90 != 0:
+            return _command_failure(
+                command.type,
+                command.entity_id,
+                reason="invalid_rotation",
+                message="local entity rotation must be one of 0, 90, 180, or 270",
+            )
+        original_rotation = entity.rotation
+        entity.rotation = int(command.rotation) % 360
+        if _local_cells_outside(area, entity):
+            entity.rotation = original_rotation
+            return _command_failure(
+                command.type,
+                command.entity_id,
+                reason="outside_grid",
+                message="rotated local entity footprint is outside the operational grid",
+            )
+        conflicts = _local_overlap(area, entity, exclude_entity_id=entity.id)
+        if conflicts:
+            entity.rotation = original_rotation
+            return _command_failure(
+                command.type,
+                command.entity_id,
+                reason="occupied_cells",
+                message="rotated local entity overlaps occupied cells",
+                occupied_cells=conflicts,
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=entity.id,
+            message=f"rotated local entity {entity.id} to {entity.rotation}",
+            entity=_local_entity_payload(state, area, entity),
+            operational_area=_local_area_payload(state, area),
+        )
+
+    if isinstance(command, LocalInspectEntity):
+        try:
+            area = _require_operational_area(state, command.operational_area_id)
+        except ValueError as exc:
+            return _command_failure(command.type, command.entity_id, reason="unknown_operational_area", message=str(exc))
+        entity = area.entities.get(command.entity_id)
+        if entity is None:
+            return _command_failure(
+                command.type,
+                command.entity_id,
+                reason="unknown_entity",
+                message=f"unknown local entity: {command.entity_id}",
+            )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=entity.id,
+            message=f"inspected local entity {entity.id}",
+            entity=_local_entity_payload(state, area, entity),
+        )
+
+    if isinstance(command, LocalConnectEntities):
+        try:
+            area = _require_operational_area(state, command.operational_area_id)
+            node, facility = _require_facility(state, command.owner_node_id)
+            connection_id = command.connection_id.strip() or (
+                f"wire_{command.source_component_id}_{command.destination_component_id}"
+            )
+            connection_command = BuildInternalConnection(
+                node_id=command.owner_node_id,
+                connection_id=connection_id,
+                source_component_id=command.source_component_id,
+                source_port_id=command.source_port_id,
+                destination_component_id=command.destination_component_id,
+                destination_port_id=command.destination_port_id,
+                link_type=command.link_type,
+            )
+            _, _, connection = _validate_build_internal_connection(state, connection_command)
+        except ValueError as exc:
+            return _command_failure(
+                command.type,
+                command.connection_id or command.entity_id or command.owner_node_id,
+                reason="invalid_connection",
+                message=str(exc),
+            )
+        entity_id = command.entity_id.strip() or f"{command.owner_node_id}:{connection.id}"
+        if entity_id in area.entities:
+            return _command_failure(
+                command.type,
+                entity_id,
+                reason="duplicate_entity_id",
+                message=f"duplicate local entity id: {entity_id}",
+            )
+        sx = sy = dx = dy = None
+        for existing in area.entities.values():
+            if existing.owner_node_id != command.owner_node_id:
+                continue
+            if existing.component_id == command.source_component_id:
+                sx, sy = existing.x, existing.y
+            if existing.component_id == command.destination_component_id:
+                dx, dy = existing.x, existing.y
+        if command.x is not None and command.y is not None:
+            x, y = int(command.x), int(command.y)
+        elif sx is not None and sy is not None and dx is not None and dy is not None:
+            x, y = int(round((sx + dx) / 2.0)), int(round((sy + dy) / 2.0))
+        else:
+            owner_entity = area.entities.get(f"{command.owner_node_id}:station")
+            x = owner_entity.x if owner_entity is not None else area.width // 2
+            y = owner_entity.y if owner_entity is not None else area.height // 2
+        entity = OperationalPlacedEntity(
+            id=entity_id,
+            entity_type=OperationalEntityType.TRANSFER_LINK,
+            world_id=area.world_id,
+            x=x,
+            y=y,
+            rotation=0,
+            width=1,
+            height=1,
+            owner_node_id=command.owner_node_id,
+            link_id=connection.id,
+            link_type=_transfer_link_kind_value(connection.link_type),
+            input_ports=(f"{connection.destination_component_id}.{connection.destination_port_id}",),
+            output_ports=(f"{connection.source_component_id}.{connection.source_port_id}",),
+            visual_hint="transfer_link",
+            blocks_occupancy=False,
+        )
+        if _local_cells_outside(area, entity):
+            return _command_failure(
+                command.type,
+                entity_id,
+                reason="outside_grid",
+                message="transfer link placement is outside the operational grid",
+            )
+        facility.connections[connection.id] = connection
+        area.entities[entity.id] = entity
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=entity.id,
+            message=f"connected local entities with {connection.link_type.value} {connection.id}",
+            node_id=command.owner_node_id,
+            **_connection_payload(connection),
+            entity=_local_entity_payload(state, area, entity),
+            operational_area=_local_area_payload(state, area),
+        )
+
+    if isinstance(command, LocalValidateSignal):
+        failure, area, entity, signal = _validate_local_signal(state, command)
+        if failure is not None:
+            return failure
+        assert area is not None and entity is not None and signal is not None
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=signal.id,
+            message=f"valid local {signal.kind.value} signal preview on {signal.link_id}",
+            entity=_local_entity_payload(state, area, entity),
+            signal=_track_signal_payload(signal),
+            track_signal_command=_track_signal_payload(signal),
+            normalized_command=_local_signal_place_payload(area, entity, signal),
+            link_id=signal.link_id,
+            node_id=signal.node_id,
+            kind=signal.kind.value,
+            active=signal.active,
+            block=signal.link_id,
+        )
+
+    if isinstance(command, LocalPlaceSignal):
+        failure, area, entity, signal = _validate_local_signal(state, command)
+        if failure is not None:
+            return failure
+        assert area is not None and entity is not None and signal is not None
+        state.add_track_signal(signal)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=signal.id,
+            message=f"placed local {signal.kind.value} signal {signal.id} on {signal.link_id}",
+            entity=_local_entity_payload(state, area, entity),
+            signal=_track_signal_payload(signal),
+            link_id=signal.link_id,
+            node_id=signal.node_id,
+            kind=signal.kind.value,
+            active=signal.active,
+            block=signal.link_id,
+        )
+
+    if isinstance(command, LocalSetSwitchRoute):
+        failure, switch = _validate_local_switch_route(state, command)
+        if failure is not None:
+            return failure
+        assert switch is not None
+        switch_id = str(switch["id"])
+        state.local_switch_routes[switch_id] = command.selected_link_id
+        updated_switch = next(
+            item
+            for item in _local_switch_payloads(state)
+            if str(item.get("id", "")) == switch_id
+        )
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=switch_id,
+            message=f"selected local switch route {command.selected_link_id}",
+            switch=updated_switch,
+            selected_link_id=command.selected_link_id,
+        )
+
+    if isinstance(command, LocalDeleteEntity):
+        try:
+            area = _require_operational_area(state, command.operational_area_id)
+        except ValueError as exc:
+            return _command_failure(command.type, command.entity_id, reason="unknown_operational_area", message=str(exc))
+        entity = area.entities.get(command.entity_id)
+        if entity is None:
+            return _command_failure(
+                command.type,
+                command.entity_id,
+                reason="unknown_entity",
+                message=f"unknown local entity: {command.entity_id}",
+            )
+        extra: dict[str, object] = {}
+        if entity.component_id is not None and entity.owner_node_id is not None:
+            try:
+                node, facility, component, future_rate = _validate_demolish_facility_component(
+                    state,
+                    DemolishFacilityComponent(node_id=entity.owner_node_id, component_id=entity.component_id),
+                )
+            except ValueError as exc:
+                return _command_failure(command.type, entity.id, reason="delete_blocked", message=str(exc))
+            refund = _demolish_refund(component)
+            cargo_returned, cargo_dropped = _demolish_cargo_plan(node, component)
+            connections_removed = _connections_referencing_component(facility, component.id)
+            for cargo_type, units in cargo_returned.items():
+                node.add_inventory(cargo_type, units)
+            for connection_id in connections_removed:
+                facility.connections.pop(connection_id, None)
+                for other_id, other in list(area.entities.items()):
+                    if other.owner_node_id == entity.owner_node_id and other.link_id == connection_id:
+                        area.entities.pop(other_id, None)
+            del facility.components[component.id]
+            state.finance.cash += refund
+            extra = {
+                "refund": refund,
+                "future_rate": future_rate,
+                "cargo_returned": _plain_cargo_cost(cargo_returned),
+                "cargo_dropped": _plain_cargo_cost(cargo_dropped),
+                "connections_removed": connections_removed,
+            }
+        elif entity.entity_type == OperationalEntityType.TRACK_SEGMENT and entity.link_id is not None:
+            for train in state.trains.values():
+                if entity.link_id in train.route_link_ids:
+                    return _command_failure(
+                        command.type,
+                        entity.id,
+                        reason="delete_blocked",
+                        message=f"cannot delete track in active train route: {entity.link_id}",
+                    )
+            state.links.pop(entity.link_id, None)
+        elif entity.entity_type == OperationalEntityType.TRANSFER_LINK and entity.owner_node_id is not None and entity.link_id is not None:
+            node = state.nodes.get(entity.owner_node_id)
+            if node is not None and node.facility is not None:
+                node.facility.connections.pop(entity.link_id, None)
+        elif entity.owner_node_id is not None:
+            return _command_failure(
+                command.type,
+                entity.id,
+                reason="delete_node_not_supported",
+                message="local node deletion is not supported by this command",
+            )
+        area.entities.pop(entity.id, None)
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=entity.id,
+            message=f"deleted local entity {entity.id}",
+            operational_area=_local_area_payload(state, area),
+            **extra,
+        )
 
     if isinstance(command, SetScheduleEnabled):
         schedule = state.schedules.get(command.schedule_id)
@@ -2707,6 +4634,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             cargo_type=command.cargo_type,
             requested_units=command.requested_units,
             priority=command.priority,
+            train_stops=command.train_stops,
         )
         state.add_order(order)
         return command_result(
@@ -2736,6 +4664,46 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             ok=True,
             target_id=command.order_id,
             message=f"order {command.order_id} cancelled",
+        )
+
+    if isinstance(command, PreviewSurveySpaceSite):
+        error, fields = _survey_site_payload(state, command)
+        if error is not None:
+            return error
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.site_id,
+            message=f"valid survey preview for site {command.site_id}",
+            resource_id=fields["resource_id"],
+            travel_ticks=fields["travel_ticks"],
+            base_yield=fields["base_yield"],
+            discovered=fields["discovered"],
+            site_cargo_type=fields["site_cargo_type"],
+            normalized_command=fields["normalized_command"],
+        )
+
+    if isinstance(command, SurveySpaceSite):
+        error, fields = _survey_site_payload(state, command)
+        if error is not None:
+            return error
+        site = fields["site"]
+        already_discovered = bool(site.discovered)
+        site.discovered = True
+        return command_result(
+            command.type,
+            ok=True,
+            target_id=command.site_id,
+            message=(
+                f"site {command.site_id} already surveyed"
+                if already_discovered
+                else f"surveyed site {command.site_id}"
+            ),
+            resource_id=fields["resource_id"],
+            travel_ticks=fields["travel_ticks"],
+            base_yield=fields["base_yield"],
+            discovered=True,
+            site_cargo_type=fields["site_cargo_type"],
         )
 
     if isinstance(command, PreviewDispatchMiningMission):
@@ -3367,6 +5335,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
             active=command.active,
             return_to_origin=command.return_to_origin,
             stops=command.stops,
+            train_stops=command.train_stops,
         )
         state.add_schedule(schedule)
         route_context = _route_context_payload(state, route)
@@ -3454,6 +5423,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
         schedule.priority = draft.priority
         schedule.active = draft.active
         schedule.return_to_origin = draft.return_to_origin
+        schedule.train_stops = draft.train_stops
         route_context = _route_context_payload(state, route)
         train = state.trains[draft.train_id]
         required_consist = required_consist_for(draft.cargo_type)
@@ -3583,8 +5553,7 @@ def apply_player_command(state: object, command: PlayerCommand) -> dict[str, obj
         node = state.nodes[command.node_id]
         if node.facility is None:
             node.facility = Facility()
-        for cargo_type, units in cargo_cost.items():
-            node.remove_inventory(cargo_type, units)
+        _consume_construction_cargo(state, node, cargo_cost)
         node.facility.components[component.id] = component
         for connection in connections:
             if connection.id in node.facility.connections:

@@ -1,11 +1,15 @@
 # GateRail
 
-GateRail is a simulation-first game project for logistics and world-building about **trains, wormholes, frontier development, and interplanetary supply chains**.
+GateRail is a simulation-first logistics game set decades after the **Horizon Event** of the Gate Horizons universe. Humanity's first encounter with the ancient **Horizon Artefact** proved that true gate technology existed, but the later corporate era has not mastered that precursor system. Instead, Transit Combines and megacorporations operate limited **derivative aperture systems** called **Railgates**.
+
+Railgates define the **Railgate Age**: smaller, paired, route-bound, energy-hungry, throughput-limited corridors that are best suited to fixed industrial freight. Trains make the network viable because they provide exact alignment, predictable mass, controlled velocity, standardized cargo, and safe automated throughput.
+
+The first gate was a miracle. Railgates are a business model.
 
 The long-term game fantasy combines three angles:
-- railroad tycoon across impossible distances,
+- railroad tycoon across constrained Railgate corridors,
 - industrial supply-chain optimizer,
-- frontier builder growing worlds from outposts into major civil and industrial hubs.
+- frontier builder growing extraction outposts and frontier colonies into industrial hubs.
 
 The current repository focus is the Python backend plus the first Godot 2D client scaffold. The backend remains authoritative and is tested through terminal and JSON-over-stdio workflows; Godot is the Stage 2 view/input layer.
 
@@ -13,10 +17,11 @@ The current repository focus is the Python backend plus the first Godot 2D clien
 
 GateRail is built around these assumptions:
 - trains are the dominant logistics layer for bulk cargo and mass transit,
-- wormholes are powerful but energy-hungry infrastructure,
-- worlds progress through development tiers,
+- Railgates are powerful but energy-hungry infrastructure, not free teleportation,
+- frontier colonies progress through development tiers,
 - expansion depends on building stable interdependent supply chains from raw extraction through advanced manufacturing,
-- power plants and gates eventually depend on mined, refined, and manufactured inputs,
+- power plants and Railgates eventually depend on mined, refined, and manufactured inputs,
+- Transit Combines compete through contracts, corridor control, and industrial logistics rather than fantasy factions,
 - the backend product surface stays CLI/stdio-first,
 - the Godot client talks to the backend through the documented JSON bridge.
 
@@ -31,11 +36,11 @@ This is now entering the first visual-client phase, but remains systems-first.
 
 ## Long-term staging
 
-Stage 1 is the current Python simulation: no graphics, with cargo demand, train schedules, gate slots, colony stockpiles, income, costs, and monthly text tables.
+Stage 1 is the current Python simulation: no graphics, with cargo demand, train schedules, Railgate slots, colony stockpiles, income, costs, and monthly text tables.
 
-Stage 2 is the Godot 2D prototype: tile-based rail presentation, simple moving trains, cargo counters, wormhole gates, route UI, gate schedule UI, and staged construction controls.
+Stage 2 is the Godot 2D prototype: tile-based rail presentation, simple moving trains, cargo counters, Railgate anchors and receiving terminals, route UI, corridor schedule UI, and staged construction controls.
 
-Stage 3 is the proper game expansion: elemental resource chains, space extraction, outpost construction, power-plant and gate-energy economies, more worlds, contracts, corporate finance, rival operators, tech tree, facility/station automation, advanced rail types, and eventually 3D facility presentation after the core systems are proven.
+Stage 3 is the proper game expansion: elemental resource chains, space extraction, outpost construction, power-plant and Railgate-energy economies, more worlds, contracts, corporate finance, rival Transit Combines, tech tree, facility/station automation, advanced rail types, and eventually 3D facility presentation after the core systems are proven.
 
 ## Core gameplay loop
 
@@ -43,11 +48,11 @@ The intended loop is:
 
 1. Establish or unlock a world.
 2. Build enough power, freight, and storage capacity to stabilize it.
-3. Lay rail and station infrastructure between extraction, processing, population, and gate hubs.
+3. Lay rail and station infrastructure between extraction outposts, refineries, factories, colony logistics hubs, depots, warehouses, Railgate anchors, and receiving terminals.
 4. Prospect local or remote deposits and move raw resources into sorting, smelting, refining, and manufacturing chains.
-5. Deliver the goods required to promote the world to a higher development tier.
-6. Specialize the world into useful exports such as mining, food, refining, manufacturing, recycling, power, gate components, or research.
-7. Connect it to the wider network with rail, collection stations, mining missions, space lanes, and eventually wormhole gates.
+5. Deliver the goods required to promote the frontier colony to a higher development tier.
+6. Specialize the world into useful exports such as mining, food, refining, manufacturing, recycling, power, aperture control components, or research.
+7. Connect it to the wider network with rail, collection stations, mining missions, space lanes, and Railgate corridors.
 8. Use the stronger network to bootstrap the next world.
 
 ## Recommended simulation model
@@ -56,7 +61,7 @@ The backend should evolve through four explicit layers:
 - `strategic`: worlds, tiers, specializations, demand, stability
 - `economic`: resources, recipes, storage, deficits, surpluses
 - `transport`: tracks, stations, trains, routing, congestion
-- `gate`: wormhole links, activation, throughput, power cost
+- `gate`: Railgate corridors, aperture activation, throughput, and power cost
 - `facility`: station/depot/hub internals such as platforms, loaders, unloaders, buffers, factory blocks, and internal cargo ports
 - `space_extraction`: remote sites, mining missions, orbital yards, collection stations, and outpost construction
 
@@ -66,7 +71,7 @@ The live game feel can be real-time, but the backend should run on fixed ticks s
 
 The first true prototype should answer one question:
 
-**Can the player bootstrap a frontier world into a self-sustaining industrial colony by building rail, extracting and refining raw resources, manufacturing key parts, powering local industry and gates, and using one costly wormhole hub intelligently?**
+**Can the player bootstrap a frontier colony into a self-sustaining industrial hub by building rail, extracting and refining raw resources, manufacturing maintenance parts and aperture control components, powering local industry and Railgates, and using one costly corridor intelligently?**
 
 That is the current MVP target.
 
@@ -138,11 +143,11 @@ gaterail --scenario industrial_expansion --ticks 20 --report traffic,resources,p
 Start from the six-world tutorial ring:
 
 ```bash
-gaterail --scenario tutorial_six_worlds --inspect --report schedules,stockpiles
+gaterail --scenario tutorial_six_worlds --inspect --report schedules,stockpiles,gates,space
 gaterail --load saves/tutorial_six_worlds.json --ticks 20 --report schedules,finance
 ```
 
-In Godot, load `tutorial_six_worlds` or `saves/tutorial_six_worlds.json`. The tutorial schedules start disabled for manual playtesting: click a train on the galaxy map, click a pickup node, click a dropoff node, then queue the one-shot dispatch. After the manual route works, enable or create schedules to automate the supply route. The Tutorial Loop panel is driven by the backend `tutorial` snapshot payload.
+In Godot, load `tutorial_six_worlds` or `saves/tutorial_six_worlds.json`. The tutorial schedules start disabled for manual playtesting, and the Tutorial Loop panel is driven by the backend `tutorial` snapshot payload. The canonical path now runs ore to metal, metal to parts, local Atlas gateworks manufacturing, Sable Reach survey, Atlas-Sable Railgate establishment, and automated starter freight to the second world. See [docs/tutorial_vertical_slice.md](docs/tutorial_vertical_slice.md).
 
 Run the closed mining-to-settlement payoff loop through stdio:
 
@@ -188,7 +193,7 @@ godot --path godot
 The Godot scaffold has two scenes that share the `GateRailBridge` autoload:
 
 - `scenes/main.tscn` (Galaxy Map) — draws the fixture immediately, then requests a live `{"ticks":0}` snapshot from the Python stdio bridge and redraws when the backend responds. Exposes bridge status, save/load, scenario reset, schedules, finance, contracts, one-shot dispatch, pending-order cancellation, auto-run, map entity inspection, placeholder SVG assets, and an alert/status strip for command history, bridge errors, disruptions, and congestion.
-- `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, gate-hub, same-world rail, interworld gate-link, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; route creation lets the player tune cargo, units per departure, and interval before preview. The right HUD Build Planner shows preview context, gate handoff route warnings, mining mission fuel/power/yield/haul-bucket context, and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The `LAYERS` toggle renders backend-owned supply, demand, inventory, shortage, recipe-blocked, and transfer-pressure overlays. The **Galaxy Map** button returns to `main.tscn`.
+- `scenes/local_region.tscn` (Local Region Construction) — drilled into from the galaxy map by selecting a world and pressing **View Local Region** in the inspector. Renders the topbar / left tool rail / center canvas / right HUD / bottom status bar from the Claude Design handoff archived at [`docs/design_handoff/local_region_construction/`](docs/design_handoff/local_region_construction/). Node, Railgate anchor, same-world rail, interworld Railgate-link, train purchase, and first route-schedule creation use backend-owned preview/validation before commit; route creation lets the player tune cargo, units per departure, and interval before preview. The right HUD Build Planner shows preview context, Railgate handoff route warnings, mining mission fuel/power/yield/haul-bucket context, and confirm/cancel actions. Built node layout metadata persists through snapshots/save-load. The `LAYERS` toggle renders backend-owned supply, demand, inventory, shortage, recipe-blocked, and transfer-pressure overlays. The **Galaxy Map** button returns to `main.tscn`.
 
 Backend snapshots include `scenario_catalog` and `cargo_catalog`; Godot selectors consume those catalogs so new Python scenarios and cargo types do not need duplicate client-side registry edits.
 
@@ -198,4 +203,4 @@ Run the test suite:
 pytest
 ```
 
-The codebase now contains the full Sprint 9 objectives layer plus the Stage 2 bridge contract: cargo-delivery, frontier-support, and gate-recovery contracts; reputation; stable render snapshots; Python-level player commands; and a JSON-over-stdio mode for a future Godot subprocess. The fixed-tick backend is now the single source of truth ahead of the Stage 2 Godot 2D port.
+The codebase now contains the full Sprint 9 objectives layer plus the Stage 2 bridge contract: cargo-delivery, frontier-support, and Railgate-recovery contracts; reputation; stable render snapshots; Python-level player commands; and a JSON-over-stdio mode for the Godot subprocess. The fixed-tick backend is now the single source of truth ahead of the Stage 2 Godot 2D port.

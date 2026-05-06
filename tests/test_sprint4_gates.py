@@ -1,4 +1,4 @@
-"""Tests for Sprint 4 gate power pressure and expansion routing."""
+"""Tests for Sprint 4 Railgate power pressure and expansion routing."""
 
 from io import StringIO
 
@@ -83,6 +83,6 @@ def test_cli_sprint4_prints_gate_bottleneck() -> None:
 
     text = output.getvalue()
     assert result == 0
-    assert "3 worlds, 8 nodes, 6 rail links, 2 gate links, 4 trains, 4 orders" in text
+    assert "3 worlds, 8 nodes, 6 rail links, 2 Railgate links, 4 trains, 4 orders" in text
     assert "gate_frontier_outer underpowered" in text
     assert "Mercy: no route frontier_settlement->outer_outpost" in text

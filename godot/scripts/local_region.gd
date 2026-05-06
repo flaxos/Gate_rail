@@ -44,7 +44,7 @@ const TOOLS: Array = [
 	{"id": TOOL_RAIL, "label": "Lay Rail", "key": "R", "group": "build"},
 	{"id": TOOL_NODE, "label": "Place Node", "key": "N", "group": "build"},
 	{"id": TOOL_WIRE, "label": "Wire Ports", "key": "C", "group": "build"},
-	{"id": TOOL_GATE, "label": "Gate Hub", "key": "G", "group": "build"},
+	{"id": TOOL_GATE, "label": "Railgate", "key": "G", "group": "build"},
 	{"id": TOOL_TRAIN, "label": "Purchase Train", "key": "T", "group": "build"},
 	{"id": TOOL_DEMOLISH, "label": "Demolish", "key": "X", "group": "destroy"},
 	{"id": TOOL_LAYERS, "label": "Layer Overlays", "key": "L", "group": "view"},
@@ -95,6 +95,8 @@ var _world_id: String = ""
 var _selected_world: Dictionary = {}
 var _world_nodes: Array = []
 var _world_links: Array = []
+var _world_operational_area: Dictionary = {}
+var _world_operational_entities: Array = []
 var _node_positions: Dictionary = {}
 var _gate_hub_node_id: String = ""
 var _outposts_by_id: Dictionary = {}
@@ -122,6 +124,9 @@ var _node_kind_popup: PopupMenu
 var _cargo_kind_popup: PopupMenu
 var _cargo_popup_options: Array = []
 var _route_tuning_popup: PopupPanel
+var _route_tuning_box: VBoxContainer
+var _route_stops_box: VBoxContainer
+var _route_cargo_opt: OptionButton
 var _route_tuning_meta: Label
 var _route_units_spin: SpinBox
 var _route_interval_spin: SpinBox
@@ -133,6 +138,7 @@ var _pending_preview_target_id: String = ""
 var _last_preview_result: Dictionary = {}
 var _route_train_id: String = ""
 var _route_origin_id: String = ""
+var _route_stops: Array[Dictionary] = []
 var _pending_route_dest_id: String = ""
 var _pending_route_tuning_train_id: String = ""
 var _pending_route_tuning_origin_id: String = ""
@@ -159,6 +165,19 @@ var _last_terrain_world_id: String = ""
 
 const DEFAULT_TRAIN_CAPACITY: int = 8
 const DEFAULT_ROUTE_INTERVAL_TICKS: int = 4
+
+const STOP_ACTION_PICKUP = "pickup"
+const STOP_ACTION_DELIVERY = "delivery"
+const STOP_ACTION_TRANSFER = "transfer"
+const STOP_ACTION_PASSTHROUGH = "passthrough"
+
+const WAIT_CONDITION_NONE = "none"
+const WAIT_CONDITION_FULL = "full"
+const WAIT_CONDITION_EMPTY = "empty"
+const WAIT_CONDITION_TIME = "time"
+
+const SCHEDULE_ORDER_PREFIX := "schedule:"
+
 const DEFAULT_GATE_CAPACITY_PER_TICK: int = 4
 const DEFAULT_GATE_POWER_REQUIRED: int = 80
 const NODE_HIT_RADIUS: float = 30.0
@@ -184,7 +203,8 @@ func _ready() -> void:
 		if not fixture.is_empty():
 			_apply_snapshot(fixture)
 	_update_bridge_chip(GateRailBridge.is_bridge_running())
-	GateRailBridge.request_snapshot()
+	if OS.get_environment("GATERAIL_LOCAL_REGION_SMOKE") != "1":
+		GateRailBridge.request_snapshot()
 
 
 func _build_node_kind_popup() -> void:
@@ -224,19 +244,31 @@ func _open_cargo_kind_popup(origin_id: String, destination_id: String) -> void:
 		if cargo_id == suggested:
 			label += "  ★"
 		_cargo_kind_popup.add_item(label, i)
+	# Quick-dispatch shortcut — skip tuning popup when there's a clear match
+	if not suggested.is_empty():
+		_cargo_kind_popup.add_separator("───")
+		var quick_label := "⚡ Quick Route (%s)" % suggested.replace("_", " ")
+		# Use a special ID offset so _on_cargo_kind_confirmed can detect it
+		_cargo_kind_popup.add_item(quick_label, 9000)
 	_cargo_kind_popup.position = Vector2i(get_viewport().get_mouse_position())
 	_cargo_kind_popup.popup()
 
 
 func _on_cargo_kind_confirmed(id: int) -> void:
-	if id < 0 or id >= _cargo_popup_options.size():
-		return
 	if _route_train_id.is_empty() or _route_origin_id.is_empty() or _pending_route_dest_id.is_empty():
 		return
-	var cargo_id := str(_cargo_popup_options[id])
 	var origin_id := _route_origin_id
 	var dest_id := _pending_route_dest_id
 	_pending_route_dest_id = ""
+	# Quick-route shortcut — skip tuning popup entirely
+	if id == 9000:
+		var cargo_id := _suggest_cargo_for_route(origin_id, dest_id)
+		_request_schedule_preview(_route_train_id, origin_id, dest_id, cargo_id)
+		_set_status_text("QUICK ROUTE · %s → %s (%s) · click dest to confirm" % [origin_id, dest_id, cargo_id.replace("_", " ")], COLOR_OK)
+		return
+	if id < 0 or id >= _cargo_popup_options.size():
+		return
+	var cargo_id := str(_cargo_popup_options[id])
 	_open_route_tuning_popup(_route_train_id, origin_id, dest_id, cargo_id)
 
 
@@ -254,30 +286,56 @@ func _build_route_tuning_popup() -> void:
 	margin.add_theme_constant_override("margin_bottom", 12)
 	_route_tuning_popup.add_child(margin)
 
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
-	col.custom_minimum_size = Vector2(280, 0)
-	margin.add_child(col)
+	_route_tuning_box = VBoxContainer.new()
+	_route_tuning_box.add_theme_constant_override("separation", 10)
+	_route_tuning_box.custom_minimum_size = Vector2(400, 0)
+	margin.add_child(_route_tuning_box)
 
 	var title := Label.new()
 	title.text = "ROUTE PARAMETERS"
 	title.add_theme_color_override("font_color", COLOR_CYAN)
 	title.add_theme_font_size_override("font_size", 12)
-	col.add_child(title)
+	_route_tuning_box.add_child(title)
 
 	_route_tuning_meta = Label.new()
 	_route_tuning_meta.text = "—"
 	_route_tuning_meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_route_tuning_meta.add_theme_color_override("font_color", COLOR_STEEL_2)
 	_route_tuning_meta.add_theme_font_size_override("font_size", 10)
-	col.add_child(_route_tuning_meta)
+	_route_tuning_box.add_child(_route_tuning_meta)
 
-	_route_units_spin = _make_route_spinbox("Units / departure", col)
-	_route_interval_spin = _make_route_spinbox("Interval ticks", col)
+	var cargo_row := HBoxContainer.new()
+	cargo_row.add_theme_constant_override("separation", 8)
+	_route_tuning_box.add_child(cargo_row)
+
+	var cargo_lbl := Label.new()
+	cargo_lbl.text = "Route Cargo"
+	cargo_lbl.add_theme_color_override("font_color", COLOR_STEEL)
+	cargo_lbl.add_theme_font_size_override("font_size", 10)
+	cargo_lbl.custom_minimum_size = Vector2(112, 0)
+	cargo_row.add_child(cargo_lbl)
+
+	_route_cargo_opt = OptionButton.new()
+	_route_cargo_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_route_cargo_opt.add_theme_font_size_override("font_size", 10)
+	cargo_row.add_child(_route_cargo_opt)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 240)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_route_tuning_box.add_child(scroll)
+
+	_route_stops_box = VBoxContainer.new()
+	_route_stops_box.add_theme_constant_override("separation", 6)
+	_route_stops_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_route_stops_box)
+
+	_route_units_spin = _make_route_spinbox("Units / departure", _route_tuning_box)
+	_route_interval_spin = _make_route_spinbox("Interval ticks", _route_tuning_box)
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
-	col.add_child(row)
+	_route_tuning_box.add_child(row)
 
 	var preview := _make_hud_button("Preview Route", COLOR_CYAN)
 	preview.pressed.connect(_on_route_tuning_preview_pressed)
@@ -286,6 +344,72 @@ func _build_route_tuning_popup() -> void:
 	var cancel := _make_hud_button("Cancel", COLOR_ERR)
 	cancel.pressed.connect(_on_route_tuning_cancel_pressed)
 	row.add_child(cancel)
+
+
+func _build_stop_config_row(idx: int) -> Control:
+	var stop: Dictionary = _route_stops[idx]
+	var node_id: String = str(stop.get("node_id", ""))
+
+	var row := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(1, 1, 1, 0.03)
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+	row.add_theme_stylebox_override("panel", style)
+
+	var inner := HBoxContainer.new()
+	inner.add_theme_constant_override("separation", 10)
+	row.add_child(inner)
+
+	var label := Label.new()
+	label.text = "%d: %s" % [idx + 1, node_id]
+	label.add_theme_font_size_override("font_size", 10)
+	label.custom_minimum_size = Vector2(80, 0)
+	inner.add_child(label)
+
+	var action_opt := OptionButton.new()
+	action_opt.add_item("Pickup", 0)
+	action_opt.add_item("Delivery", 1)
+	action_opt.add_item("Transfer", 2)
+	action_opt.add_item("Passthrough", 3)
+	var actions := [STOP_ACTION_PICKUP, STOP_ACTION_DELIVERY, STOP_ACTION_TRANSFER, STOP_ACTION_PASSTHROUGH]
+	action_opt.selected = actions.find(stop.get("action", STOP_ACTION_PASSTHROUGH))
+	action_opt.item_selected.connect(func(id):
+		_route_stops[idx]["action"] = actions[id]
+	)
+	action_opt.add_theme_font_size_override("font_size", 10)
+	inner.add_child(action_opt)
+
+	var wait_opt := OptionButton.new()
+	wait_opt.add_item("No Wait", 0)
+	wait_opt.add_item("Wait Full", 1)
+	wait_opt.add_item("Wait Empty", 2)
+	wait_opt.add_item("Wait Time", 3)
+	var conditions := [WAIT_CONDITION_NONE, WAIT_CONDITION_FULL, WAIT_CONDITION_EMPTY, WAIT_CONDITION_TIME]
+	wait_opt.selected = conditions.find(stop.get("wait_condition", WAIT_CONDITION_NONE))
+
+	var ticks_spin := SpinBox.new()
+	ticks_spin.min_value = 0
+	ticks_spin.max_value = 1000
+	ticks_spin.value = int(stop.get("wait_ticks", 0))
+	ticks_spin.visible = wait_opt.selected == 3
+	ticks_spin.value_changed.connect(func(val):
+		_route_stops[idx]["wait_ticks"] = int(val)
+	)
+	ticks_spin.custom_minimum_size = Vector2(70, 0)
+
+	wait_opt.item_selected.connect(func(id):
+		_route_stops[idx]["wait_condition"] = conditions[id]
+		ticks_spin.visible = (id == 3)
+	)
+	wait_opt.add_theme_font_size_override("font_size", 10)
+
+	inner.add_child(wait_opt)
+	inner.add_child(ticks_spin)
+
+	return row
 
 
 func _make_route_spinbox(label_text: String, parent: VBoxContainer) -> SpinBox:
@@ -317,26 +441,54 @@ func _open_route_tuning_popup(train_id: String, origin_id: String, destination_i
 	_pending_route_tuning_dest_id = destination_id
 	_pending_route_tuning_cargo = cargo_id
 
+	# Populate stops box
+	if _route_stops_box != null:
+		for child in _route_stops_box.get_children():
+			child.queue_free()
+
+		for i in _route_stops.size():
+			var row := _build_stop_config_row(i)
+			_route_stops_box.add_child(row)
+
 	var capacity := _train_capacity(train_id)
 	var suggested_units: int = min(DEFAULT_TRAIN_CAPACITY, capacity)
 	if _route_units_spin != null:
-		_route_units_spin.min_value = 1
 		_route_units_spin.max_value = max(1, capacity)
 		_route_units_spin.value = suggested_units
 	if _route_interval_spin != null:
-		_route_interval_spin.min_value = 1
-		_route_interval_spin.max_value = 240
 		_route_interval_spin.value = DEFAULT_ROUTE_INTERVAL_TICKS
+
+	# Populate cargo options
+	if _route_cargo_opt != null:
+		_route_cargo_opt.clear()
+		var options := _cargo_options_for_route(origin_id, destination_id)
+		if options.is_empty():
+			options = _cargo_catalog_ids()
+		for i in options.size():
+			var cid := str(options[i])
+			_route_cargo_opt.add_item(cid.replace("_", " ").capitalize(), i)
+			_route_cargo_opt.set_item_metadata(i, cid)
+
+		if not cargo_id.is_empty():
+			for i in _route_cargo_opt.item_count:
+				if _route_cargo_opt.get_item_metadata(i) == cargo_id:
+					_route_cargo_opt.selected = i
+					break
+		else:
+			var suggested := _suggest_cargo_for_route(origin_id, destination_id)
+			for i in _route_cargo_opt.item_count:
+				if _route_cargo_opt.get_item_metadata(i) == suggested:
+					_route_cargo_opt.selected = i
+					break
+
 	if _route_tuning_meta != null:
-		_route_tuning_meta.text = "%s\n%s -> %s\nCargo: %s · Train cap: %d" % [
+		_route_tuning_meta.text = "Train: %s · Capacity: %d · Cargo: %s" % [
 			train_id,
-			_node_display_name(origin_id),
-			_node_display_name(destination_id),
-			cargo_id.replace("_", " "),
 			capacity,
+			cargo_id.replace("_", " ").capitalize()
 		]
 
-	_set_status_text("ROUTE · tune units and interval for %s -> %s" % [origin_id, destination_id], COLOR_CYAN)
+	_set_status_text("ROUTE · tune stops for %s" % train_id, COLOR_CYAN)
 	_refresh_construction_hud()
 	_route_tuning_popup.position = Vector2i(get_viewport().get_mouse_position())
 	_route_tuning_popup.popup()
@@ -351,6 +503,12 @@ func _on_route_tuning_preview_pressed() -> void:
 	var origin_id := _pending_route_tuning_origin_id
 	var destination_id := _pending_route_tuning_dest_id
 	var cargo_id := _pending_route_tuning_cargo
+
+	if _route_cargo_opt != null:
+		var idx := _route_cargo_opt.selected
+		if idx >= 0:
+			cargo_id = str(_route_cargo_opt.get_item_metadata(idx))
+
 	_clear_route_tuning_state()
 	_request_schedule_preview(train_id, origin_id, destination_id, cargo_id, units, interval)
 
@@ -610,6 +768,20 @@ func _hit_link_at(local_pos: Vector2) -> String:
 	return best_id
 
 
+func _hit_operational_entity_at(local_pos: Vector2) -> String:
+	var best_id := ""
+	var best_dist := 16.0
+	for entity in _world_operational_entities:
+		if typeof(entity) != TYPE_DICTIONARY:
+			continue
+		var pos := _operational_entity_position(entity)
+		var d := local_pos.distance_to(pos)
+		if d < best_dist:
+			best_dist = d
+			best_id = str(entity.get("id", ""))
+	return best_id
+
+
 func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 	var seg := b - a
 	var len_sq := seg.length_squared()
@@ -629,7 +801,7 @@ func _snap_to_grid(pos: Vector2) -> Vector2:
 
 # --- Place Node ---
 func _handle_place_node_click(local_pos: Vector2) -> void:
-	if _pending_preview_kind == "node" and not _pending_build_command.is_empty():
+	if _pending_preview_kind == "local_entity" and not _pending_build_command.is_empty():
 		_send_pending_build("Building %s..." % _pending_build_command.get("kind", "node"), COLOR_AMBER_HOT)
 		return
 	_clear_pending_preview()
@@ -638,23 +810,166 @@ func _handle_place_node_click(local_pos: Vector2) -> void:
 	_node_kind_popup.popup()
 
 
+func _local_area_id() -> String:
+	if not _world_operational_area.is_empty():
+		return str(_world_operational_area.get("id", ""))
+	if not _world_id.is_empty():
+		return "%s:local" % _world_id
+	return ""
+
+
+func _local_cell_from_logical(logical_pos: Vector2) -> Dictionary:
+	var grid: Dictionary = _world_operational_area.get("grid", {}) if typeof(_world_operational_area.get("grid")) == TYPE_DICTIONARY else {}
+	var grid_w := int(grid.get("width", 48))
+	var grid_h := int(grid.get("height", 32))
+	var cell_size: float = max(1.0, float(grid.get("cell_size", GRID_MICRO)))
+	var layout := _logical_to_layout(logical_pos)
+	var x := int(round(layout.x / cell_size + float(grid_w) / 2.0))
+	var y := int(round(layout.y / cell_size + float(grid_h) / 3.0))
+	return {
+		"x": max(0, min(grid_w - 1, x)),
+		"y": max(0, min(grid_h - 1, y)),
+	}
+
+
+func _operational_cell_position(cell: Dictionary) -> Vector2:
+	var grid: Dictionary = _world_operational_area.get("grid", {}) if typeof(_world_operational_area.get("grid")) == TYPE_DICTIONARY else {}
+	var grid_w := int(grid.get("width", 48))
+	var grid_h := int(grid.get("height", 32))
+	var cell_size := float(grid.get("cell_size", GRID_MICRO))
+	var raw := Vector2(
+		(float(cell.get("x", 0)) - float(grid_w / 2)) * cell_size,
+		(float(cell.get("y", 0)) - float(grid_h / 3)) * cell_size,
+	)
+	var center := _canvas_rect.size * 0.5
+	var scale: float = _layout_spread_scale if _layout_spread_scale > 0.0 else 1.0
+	return center + (raw - _layout_bbox_center) * scale
+
+
+func _operational_entity_for_owner(owner_node_id: String) -> Dictionary:
+	for entity in _world_operational_entities:
+		if typeof(entity) == TYPE_DICTIONARY and str(entity.get("owner_node_id", "")) == owner_node_id:
+			if str(entity.get("entity_type", "")) == "station_platform":
+				return entity
+	for entity in _world_operational_entities:
+		if typeof(entity) == TYPE_DICTIONARY and str(entity.get("owner_node_id", "")) == owner_node_id:
+			return entity
+	return {}
+
+
+func _entity_cell_bounds(entity: Dictionary) -> Dictionary:
+	var cells: Array = entity.get("occupied_cells", []) if typeof(entity.get("occupied_cells")) == TYPE_ARRAY else []
+	if cells.is_empty():
+		var cell: Dictionary = entity.get("cell", {}) if typeof(entity.get("cell")) == TYPE_DICTIONARY else {}
+		return {
+			"min_x": int(cell.get("x", 0)),
+			"max_x": int(cell.get("x", 0)),
+			"min_y": int(cell.get("y", 0)),
+			"max_y": int(cell.get("y", 0)),
+		}
+	var first: Dictionary = cells[0] if typeof(cells[0]) == TYPE_DICTIONARY else {}
+	var min_x: int = int(first.get("x", 0))
+	var max_x: int = min_x
+	var min_y: int = int(first.get("y", 0))
+	var max_y: int = min_y
+	for item in cells:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var cell_item: Dictionary = item
+		var cx: int = int(cell_item.get("x", 0))
+		var cy: int = int(cell_item.get("y", 0))
+		min_x = mini(min_x, cx)
+		max_x = maxi(max_x, cx)
+		min_y = mini(min_y, cy)
+		max_y = maxi(max_y, cy)
+	return {"min_x": min_x, "max_x": max_x, "min_y": min_y, "max_y": max_y}
+
+
+func _append_path_cell(cells: Array, seen: Dictionary, x: int, y: int) -> void:
+	var key := "%d:%d" % [x, y]
+	if seen.has(key):
+		return
+	seen[key] = true
+	cells.append({"x": x, "y": y})
+
+
+func _local_track_path_cells_between(origin_id: String, destination_id: String) -> Array:
+	var origin_entity := _operational_entity_for_owner(origin_id)
+	var destination_entity := _operational_entity_for_owner(destination_id)
+	if origin_entity.is_empty() or destination_entity.is_empty():
+		return []
+	var origin_bounds := _entity_cell_bounds(origin_entity)
+	var destination_bounds := _entity_cell_bounds(destination_entity)
+	var origin_center_y: int = int(round((float(origin_bounds.get("min_y", 0)) + float(origin_bounds.get("max_y", 0))) * 0.5))
+	var destination_center_y: int = int(round((float(destination_bounds.get("min_y", 0)) + float(destination_bounds.get("max_y", 0))) * 0.5))
+	var origin_center_x: int = int(round((float(origin_bounds.get("min_x", 0)) + float(origin_bounds.get("max_x", 0))) * 0.5))
+	var destination_center_x: int = int(round((float(destination_bounds.get("min_x", 0)) + float(destination_bounds.get("max_x", 0))) * 0.5))
+	var start_x: int = origin_center_x
+	var end_x: int = destination_center_x
+	if destination_center_x >= origin_center_x:
+		start_x = int(origin_bounds.get("max_x", origin_center_x)) + 1
+		end_x = int(destination_bounds.get("min_x", destination_center_x)) - 1
+	else:
+		start_x = int(origin_bounds.get("min_x", origin_center_x)) - 1
+		end_x = int(destination_bounds.get("max_x", destination_center_x)) + 1
+	var cells: Array = []
+	var seen := {}
+	var x_step: int = 1 if end_x >= start_x else -1
+	var x: int = start_x
+	while x != end_x:
+		_append_path_cell(cells, seen, x, origin_center_y)
+		x += x_step
+	_append_path_cell(cells, seen, end_x, origin_center_y)
+	var y_step: int = 1 if destination_center_y >= origin_center_y else -1
+	var y: int = origin_center_y
+	while y != destination_center_y:
+		y += y_step
+		_append_path_cell(cells, seen, end_x, y)
+	return cells
+
+
+func _local_entity_type_for_node_kind(kind: String) -> String:
+	match kind:
+		"extractor":
+			return "extractor"
+		"industry":
+			return "factory"
+		"gate_hub":
+			return "railgate_terminal"
+		"warehouse", "settlement", "depot":
+			return "storage"
+		_:
+			return "station_platform"
+
+
 func _request_node_preview(kind: String, local_pos: Vector2) -> void:
+	_request_local_entity_preview(kind, local_pos)
+
+
+func _request_local_entity_preview(kind: String, local_pos: Vector2) -> void:
 	if _world_id.is_empty():
 		_set_status_text("Cannot build without a selected world.", COLOR_ERR)
 		return
+	var area_id := _local_area_id()
+	if area_id.is_empty():
+		_set_status_text("Cannot build before a local operational area is loaded.", COLOR_ERR)
+		return
 	var snapped_pos := _snap_to_grid(local_pos)
-	var node_id := _next_build_id(kind)
+	var cell := _local_cell_from_logical(snapped_pos)
+	var node_id := _next_build_id(_local_entity_type_for_node_kind(kind))
 	var node_name := "%s %s" % [_world_id.capitalize(), _kind_display(kind)]
 	var command := {
-		"type": "PreviewBuildNode",
-		"node_id": node_id,
-		"world_id": _world_id,
-		"kind": kind,
+		"type": "local.validate_placement",
+		"operational_area_id": area_id,
+		"entity_id": node_id,
+		"entity_type": _local_entity_type_for_node_kind(kind),
 		"name": node_name,
-		"layout": _logical_to_layout(snapped_pos),
+		"x": int(cell.get("x", 0)),
+		"y": int(cell.get("y", 0)),
+		"rotation": 0,
 	}
 	_pending_node_local_pos = snapped_pos
-	_pending_preview_kind = "node"
+	_pending_preview_kind = "local_entity"
 	_pending_preview_target_id = node_id
 	_pending_build_command = {}
 	_last_preview_result = {}
@@ -694,6 +1009,7 @@ func _clear_pending_preview() -> void:
 func _clear_route_builder() -> void:
 	_route_train_id = ""
 	_route_origin_id = ""
+	_route_stops = []
 	_clear_route_tuning_state()
 	_refresh_construction_hud()
 
@@ -715,10 +1031,10 @@ func _handle_rail_click(local_pos: Vector2) -> void:
 		if _canvas_panel != null:
 			_canvas_panel.queue_redraw()
 		return
-	if _pending_preview_kind == "rail" and not _pending_build_command.is_empty():
-		var pending_dest := str(_pending_build_command.get("destination", ""))
+	if _pending_preview_kind in ["rail", "local_entity"] and not _pending_build_command.is_empty():
+		var pending_dest := str(_pending_build_command.get("destination_node_id", _pending_build_command.get("destination", "")))
 		if nid == pending_dest:
-			var pending_origin := str(_pending_build_command.get("origin", _rail_origin_id))
+			var pending_origin := str(_pending_build_command.get("origin_node_id", _pending_build_command.get("origin", _rail_origin_id)))
 			_send_pending_build("Building rail %s -> %s..." % [pending_origin, pending_dest], COLOR_AMBER_HOT)
 			_rail_origin_id = ""
 			if _canvas_panel != null:
@@ -739,31 +1055,129 @@ func _handle_rail_click(local_pos: Vector2) -> void:
 
 func _request_link_preview(origin_id: String, destination_id: String) -> void:
 	var link_id := _next_build_id("rail")
-	_pending_preview_kind = "rail"
+	var area_id := _local_area_id()
+	if area_id.is_empty():
+		_set_status_text("Cannot build rail before a local operational area is loaded.", COLOR_ERR)
+		return
+	var midpoint := Vector2.ZERO
+	if _node_positions.has(origin_id) and _node_positions.has(destination_id):
+		midpoint = (_node_positions[origin_id] + _node_positions[destination_id]) * 0.5
+	else:
+		midpoint = _canvas_rect.size * 0.5
+	var cell := _local_cell_from_logical(midpoint)
+	var rotation := 0
+	if _node_positions.has(origin_id) and _node_positions.has(destination_id):
+		var delta: Vector2 = _node_positions[destination_id] - _node_positions[origin_id]
+		if abs(delta.x) >= abs(delta.y):
+			rotation = 90 if delta.x >= 0.0 else 270
+		else:
+			rotation = 180 if delta.y >= 0.0 else 0
+	var path_cells := _local_track_path_cells_between(origin_id, destination_id)
+	if not path_cells.is_empty() and typeof(path_cells[0]) == TYPE_DICTIONARY:
+		var first_cell: Dictionary = path_cells[0]
+		cell = {
+			"x": int(first_cell.get("x", int(cell.get("x", 0)))),
+			"y": int(first_cell.get("y", int(cell.get("y", 0)))),
+		}
+	_pending_preview_kind = "local_entity"
 	_pending_preview_target_id = link_id
 	_pending_build_command = {}
 	_last_preview_result = {}
 	_set_status_text("PREVIEW · checking rail %s -> %s..." % [origin_id, destination_id], COLOR_AMBER_HOT)
 	_refresh_construction_hud()
+	var command := {
+		"type": "local.validate_placement",
+		"operational_area_id": area_id,
+		"entity_type": "track_segment",
+		"link_id": link_id,
+		"origin_node_id": origin_id,
+		"destination_node_id": destination_id,
+		"x": int(cell.get("x", 0)),
+		"y": int(cell.get("y", 0)),
+		"rotation": rotation,
+	}
+	if not path_cells.is_empty():
+		command["path_cells"] = path_cells
 	GateRailBridge.send_message({
-		"commands": [{
-			"type": "PreviewBuildLink",
-			"link_id": link_id,
-			"origin": origin_id,
-			"destination": destination_id,
-			"mode": "rail",
-		}],
+		"commands": [command],
 		"ticks": 0
 	})
 
 
-# --- Gate Hub ---
+func _request_local_signal_preview(entity: Dictionary) -> void:
+	if _world_operational_area.is_empty():
+		_set_status_text("Cannot place signal before a local operational area is loaded.", COLOR_ERR)
+		return
+	var area_id: String = str(_world_operational_area.get("id", ""))
+	var entity_id: String = str(entity.get("id", ""))
+	if area_id.is_empty() or entity_id.is_empty():
+		_set_status_text("Cannot place signal without a selected local track.", COLOR_ERR)
+		return
+	var command: Dictionary = {
+		"type": "local.validate_signal",
+		"operational_area_id": area_id,
+		"track_entity_id": entity_id,
+		"kind": "stop",
+	}
+	_pending_preview_kind = "local_signal"
+	_pending_preview_target_id = entity_id
+	_pending_build_command = {}
+	_last_preview_result = {}
+	_set_status_text("PREVIEW · checking local signal...", COLOR_CYAN)
+	_refresh_construction_hud()
+	GateRailBridge.send_message({
+		"commands": [command],
+		"ticks": 0
+	})
+
+
+func _local_switches_for_link(link_id: String) -> Array:
+	var matches: Array = []
+	var local_rail_raw: Variant = _latest_snapshot.get("local_rail", {})
+	if typeof(local_rail_raw) != TYPE_DICTIONARY:
+		return matches
+	var local_rail: Dictionary = local_rail_raw
+	var switches: Array = local_rail.get("switches", []) if typeof(local_rail.get("switches")) == TYPE_ARRAY else []
+	var area_id: String = str(_world_operational_area.get("id", ""))
+	for switch_raw in switches:
+		if typeof(switch_raw) != TYPE_DICTIONARY:
+			continue
+		var switch_payload: Dictionary = switch_raw
+		if not area_id.is_empty() and str(switch_payload.get("operational_area_id", "")) != area_id:
+			continue
+		var link_ids: Array = switch_payload.get("link_ids", []) if typeof(switch_payload.get("link_ids")) == TYPE_ARRAY else []
+		for raw_link_id in link_ids:
+			if str(raw_link_id) == link_id:
+				matches.append(switch_payload)
+				break
+	return matches
+
+
+func _set_local_switch_route(switch_payload: Dictionary, selected_link_id: String) -> void:
+	var area_id: String = str(_world_operational_area.get("id", ""))
+	var switch_id: String = str(switch_payload.get("id", ""))
+	if area_id.is_empty() or switch_id.is_empty() or selected_link_id.is_empty():
+		_set_status_text("Cannot set switch route without a switch and track.", COLOR_ERR)
+		return
+	GateRailBridge.send_message({
+		"commands": [{
+			"type": "local.set_switch_route",
+			"operational_area_id": area_id,
+			"switch_id": switch_id,
+			"selected_link_id": selected_link_id,
+		}],
+		"ticks": 0
+	})
+	_set_status_text("SWITCH · selecting route %s..." % selected_link_id, COLOR_CYAN)
+
+
+# --- Railgate ---
 func _handle_gate_click(local_pos: Vector2) -> void:
 	if _pending_preview_kind == "node" and not _pending_build_command.is_empty():
-		_send_pending_build("Building gate hub...", COLOR_AMBER_HOT)
+		_send_pending_build("Building Railgate anchor...", COLOR_AMBER_HOT)
 		return
 	if _pending_preview_kind == "gate_link" and not _pending_build_command.is_empty():
-		_send_pending_build("Building gate link...", COLOR_AMBER_HOT)
+		_send_pending_build("Building Railgate link...", COLOR_AMBER_HOT)
 		return
 
 	var nid := _hit_node_at(local_pos)
@@ -771,7 +1185,7 @@ func _handle_gate_click(local_pos: Vector2) -> void:
 		var node := _node_snapshot(nid)
 		if str(node.get("kind", "")) != "gate_hub":
 			_clear_pending_preview()
-			_set_status_text("GATE · click empty tile to build a gate hub, or click an existing gate hub to link", COLOR_AMBER_HOT)
+			_set_status_text("RAILGATE · click empty tile to build an anchor, or click an existing anchor to link", COLOR_AMBER_HOT)
 			return
 		_request_gate_link_preview(nid)
 		return
@@ -786,7 +1200,7 @@ func _request_gate_link_preview(origin_id: String) -> void:
 	var destination := _suggest_gate_destination(origin_id)
 	if destination.is_empty():
 		_clear_pending_preview()
-		_set_status_text("GATE LINK · no unlinked external gate hub available", COLOR_ERR)
+		_set_status_text("RAILGATE LINK · no unlinked external Railgate endpoint available", COLOR_ERR)
 		_refresh_construction_hud()
 		return
 	var destination_id := str(destination.get("id", ""))
@@ -795,7 +1209,7 @@ func _request_gate_link_preview(origin_id: String) -> void:
 	_pending_preview_target_id = link_id
 	_pending_build_command = {}
 	_last_preview_result = {}
-	_set_status_text("PREVIEW · checking gate link %s -> %s..." % [origin_id, destination_id], COLOR_AMBER_HOT)
+	_set_status_text("PREVIEW · checking Railgate link %s -> %s..." % [origin_id, destination_id], COLOR_AMBER_HOT)
 	_refresh_construction_hud()
 	GateRailBridge.send_message({
 		"commands": [{
@@ -871,27 +1285,49 @@ func _handle_train_click(local_pos: Vector2) -> void:
 		_clear_pending_preview()
 
 	if _pending_preview_kind == "schedule" and not _pending_build_command.is_empty():
-		if nid == str(_pending_build_command.get("destination", "")):
+		var last_stop := ""
+		if not _route_stops.is_empty():
+			last_stop = str(_route_stops[-1].get("node_id", ""))
+		if nid == last_stop or nid == str(_pending_build_command.get("destination", "")):
 			_send_pending_build("Creating schedule %s..." % _pending_build_command.get("schedule_id", "route"), COLOR_CYAN)
 			_clear_route_builder()
 			return
 		_clear_pending_preview()
 
 	if not _route_train_id.is_empty():
-		if nid == _route_origin_id:
-			_set_status_text("ROUTE · origin %s selected · click destination node" % nid, COLOR_CYAN)
-			_refresh_construction_hud()
-			return
-		_open_cargo_kind_popup(_route_origin_id, nid)
-		_set_status_text("ROUTE · pick cargo for %s -> %s" % [_route_origin_id, nid], COLOR_CYAN)
+		var stop := {
+			"node_id": nid,
+			"action": STOP_ACTION_DELIVERY,
+			"cargo_type": null,
+			"units": 0,
+			"wait_condition": WAIT_CONDITION_NONE,
+			"wait_ticks": 0
+		}
+		if _route_stops.is_empty():
+			stop["action"] = STOP_ACTION_PICKUP
+			_route_origin_id = nid
+
+		_route_stops.append(stop)
+		_set_status_text("ROUTE · added stop %s · total stops: %d · click HUD to tune" % [_node_display_name(nid), _route_stops.size()], COLOR_CYAN)
+		_refresh_construction_hud()
+		if _canvas_panel != null:
+			_canvas_panel.queue_redraw()
 		return
 
 	var idle_train_id := _idle_train_at_node(nid)
 	if not idle_train_id.is_empty():
 		_clear_pending_preview()
 		_route_train_id = idle_train_id
+		_route_stops = [{
+			"node_id": nid,
+			"action": STOP_ACTION_PICKUP,
+			"cargo_type": null,
+			"units": 0,
+			"wait_condition": WAIT_CONDITION_NONE,
+			"wait_ticks": 0
+		}]
 		_route_origin_id = nid
-		_set_status_text("ROUTE · %s from %s · click destination" % [idle_train_id, nid], COLOR_CYAN)
+		_set_status_text("ROUTE · %s selected · added stop %s · click next stop" % [idle_train_id, _node_display_name(nid)], COLOR_CYAN)
 		_refresh_construction_hud()
 		if _canvas_panel != null:
 			_canvas_panel.queue_redraw()
@@ -938,11 +1374,23 @@ func _request_schedule_preview(
 	var interval := interval_ticks
 	if interval <= 0:
 		interval = DEFAULT_ROUTE_INTERVAL_TICKS
+
+	var train_stops_payload: Array = []
+	for stop in _route_stops:
+		train_stops_payload.append({
+			"node_id": stop.get("node_id", ""),
+			"action": stop.get("action", STOP_ACTION_PASSTHROUGH),
+			"cargo_type": cargo_type,
+			"units": units,
+			"wait_condition": stop.get("wait_condition", WAIT_CONDITION_NONE),
+			"wait_ticks": stop.get("wait_ticks", 0)
+		})
+
 	_pending_preview_kind = "schedule"
 	_pending_preview_target_id = schedule_id
 	_pending_build_command = {}
 	_last_preview_result = {}
-	_set_status_text("PREVIEW · checking route %s -> %s..." % [origin_id, destination_id], COLOR_CYAN)
+	_set_status_text("PREVIEW · checking multi-stop route for %s..." % train_id, COLOR_CYAN)
 	_refresh_construction_hud()
 	GateRailBridge.send_message({
 		"commands": [{
@@ -954,6 +1402,7 @@ func _request_schedule_preview(
 			"cargo_type": cargo_type,
 			"units_per_departure": units,
 			"interval_ticks": interval,
+			"train_stops": train_stops_payload,
 		}],
 		"ticks": 0
 	})
@@ -989,12 +1438,29 @@ func _suggest_cargo_for_route(origin_id: String, destination_id: String) -> Stri
 	var origin := _node_snapshot(origin_id)
 	var destination := _node_snapshot(destination_id)
 	var inventory: Dictionary = origin.get("inventory", {}) if typeof(origin.get("inventory")) == TYPE_DICTIONARY else {}
+	var production: Dictionary = origin.get("production", {}) if typeof(origin.get("production")) == TYPE_DICTIONARY else {}
 	var demand: Dictionary = destination.get("demand", {}) if typeof(destination.get("demand")) == TYPE_DICTIONARY else {}
+	var recipe_in := _node_recipe_inputs(destination)
+	var recipe_out := _node_recipe_outputs(origin)
+	# Priority 1: inventory matches destination demand or recipe input
 	var keys: Array = inventory.keys()
 	keys.sort()
 	for key in keys:
-		if demand.has(key):
+		if demand.has(key) or recipe_in.has(key):
 			return str(key)
+	# Priority 2: origin production matches destination demand or recipe input
+	var prod_keys: Array = production.keys()
+	prod_keys.sort()
+	for key in prod_keys:
+		if demand.has(key) or recipe_in.has(key):
+			return str(key)
+	# Priority 3: origin recipe outputs match destination demand or recipe input
+	var out_keys: Array = recipe_out.keys()
+	out_keys.sort()
+	for key in out_keys:
+		if demand.has(key) or recipe_in.has(key):
+			return str(key)
+	# Fallback: first inventory item, first demand, or "food"
 	if not keys.is_empty():
 		return str(keys[0])
 	var demand_keys: Array = demand.keys()
@@ -1006,6 +1472,24 @@ func _suggest_cargo_for_route(origin_id: String, destination_id: String) -> Stri
 
 # --- Select / Inspect ---
 func _handle_select_click(local_pos: Vector2) -> void:
+	var eid := _hit_operational_entity_at(local_pos)
+	if not eid.is_empty():
+		_selected_local_kind = "operational_entity"
+		_selected_local_id = eid
+		_set_status_text("INSPECT · local entity %s" % eid, COLOR_CYAN)
+		if not _world_operational_area.is_empty():
+			GateRailBridge.send_message({
+				"commands": [{
+					"type": "local.inspect_entity",
+					"operational_area_id": str(_world_operational_area.get("id", "")),
+					"entity_id": eid,
+				}],
+				"ticks": 0
+			})
+		_refresh_construction_hud()
+		if _canvas_panel != null:
+			_canvas_panel.queue_redraw()
+		return
 	var nid := _hit_node_at(local_pos)
 	if not nid.is_empty():
 		_selected_local_kind = "node"
@@ -1125,6 +1609,18 @@ func _request_internal_connection_preview(source: Dictionary, destination: Dicti
 
 # --- Demolish ---
 func _handle_demolish_click(local_pos: Vector2) -> void:
+	var entity_id := _hit_operational_entity_at(local_pos)
+	if not entity_id.is_empty() and not _world_operational_area.is_empty():
+		_set_status_text("Deleting local entity %s..." % entity_id, COLOR_ERR)
+		GateRailBridge.send_message({
+			"commands": [{
+				"type": "local.delete_entity",
+				"operational_area_id": str(_world_operational_area.get("id", "")),
+				"entity_id": entity_id,
+			}],
+			"ticks": 0
+		})
+		return
 	var link_id := _hit_link_at(local_pos)
 	if not link_id.is_empty():
 		_set_status_text("Demolishing link %s..." % link_id, COLOR_ERR)
@@ -1403,8 +1899,10 @@ func _on_canvas_draw() -> void:
 	_draw_terrain(size)
 	_draw_grid(size)
 	_draw_links_and_nodes(size)
+	_draw_operational_entities(size)
 	_draw_logistics_overlays(size)
 	_draw_trains(size)
+	_draw_route_builder()
 	_draw_build_preview(size)
 	_draw_snap_cursor(size)
 	_canvas_panel.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -1413,12 +1911,74 @@ func _on_canvas_draw() -> void:
 	_draw_corner_brackets(size)
 	_draw_compass(size)
 	_draw_scalebar(size)
+	_draw_supply_chain_flowchart(size)
+
+
+func _draw_route_builder() -> void:
+	if _active_tool != TOOL_TRAIN or _route_train_id.is_empty():
+		return
+
+	var t_sec := Time.get_ticks_msec() / 1000.0
+	var pulse := 0.5 + 0.5 * sin(t_sec * 2.5)
+	var color := COLOR_CYAN
+	color.a = 0.6 + 0.2 * pulse
+
+	var prev_pos := Vector2.ZERO
+	var has_prev := false
+
+	for i in _route_stops.size():
+		var stop := _route_stops[i]
+		var nid := str(stop.get("node_id", ""))
+		if not _node_positions.has(nid):
+			continue
+		var pos: Vector2 = _node_positions[nid]
+
+		# Draw stop highlight
+		_canvas_panel.draw_arc(pos, 32.0, 0.0, TAU, 32, color, 2.5 if i == _route_stops.size() - 1 else 1.5, true)
+
+		# Draw Action/Wait label
+		var action_text: String = str(stop.get("action", "")).to_upper()
+		var wait_text: String = str(stop.get("wait_condition", "none"))
+		var label := action_text
+		if wait_text != "none":
+			label += " (WAIT %s)" % wait_text.to_upper()
+
+		var font := ThemeDB.fallback_font
+		_canvas_panel.draw_string(font, pos + Vector2(-40, 48), label, HORIZONTAL_ALIGNMENT_CENTER, 80, 9, color)
+
+		# Draw sequence line
+		if has_prev:
+			var line_color := Color(color.r, color.g, color.b, 0.4)
+			_canvas_panel.draw_line(prev_pos, pos, line_color, 2.0)
+			# Draw direction arrow
+			var mid := prev_pos.lerp(pos, 0.5)
+			var dir := (pos - prev_pos).normalized()
+			_canvas_panel.draw_line(mid, mid - dir.rotated(0.4) * 12, color, 1.5)
+			_canvas_panel.draw_line(mid, mid - dir.rotated(-0.4) * 12, color, 1.5)
+
+		prev_pos = pos
+		has_prev = true
 
 
 func _process(_delta: float) -> void:
-	# Continuously redraw only when trains are in transit for smooth animation
+	# Continuously redraw for smooth animations: in-transit trains, attention
+	# pulses on nodes with shortages/blocked recipes, and route suggestions.
 	if _canvas_panel == null:
 		return
+	# Route suggestion highlights animate while the train tool is active
+	if _active_tool == TOOL_TRAIN and not _route_train_id.is_empty():
+		_canvas_panel.queue_redraw()
+		return
+	# Attention pulses animate when any node has shortages or blocked recipes
+	for node in _world_nodes:
+		if typeof(node) != TYPE_DICTIONARY:
+			continue
+		if _dict_positive_total(node.get("recipe_blocked", {})) > 0:
+			_canvas_panel.queue_redraw()
+			return
+		if _dict_positive_total(node.get("shortages", {})) > 0:
+			_canvas_panel.queue_redraw()
+			return
 	var trains: Array = _latest_snapshot.get("trains", [])
 	for t in trains:
 		if typeof(t) == TYPE_DICTIONARY and str(t.get("status", "")) == "in_transit":
@@ -1675,6 +2235,46 @@ func _draw_trains(_size: Vector2) -> void:
 		if status == "in_transit":
 			_draw_local_train_route_path(train)
 		_draw_train_glyph(draw_pos, draw_dir, status)
+
+		# Draw status label for stopped trains
+		if status != "in_transit":
+			var font := ThemeDB.fallback_font
+			var label := status.to_upper()
+			var color := COLOR_STEEL
+
+			if status == "blocked":
+				color = COLOR_ERR
+				var reason := str(train.get("blocked_reason", ""))
+				if not reason.is_empty():
+					label = "BLOCKED (%s)" % reason.replace("_", " ").to_upper()
+
+			# Check if train is currently at a stop with a wait condition
+			var stops: Array = []
+			var current_idx: int = int(train.get("current_stop_index", 0))
+			var order_id := str(train.get("order", ""))
+
+			# Search for stops in the snapshot
+			if not order_id.is_empty():
+				if order_id.begins_with(SCHEDULE_ORDER_PREFIX):
+					var sid := order_id.trim_prefix(SCHEDULE_ORDER_PREFIX)
+					for s in _latest_snapshot.get("schedules", []):
+						if str(s.get("id", "")) == sid:
+							stops = s.get("train_stops", [])
+							break
+				else:
+					for o in _latest_snapshot.get("orders", []):
+						if str(o.get("id", "")) == order_id:
+							stops = o.get("train_stops", [])
+							break
+
+			if current_idx < stops.size():
+				var stop: Dictionary = stops[current_idx]
+				var wait := str(stop.get("wait_condition", "none"))
+				if wait != "none":
+					label = "WAITING %s" % wait.to_upper()
+					color = COLOR_CYAN
+
+			_canvas_panel.draw_string(font, draw_pos + Vector2(-40, -12), label, HORIZONTAL_ALIGNMENT_CENTER, 80, 8, color)
 
 
 func _draw_local_train_route_path(train: Dictionary) -> void:
@@ -1967,6 +2567,233 @@ func _draw_scalebar(size: Vector2) -> void:
 	_canvas_panel.draw_string(font, origin + Vector2(140, 6), "2.4 KM", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, COLOR_STEEL)
 
 
+# ---- Tier 3: Supply Chain Flowchart ----
+
+func _draw_supply_chain_flowchart(size: Vector2) -> void:
+	# Prefer the backend-driven vertical loop payload when present.
+	var vl = _latest_snapshot.get("vertical_loop")
+	if typeof(vl) == TYPE_DICTIONARY and typeof(vl.get("steps")) == TYPE_ARRAY:
+		_draw_vertical_loop_panel(size, vl)
+		return
+	# Fallback: generic node-scanner for scenarios without a vertical_loop
+	_draw_generic_chain_panel(size)
+
+
+func _draw_vertical_loop_panel(size: Vector2, vl: Dictionary) -> void:
+	var steps: Array = vl.get("steps", [])
+	var diagnostics: Array = vl.get("diagnostics", [])
+	var title_text: String = str(vl.get("title", "SUPPLY CHAIN"))
+	var font := ThemeDB.fallback_font
+
+	var step_h := 24.0
+	var diag_h := 18.0
+	var header_h := 28.0
+	var diag_count := mini(diagnostics.size(), 4)  # Cap visible diagnostics
+	var panel_w := 280.0
+	var panel_h := header_h + float(steps.size()) * step_h + float(diag_count) * diag_h + 20.0
+	var panel_pos := Vector2(size.x - panel_w - 16, size.y - panel_h - 44)
+
+	# Panel background
+	var panel_rect := Rect2(panel_pos, Vector2(panel_w, panel_h))
+	_canvas_panel.draw_rect(panel_rect, Color(0.02, 0.04, 0.08, 0.90), true)
+	_canvas_panel.draw_rect(panel_rect, Color(COLOR_HAIR_2.r, COLOR_HAIR_2.g, COLOR_HAIR_2.b, 0.6), false, 1.0)
+
+	# Header
+	_canvas_panel.draw_string(font, panel_pos + Vector2(10, 18), title_text.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, panel_w - 20, 10, COLOR_STEEL_2)
+
+	var y_cursor := panel_pos.y + header_h
+
+	# Blocker diagnostics strip (ABOVE steps as per plan)
+	if diag_count > 0:
+		for d_i in diag_count:
+			var diag: Dictionary = diagnostics[d_i] if typeof(diagnostics[d_i]) == TYPE_DICTIONARY else {}
+			var code := str(diag.get("code", ""))
+			var msg := str(diag.get("message", ""))
+			var diag_col := COLOR_AMBER_HOT
+			# Color codes by severity
+			if code in ["missing_power", "railgate_capacity_exceeded", "no_route", "missing_train"]:
+				diag_col = COLOR_ERR
+
+			_canvas_panel.draw_string(font, Vector2(panel_pos.x + 10, y_cursor + 12), "⚠ " + msg, HORIZONTAL_ALIGNMENT_LEFT, panel_w - 20, 9, diag_col)
+			y_cursor += diag_h
+
+		# Separator
+		y_cursor += 4.0
+		_canvas_panel.draw_line(
+			Vector2(panel_pos.x + 10, y_cursor),
+			Vector2(panel_pos.x + panel_w - 10, y_cursor),
+			Color(COLOR_HAIR_2.r, COLOR_HAIR_2.g, COLOR_HAIR_2.b, 0.4), 1.0
+		)
+		y_cursor += 6.0
+
+	# Milestone steps
+	for i in steps.size():
+		var step: Dictionary = steps[i] if typeof(steps[i]) == TYPE_DICTIONARY else {}
+		var step_y := y_cursor
+		var x := panel_pos.x + 10
+		var status := str(step.get("status", "pending"))
+		var label := str(step.get("label", str(step.get("id", ""))))
+
+		# Status icon + color
+		var icon := "⏳"
+		var col := COLOR_STEEL
+		if status == "complete":
+			icon = "✓"
+			col = COLOR_OK
+		elif status == "active":
+			icon = "►"
+			col = COLOR_CYAN
+
+		_canvas_panel.draw_string(font, Vector2(x, step_y + 15), icon, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, col)
+		_canvas_panel.draw_string(font, Vector2(x + 18, step_y + 15), label, HORIZONTAL_ALIGNMENT_LEFT, panel_w - 85, 9, col if status != "pending" else Color(col.r, col.g, col.b, 0.45))
+
+		# Progress bar for delivery steps
+		var delivered := int(step.get("delivered", 0))
+		var target := int(step.get("target_units", 0))
+		if target > 0:
+			var progress_label := "%d/%d" % [delivered, target]
+			_canvas_panel.draw_string(font, Vector2(panel_pos.x + panel_w - 52, step_y + 15), progress_label, HORIZONTAL_ALIGNMENT_RIGHT, 42, 9, col)
+			# Mini progress bar
+			var bar_x := panel_pos.x + panel_w - 52
+			var bar_y := step_y + 18
+			var bar_w := 42.0
+			var bar_h := 3.0
+			_canvas_panel.draw_rect(Rect2(Vector2(bar_x, bar_y), Vector2(bar_w, bar_h)), Color(col.r, col.g, col.b, 0.15), true)
+			var fill := clampf(float(delivered) / float(target), 0.0, 1.0)
+			_canvas_panel.draw_rect(Rect2(Vector2(bar_x, bar_y), Vector2(bar_w * fill, bar_h)), Color(col.r, col.g, col.b, 0.7), true)
+
+		# Arrow connector between steps
+		if i < steps.size() - 1:
+			var arrow_y := step_y + step_h - 3
+			_canvas_panel.draw_line(Vector2(x + 4, arrow_y - 4), Vector2(x + 4, arrow_y + 2), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.3), 1.0)
+			_canvas_panel.draw_line(Vector2(x + 2, arrow_y), Vector2(x + 4, arrow_y + 2), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.3), 1.0)
+			_canvas_panel.draw_line(Vector2(x + 6, arrow_y), Vector2(x + 4, arrow_y + 2), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.3), 1.0)
+
+		y_cursor += step_h
+
+
+func _draw_generic_chain_panel(size: Vector2) -> void:
+	# Fallback generic chain from snapshot nodes: find extractors → industries → settlements
+	var all_nodes: Array = _latest_snapshot.get("nodes", []) if typeof(_latest_snapshot.get("nodes")) == TYPE_ARRAY else []
+	var all_trains: Array = _latest_snapshot.get("trains", []) if typeof(_latest_snapshot.get("trains")) == TYPE_ARRAY else []
+	var cargo_flows: Array = _latest_snapshot.get("cargo_flows", []) if typeof(_latest_snapshot.get("cargo_flows")) == TYPE_ARRAY else []
+
+	var steps: Array = []
+	for node in all_nodes:
+		if typeof(node) != TYPE_DICTIONARY:
+			continue
+		var kind := str(node.get("kind", ""))
+		var node_name := str(node.get("name", str(node.get("id", ""))))
+		var node_id := str(node.get("id", ""))
+		var production := _cargo_dict(node.get("production", {}))
+		var recipe_in := _node_recipe_inputs(node)
+		var recipe_out := _node_recipe_outputs(node)
+		var inventory := _cargo_dict(node.get("inventory", {}))
+		var blocked := _cargo_dict(node.get("recipe_blocked", {}))
+		var demand := _cargo_dict(node.get("demand", {}))
+
+		if kind != "extractor" and kind != "industry" and kind != "settlement":
+			continue
+		if kind == "settlement" and demand.is_empty():
+			continue
+
+		var icon := "⛏" if kind == "extractor" else ("🏭" if kind == "industry" else "🏘")
+		var cargo_label := ""
+		if not production.is_empty():
+			cargo_label = _format_top_cargo(production, 1)
+		elif not recipe_out.is_empty():
+			cargo_label = _format_top_cargo(recipe_out, 1)
+		elif not demand.is_empty():
+			cargo_label = _format_top_cargo(demand, 1)
+
+		var status := "idle"
+		var status_color := COLOR_STEEL
+		var status_icon := "⏳"
+		if _dict_positive_total(blocked) > 0:
+			status = "blocked"
+			status_color = COLOR_ERR
+			status_icon = "⚠"
+		elif kind == "extractor" and _dict_positive_total(production) > 0:
+			status = "running"
+			status_color = COLOR_OK
+			status_icon = "✓"
+		elif kind == "industry" and _dict_positive_total(inventory) > 0:
+			var has_inputs := false
+			for cargo_key in recipe_in.keys():
+				if int(inventory.get(cargo_key, 0)) > 0:
+					has_inputs = true
+					break
+			if has_inputs:
+				status = "running"
+				status_color = COLOR_OK
+				status_icon = "✓"
+		elif kind == "settlement" and _dict_positive_total(inventory) > 0:
+			status = "receiving"
+			status_color = COLOR_OK
+			status_icon = "✓"
+
+		var has_active_flow := false
+		for flow in cargo_flows:
+			if typeof(flow) != TYPE_DICTIONARY:
+				continue
+			var route: Array = flow.get("route_node_ids", [])
+			for rid in route:
+				if str(rid) == node_id:
+					has_active_flow = true
+					break
+			if has_active_flow:
+				break
+		if has_active_flow and status == "idle":
+			status = "served"
+			status_color = COLOR_CYAN
+			status_icon = "↔"
+
+		steps.append({
+			"name": node_name,
+			"icon": icon,
+			"cargo": cargo_label,
+			"status": status,
+			"status_color": status_color,
+			"status_icon": status_icon,
+		})
+
+	if steps.is_empty():
+		return
+
+	var font := ThemeDB.fallback_font
+	var step_h := 22.0
+	var panel_w := 220.0
+	var header_h := 24.0
+	var panel_h := header_h + float(steps.size()) * step_h + 12.0
+	var panel_pos := Vector2(size.x - panel_w - 16, size.y - panel_h - 44)
+
+	var panel_rect := Rect2(panel_pos, Vector2(panel_w, panel_h))
+	_canvas_panel.draw_rect(panel_rect, Color(0.025, 0.055, 0.09, 0.85), true)
+	_canvas_panel.draw_rect(panel_rect, Color(COLOR_HAIR_2.r, COLOR_HAIR_2.g, COLOR_HAIR_2.b, 0.6), false, 1.0)
+
+	_canvas_panel.draw_string(font, panel_pos + Vector2(10, 16), "SUPPLY CHAIN", HORIZONTAL_ALIGNMENT_LEFT, panel_w - 20, 10, COLOR_STEEL_2)
+
+	var y := panel_pos.y + header_h
+	for i in steps.size():
+		var step: Dictionary = steps[i]
+		var step_y := y + float(i) * step_h
+		var x := panel_pos.x + 10
+
+		_canvas_panel.draw_string(font, Vector2(x, step_y + 14), str(step["status_icon"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, step["status_color"])
+		var label_text := "%s %s" % [str(step["icon"]), str(step["name"])]
+		_canvas_panel.draw_string(font, Vector2(x + 16, step_y + 14), label_text, HORIZONTAL_ALIGNMENT_LEFT, panel_w - 80, 9, COLOR_ICE)
+
+		if not str(step["cargo"]).is_empty():
+			_canvas_panel.draw_string(font, Vector2(panel_pos.x + panel_w - 68, step_y + 14), str(step["cargo"]), HORIZONTAL_ALIGNMENT_RIGHT, 56, 9, step["status_color"])
+
+		if i < steps.size() - 1:
+			var arrow_y := step_y + step_h - 2
+			_canvas_panel.draw_line(Vector2(x + 4, arrow_y - 4), Vector2(x + 4, arrow_y + 2), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.4), 1.0)
+			_canvas_panel.draw_line(Vector2(x + 2, arrow_y), Vector2(x + 4, arrow_y + 2), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.4), 1.0)
+			_canvas_panel.draw_line(Vector2(x + 6, arrow_y), Vector2(x + 4, arrow_y + 2), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.4), 1.0)
+
+
+
 func _draw_links_and_nodes(size: Vector2) -> void:
 	# Rebuild positions each draw so it reacts to resize.
 	_rebuild_node_positions(size)
@@ -1984,21 +2811,357 @@ func _draw_links_and_nodes(size: Vector2) -> void:
 
 	_draw_cargo_flows()
 
-	# Nodes
+	# Nodes — draw glyphs, info cards, attention pulses, idle train chips
 	var font := ThemeDB.fallback_font
+	var t_sec: float = float(Time.get_ticks_msec()) / 1000.0
 	for node in _world_nodes:
 		var node_id := str(node.get("id", ""))
 		if not _node_positions.has(node_id):
 			continue
 		var pos: Vector2 = _node_positions[node_id]
 		var kind := str(node.get("kind", "depot"))
+
+		# --- Attention pulse ring (animated) ---
+		_draw_node_attention_pulse(pos, node, t_sec)
+
 		_draw_node_glyph(pos, kind, node_id == _gate_hub_node_id)
-		var label := str(node.get("name", node_id)).to_upper()
-		var kind_lbl := kind.to_upper().replace("_", " ")
-		_canvas_panel.draw_string(font, pos + Vector2(-50, 44), label, HORIZONTAL_ALIGNMENT_CENTER, 100, 11, COLOR_ICE)
-		_canvas_panel.draw_string(font, pos + Vector2(-50, 58), kind_lbl, HORIZONTAL_ALIGNMENT_CENTER, 100, 10, COLOR_STEEL)
+
+		# --- Info card ---
+		_draw_node_info_card(pos, node, font, t_sec)
+
+		# --- Idle train chip ---
+		_draw_idle_train_chip(pos, node_id, font)
+
 		if node.get("construction_project_id") != null and str(node.get("construction_project_id")) != "":
 			_canvas_panel.draw_string(font, pos + Vector2(-60, -32), "UNDER CONSTRUCTION", HORIZONTAL_ALIGNMENT_CENTER, 120, 10, COLOR_AMBER_HOT)
+
+	# --- Route suggestions (highlight valid destinations when train tool is active) ---
+	_draw_route_suggestions(font, t_sec)
+
+
+func _operational_entity_position(entity: Dictionary) -> Vector2:
+	var cell: Dictionary = entity.get("cell", {}) if typeof(entity.get("cell")) == TYPE_DICTIONARY else {}
+	var grid: Dictionary = _world_operational_area.get("grid", {}) if typeof(_world_operational_area.get("grid")) == TYPE_DICTIONARY else {}
+	var grid_w := int(grid.get("width", 48))
+	var grid_h := int(grid.get("height", 32))
+	var cell_size := float(grid.get("cell_size", GRID_MICRO))
+	var raw := Vector2(
+		(float(cell.get("x", 0)) - float(grid_w / 2)) * cell_size,
+		(float(cell.get("y", 0)) - float(grid_h / 3)) * cell_size,
+	)
+	var center := _canvas_rect.size * 0.5
+	var scale: float = _layout_spread_scale if _layout_spread_scale > 0.0 else 1.0
+	return center + (raw - _layout_bbox_center) * scale
+
+
+func _operational_entity_color(entity_type: String, blocked: bool) -> Color:
+	if blocked:
+		return COLOR_ERR
+	match entity_type:
+		"track_segment":
+			return COLOR_STEEL_2
+		"loader", "unloader":
+			return COLOR_AMBER_HOT
+		"transfer_link":
+			return COLOR_CYAN
+		"refinery":
+			return Color(0.48, 0.78, 0.95)
+		"factory":
+			return Color(0.78, 0.62, 0.96)
+		"railgate_terminal":
+			return COLOR_AMBER
+		"extractor":
+			return COLOR_OK
+		"storage", "hopper":
+			return Color(0.70, 0.82, 0.84)
+		_:
+			return COLOR_STEEL
+
+
+func _draw_operational_entities(_size: Vector2) -> void:
+	if _world_operational_entities.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	for entity in _world_operational_entities:
+		if typeof(entity) != TYPE_DICTIONARY:
+			continue
+		var entity_type := str(entity.get("entity_type", entity.get("kind", "")))
+		var blocked_reasons: Array = entity.get("blocked_reasons", []) if typeof(entity.get("blocked_reasons")) == TYPE_ARRAY else []
+		var blocked := not blocked_reasons.is_empty()
+		var pos := _operational_entity_position(entity)
+		var col := _operational_entity_color(entity_type, blocked)
+		var footprint: Dictionary = entity.get("footprint", {}) if typeof(entity.get("footprint")) == TYPE_DICTIONARY else {}
+		var w: int = max(1, int(footprint.get("width", 1)))
+		var h: int = max(1, int(footprint.get("height", 1)))
+		var draw_w: float = max(14.0, float(w) * 12.0)
+		var draw_h: float = max(14.0, float(h) * 12.0)
+		var rect := Rect2(pos - Vector2(draw_w, draw_h) * 0.5, Vector2(draw_w, draw_h))
+
+		if entity_type == "transfer_link":
+			_canvas_panel.draw_circle(pos, 4.5, Color(col.r, col.g, col.b, 0.82))
+			continue
+		if entity_type == "track_segment":
+			var path_cells: Array = entity.get("path_cells", []) if typeof(entity.get("path_cells")) == TYPE_ARRAY else []
+			if path_cells.size() >= 2:
+				var previous := Vector2.ZERO
+				var has_previous := false
+				for path_cell in path_cells:
+					if typeof(path_cell) != TYPE_DICTIONARY:
+						continue
+					var path_pos := _operational_cell_position(path_cell)
+					if has_previous:
+						_canvas_panel.draw_line(previous, path_pos, Color(col.r, col.g, col.b, 0.72), 4.0)
+					_canvas_panel.draw_circle(path_pos, 2.5, Color(col.r, col.g, col.b, 0.82))
+					previous = path_pos
+					has_previous = true
+				continue
+			var rot := deg_to_rad(float(entity.get("rotation", 0)))
+			var dir := Vector2(cos(rot), sin(rot))
+			if dir.length() <= 0.0:
+				dir = Vector2.RIGHT
+			_canvas_panel.draw_line(pos - dir * 10.0, pos + dir * 10.0, Color(col.r, col.g, col.b, 0.66), 3.0)
+			continue
+
+		_canvas_panel.draw_rect(rect, Color(col.r, col.g, col.b, 0.12), true)
+		_canvas_panel.draw_rect(rect, Color(col.r, col.g, col.b, 0.70), false, 1.0)
+		var label := entity_type.substr(0, min(3, entity_type.length())).to_upper()
+		_canvas_panel.draw_string(font, rect.position + Vector2(2, draw_h - 3), label, HORIZONTAL_ALIGNMENT_CENTER, draw_w - 4, 8, col)
+
+
+# ---- Tier 1A: Node Info Cards ----
+
+func _draw_node_info_card(pos: Vector2, node: Dictionary, font: Font, t_sec: float) -> void:
+	var kind := str(node.get("kind", "depot"))
+	var node_name := str(node.get("name", str(node.get("id", "")))).to_upper()
+	var kind_lbl := kind.to_upper().replace("_", " ")
+
+	# Gather data
+	var production := _cargo_dict(node.get("production", {}))
+	var demand := _cargo_dict(node.get("demand", {}))
+	var recipe_in := _node_recipe_inputs(node)
+	var recipe_out := _node_recipe_outputs(node)
+	var inventory := _cargo_dict(node.get("inventory", {}))
+	var storage_pct := _node_storage_pressure(node)
+	var storage := _cargo_dict(node.get("storage", {}))
+	var used := int(storage.get("used", 0))
+	var cap := int(storage.get("capacity", 1))
+
+	# Compute card height based on content lines
+	var lines: Array = []
+	if not production.is_empty():
+		lines.append({"text": "▲ " + _format_top_cargo(production, 2) + " /t", "color": COLOR_OK})
+	if not recipe_in.is_empty() and not recipe_out.is_empty():
+		lines.append({"text": _format_top_cargo(recipe_in, 1) + " → " + _format_top_cargo(recipe_out, 1), "color": COLOR_CYAN})
+	elif not recipe_in.is_empty():
+		lines.append({"text": "needs " + _format_top_cargo(recipe_in, 2), "color": COLOR_AMBER_HOT})
+	if not demand.is_empty():
+		lines.append({"text": "▼ " + _format_top_cargo(demand, 2), "color": COLOR_AMBER_HOT})
+	# Check for recipe blocked state
+	var blocked := _cargo_dict(node.get("recipe_blocked", {}))
+	if _dict_positive_total(blocked) > 0:
+		lines.append({"text": "⚠ MISSING " + _format_top_cargo(blocked, 1), "color": COLOR_ERR})
+
+	var card_w := 140.0
+	var line_height := 14.0
+	var header_h := 30.0
+	var bar_h := 8.0
+	var padding := 6.0
+	var card_h := header_h + float(lines.size()) * line_height + bar_h + padding * 2.0
+	var card_pos := pos + Vector2(-card_w * 0.5, 44.0)
+
+	# Card background
+	var card_rect := Rect2(card_pos, Vector2(card_w, card_h))
+	_canvas_panel.draw_rect(card_rect, Color(0.035, 0.075, 0.12, 0.88), true)
+	# Subtle border — use attention color if node needs action
+	var border_color := COLOR_HAIR_2
+	if _dict_positive_total(blocked) > 0:
+		border_color = Color(COLOR_ERR.r, COLOR_ERR.g, COLOR_ERR.b, 0.6)
+	elif _node_has_demand(node) and not _node_has_supply(node):
+		border_color = Color(COLOR_AMBER_HOT.r, COLOR_AMBER_HOT.g, COLOR_AMBER_HOT.b, 0.5)
+	_canvas_panel.draw_rect(card_rect, border_color, false, 1.0)
+
+	# Header: name + kind
+	_canvas_panel.draw_string(font, card_pos + Vector2(6, 14), node_name, HORIZONTAL_ALIGNMENT_LEFT, card_w - 12, 10, COLOR_ICE)
+	_canvas_panel.draw_string(font, card_pos + Vector2(6, 26), kind_lbl, HORIZONTAL_ALIGNMENT_LEFT, card_w - 12, 9, COLOR_STEEL)
+
+	# Content lines
+	var y_cursor := card_pos.y + header_h
+	for line in lines:
+		_canvas_panel.draw_string(font, Vector2(card_pos.x + 6, y_cursor + 10), str(line["text"]), HORIZONTAL_ALIGNMENT_LEFT, card_w - 12, 10, line["color"])
+		y_cursor += line_height
+
+	# Storage bar
+	var bar_y := y_cursor + padding
+	var bar_x := card_pos.x + 6.0
+	var bar_w := card_w - 12.0
+	var bar_color := COLOR_CYAN
+	if storage_pct >= 0.90:
+		bar_color = COLOR_ERR
+	elif storage_pct >= 0.70:
+		bar_color = COLOR_AMBER_HOT
+	_canvas_panel.draw_rect(Rect2(Vector2(bar_x, bar_y), Vector2(bar_w, bar_h)), Color(0.02, 0.04, 0.07, 0.7), true)
+	_canvas_panel.draw_rect(Rect2(Vector2(bar_x, bar_y), Vector2(bar_w, bar_h)), Color(bar_color.r, bar_color.g, bar_color.b, 0.35), false, 1.0)
+	if storage_pct > 0.0:
+		_canvas_panel.draw_rect(Rect2(Vector2(bar_x, bar_y), Vector2(bar_w * clampf(storage_pct, 0.0, 1.0), bar_h)), Color(bar_color.r, bar_color.g, bar_color.b, 0.75), true)
+	# Storage label
+	var storage_label := "%d/%d" % [used, cap]
+	_canvas_panel.draw_string(font, Vector2(bar_x + bar_w + 4, bar_y + 7), storage_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, COLOR_STEEL)
+
+
+# ---- Tier 1C: Attention Pulse ----
+
+func _draw_node_attention_pulse(pos: Vector2, node: Dictionary, t_sec: float) -> void:
+	var pulse := 0.5 + 0.5 * sin(t_sec * 3.0)
+	var blocked := _cargo_dict(node.get("recipe_blocked", {}))
+	var shortages := _cargo_dict(node.get("shortages", {}))
+
+	if _dict_positive_total(blocked) > 0:
+		# Recipe blocked — red pulse
+		var alpha := 0.12 + 0.18 * pulse
+		_canvas_panel.draw_arc(pos, 34.0 + 4.0 * pulse, 0.0, TAU, 48, Color(COLOR_ERR.r, COLOR_ERR.g, COLOR_ERR.b, alpha), 2.5, true)
+	elif _dict_positive_total(shortages) > 0:
+		# Shortage — amber pulse
+		var alpha := 0.10 + 0.15 * pulse
+		_canvas_panel.draw_arc(pos, 32.0 + 3.0 * pulse, 0.0, TAU, 48, Color(COLOR_AMBER_HOT.r, COLOR_AMBER_HOT.g, COLOR_AMBER_HOT.b, alpha), 2.0, true)
+	elif _node_has_demand(node) and _dict_positive_total(_cargo_dict(node.get("inventory", {}))) == 0:
+		# Unsatisfied demand with empty inventory — amber gentle pulse
+		var alpha := 0.08 + 0.10 * pulse
+		_canvas_panel.draw_arc(pos, 30.0 + 2.0 * pulse, 0.0, TAU, 48, Color(COLOR_AMBER.r, COLOR_AMBER.g, COLOR_AMBER.b, alpha), 1.5, true)
+	elif _node_storage_pressure(node) >= 0.90:
+		# Storage almost full — green glow
+		_canvas_panel.draw_arc(pos, 30.0, 0.0, TAU, 48, Color(COLOR_OK.r, COLOR_OK.g, COLOR_OK.b, 0.18 + 0.08 * pulse), 2.0, true)
+	else:
+		# Check vertical_loop diagnostics for blockers referencing this node
+		var node_id := str(node.get("id", ""))
+		var vl = _latest_snapshot.get("vertical_loop")
+		if typeof(vl) == TYPE_DICTIONARY:
+			var diags: Array = vl.get("diagnostics", []) if typeof(vl.get("diagnostics")) == TYPE_ARRAY else []
+			for diag in diags:
+				if typeof(diag) != TYPE_DICTIONARY:
+					continue
+
+				var diag_node_id := str(diag.get("node_id", ""))
+				var diag_origin := str(diag.get("origin", ""))
+				var diag_link_id := str(diag.get("link_id", ""))
+				var diag_sched_id := str(diag.get("schedule_id", ""))
+
+				# If no direct node_id/origin, try to resolve from schedule or link
+				if diag_node_id == "" and diag_origin == "":
+					if diag_sched_id != "":
+						for s in _latest_snapshot.get("schedules", []):
+							if str(s.get("id", "")) == diag_sched_id:
+								diag_node_id = str(s.get("origin", ""))
+								break
+					elif diag_link_id != "":
+						for lnk in _latest_snapshot.get("links", []):
+							if str(lnk.get("id", "")) == diag_link_id:
+								if str(lnk.get("origin", "")) == node_id or str(lnk.get("destination", "")) == node_id:
+									diag_node_id = node_id
+								break
+
+				# Some diagnostics use 'origin' (like no_route) instead of 'node_id'
+				if diag_node_id != node_id and diag_origin != node_id:
+					continue
+
+				var code := str(diag.get("code", ""))
+
+				if code in ["no_route", "missing_train", "missing_power", "railgate_capacity_exceeded"]:
+					# Critical blockers — red pulse
+					var alpha := 0.12 + 0.18 * pulse
+					_canvas_panel.draw_arc(pos, 34.0 + 4.0 * pulse, 0.0, TAU, 48, Color(COLOR_ERR.r, COLOR_ERR.g, COLOR_ERR.b, alpha), 2.5, true)
+					break
+				elif code in ["depot_full", "warehouse_full", "no_source_cargo", "recipe_input_missing", "colony_shortage"]:
+					# Resource/Capacity blockers — amber pulse
+					var alpha := 0.10 + 0.12 * pulse
+					_canvas_panel.draw_arc(pos, 32.0 + 3.0 * pulse, 0.0, TAU, 48, Color(COLOR_AMBER_HOT.r, COLOR_AMBER_HOT.g, COLOR_AMBER_HOT.b, alpha), 2.0, true)
+					break
+				elif code in ["extraction_not_built", "extraction_under_construction"]:
+					# Progression info — cyan pulse
+					var alpha := 0.08 + 0.12 * pulse
+					_canvas_panel.draw_arc(pos, 30.0 + 2.0 * pulse, 0.0, TAU, 48, Color(COLOR_CYAN.r, COLOR_CYAN.g, COLOR_CYAN.b, alpha), 1.5, true)
+					break
+
+
+# ---- Tier 1C: Idle Train Chip ----
+
+func _draw_idle_train_chip(pos: Vector2, node_id: String, font: Font) -> void:
+	var trains: Array = _latest_snapshot.get("trains", [])
+	var idle_count := 0
+	var first_name := ""
+	for t in trains:
+		if typeof(t) != TYPE_DICTIONARY:
+			continue
+		if str(t.get("node_id", "")) == node_id and str(t.get("status", "")) == "idle":
+			idle_count += 1
+			if first_name.is_empty():
+				first_name = str(t.get("name", str(t.get("id", ""))))
+	if idle_count == 0:
+		return
+	var chip_text := "🚂 %s" % first_name if idle_count == 1 else "🚂 %d trains" % idle_count
+	var chip_w := 12.0 + float(chip_text.length()) * 6.0
+	var chip_h := 18.0
+	var chip_pos := pos + Vector2(-chip_w * 0.5, -46.0)
+	_canvas_panel.draw_rect(Rect2(chip_pos, Vector2(chip_w, chip_h)), Color(0.04, 0.08, 0.14, 0.88), true)
+	_canvas_panel.draw_rect(Rect2(chip_pos, Vector2(chip_w, chip_h)), Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.5), false, 1.0)
+	_canvas_panel.draw_string(font, chip_pos + Vector2(6, 13), chip_text, HORIZONTAL_ALIGNMENT_LEFT, chip_w - 12, 10, COLOR_STEEL_2)
+
+
+# ---- Tier 2A: Route Suggestions ----
+
+func _draw_route_suggestions(font: Font, t_sec: float) -> void:
+	if _active_tool != TOOL_TRAIN:
+		return
+	if _route_train_id.is_empty() or _route_origin_id.is_empty():
+		return
+	if not _node_positions.has(_route_origin_id):
+		return
+	var origin_pos: Vector2 = _node_positions[_route_origin_id]
+	var origin_node := _node_snapshot(_route_origin_id)
+	var origin_inv := _cargo_dict(origin_node.get("inventory", {}))
+	var origin_prod := _cargo_dict(origin_node.get("production", {}))
+	var origin_recipe_out := _node_recipe_outputs(origin_node)
+	var pulse := 0.5 + 0.5 * sin(t_sec * 2.5)
+
+	# Highlight origin
+	_canvas_panel.draw_arc(origin_pos, 36.0, 0.0, TAU, 48, Color(COLOR_CYAN.r, COLOR_CYAN.g, COLOR_CYAN.b, 0.4 + 0.2 * pulse), 3.0, true)
+
+	# Find and highlight valid destinations
+	for node in _world_nodes:
+		var nid := str(node.get("id", ""))
+		if nid == _route_origin_id:
+			continue
+		if not _node_positions.has(nid):
+			continue
+		var dest_pos: Vector2 = _node_positions[nid]
+		var dest_demand := _cargo_dict(node.get("demand", {}))
+		var dest_recipe_in := _node_recipe_inputs(node)
+		# Check if origin has something this destination wants
+		var match_found := false
+		var match_cargo := ""
+		for cargo_key in origin_inv.keys():
+			if int(origin_inv[cargo_key]) > 0 and (dest_demand.has(cargo_key) or dest_recipe_in.has(cargo_key)):
+				match_found = true
+				match_cargo = str(cargo_key).replace("_", " ")
+				break
+		for cargo_key in origin_prod.keys():
+			if int(origin_prod[cargo_key]) > 0 and (dest_demand.has(cargo_key) or dest_recipe_in.has(cargo_key)):
+				match_found = true
+				match_cargo = str(cargo_key).replace("_", " ")
+				break
+		for cargo_key in origin_recipe_out.keys():
+			if dest_demand.has(cargo_key) or dest_recipe_in.has(cargo_key):
+				match_found = true
+				match_cargo = str(cargo_key).replace("_", " ")
+				break
+		if match_found:
+			# Strong highlight — this is a recommended destination
+			_canvas_panel.draw_arc(dest_pos, 34.0 + 3.0 * pulse, 0.0, TAU, 48, Color(COLOR_OK.r, COLOR_OK.g, COLOR_OK.b, 0.25 + 0.15 * pulse), 2.5, true)
+			# Cargo match label
+			_canvas_panel.draw_string(font, dest_pos + Vector2(-40, -52), "★ " + match_cargo, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, COLOR_OK)
+		else:
+			# Dim ring — still clickable but not a strong match
+			_canvas_panel.draw_arc(dest_pos, 30.0, 0.0, TAU, 32, Color(COLOR_STEEL.r, COLOR_STEEL.g, COLOR_STEEL.b, 0.12), 1.0, true)
+
 
 
 func _draw_cargo_flows() -> void:
@@ -2410,8 +3573,8 @@ func _preview_summary(result: Dictionary) -> String:
 	if result_type == "PreviewBuildLink" and str(result.get("mode", "")) == "gate":
 		var power_shortfall := int(result.get("power_shortfall", 0))
 		if power_shortfall > 0:
-			return "VALID GATE · power short %d MW · confirm to build" % power_shortfall
-		return "VALID GATE · powered · confirm to build"
+			return "VALID RAILGATE · power short %d MW · confirm to build" % power_shortfall
+		return "VALID RAILGATE · powered · confirm to build"
 	var cost := int(round(float(result.get("cost", 0.0))))
 	var travel_ticks := int(result.get("travel_ticks", 0))
 	if travel_ticks > 0:
@@ -2685,6 +3848,8 @@ func _update_overlay_summary() -> void:
 	_overlay_list.add_child(_make_overlay_summary_row("Shortage", "%d blocked" % int(counts.get("shortage", 0)), COLOR_ERR))
 	_overlay_list.add_child(_make_overlay_summary_row("Recipe", "%d waiting" % int(counts.get("recipe_blocked", 0)), COLOR_RECIPE_BLOCKED))
 	_overlay_list.add_child(_make_overlay_summary_row("Transfer", "%d hot" % int(counts.get("transfer_hot", 0)), _transfer_pressure_color(0.95) if int(counts.get("transfer_hot", 0)) > 0 else COLOR_STEEL))
+	_overlay_list.add_child(_make_overlay_summary_row("Ops", "%d entities" % int(counts.get("operational_entities", 0)), COLOR_CYAN))
+	_overlay_list.add_child(_make_overlay_summary_row("Ops Block", "%d entities" % int(counts.get("operational_blocked", 0)), COLOR_ERR if int(counts.get("operational_blocked", 0)) > 0 else COLOR_STEEL))
 
 
 func _overlay_counts() -> Dictionary:
@@ -2695,6 +3860,8 @@ func _overlay_counts() -> Dictionary:
 		"shortage": 0,
 		"recipe_blocked": 0,
 		"transfer_hot": 0,
+		"operational_entities": _world_operational_entities.size(),
+		"operational_blocked": 0,
 	}
 	for node in _world_nodes:
 		if typeof(node) != TYPE_DICTIONARY:
@@ -2711,6 +3878,12 @@ func _overlay_counts() -> Dictionary:
 			counts["recipe_blocked"] = int(counts["recipe_blocked"]) + 1
 		if float(node.get("transfer_pressure", 0.0)) >= 0.75 or int(node.get("saturation_streak", 0)) > 0:
 			counts["transfer_hot"] = int(counts["transfer_hot"]) + 1
+	for entity in _world_operational_entities:
+		if typeof(entity) != TYPE_DICTIONARY:
+			continue
+		var blocked_reasons: Array = entity.get("blocked_reasons", []) if typeof(entity.get("blocked_reasons")) == TYPE_ARRAY else []
+		if not blocked_reasons.is_empty():
+			counts["operational_blocked"] = int(counts["operational_blocked"]) + 1
 	return counts
 
 
@@ -2741,7 +3914,7 @@ func _make_overlay_summary_row(label_text: String, value_text: String, color: Co
 
 
 func _build_gate_section(parent: VBoxContainer) -> void:
-	var header := _make_hud_header("Gate Throughput", "→ Galaxy")
+	var header := _make_hud_header("Railgate Throughput", "→ Galaxy")
 	parent.add_child(header)
 
 	_gate_card = PanelContainer.new()
@@ -2762,7 +3935,7 @@ func _build_gate_section(parent: VBoxContainer) -> void:
 
 	var title_row := HBoxContainer.new()
 	_gate_title_value = Label.new()
-	_gate_title_value.text = "NO GATE HUB"
+	_gate_title_value.text = "NO RAILGATE ANCHOR"
 	_gate_title_value.add_theme_color_override("font_color", COLOR_AMBER_HOT)
 	_gate_title_value.add_theme_font_size_override("font_size", 11)
 	_gate_title_value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2832,15 +4005,38 @@ func _refresh_construction_hud() -> void:
 	_add_planner_line("Tool", _active_tool_label(), COLOR_ICE)
 	if _active_tool == TOOL_NODE or _active_tool == TOOL_GATE:
 		_add_planner_line("Snap", "%.0f-unit grid" % GRID_MICRO, COLOR_STEEL_2)
+	_add_tutorial_action_controls()
 	if not _route_train_id.is_empty():
 		_add_planner_line("Route Train", _route_train_id, COLOR_CYAN)
-		_add_planner_line("Origin", _node_display_name(_route_origin_id), COLOR_ICE)
+		for i in _route_stops.size():
+			var stop: Dictionary = _route_stops[i]
+			var nid: String = str(stop.get("node_id", ""))
+			_add_planner_line("Stop %d" % (i + 1), _node_display_name(nid), COLOR_ICE)
+
 		if not _pending_route_tuning_train_id.is_empty():
-			_add_planner_line("Destination", _node_display_name(_pending_route_tuning_dest_id), COLOR_ICE)
 			_add_planner_line("Cargo", _pending_route_tuning_cargo.replace("_", " "), COLOR_AMBER_HOT)
-			_add_planner_note("Tune units and interval in the route popup, then preview through the backend.", COLOR_STEEL)
+			_add_planner_note("Tune stops in the route popup, then preview through the backend.", COLOR_STEEL)
 		else:
-			_add_planner_note("Click a destination node to pick a cargo and preview a schedule.", COLOR_STEEL)
+			if _route_stops.size() >= 2:
+				var row := HBoxContainer.new()
+				row.add_theme_constant_override("separation", 8)
+				_queue_list.add_child(row)
+
+				var tune := _make_hud_button("Tune and Preview", COLOR_CYAN)
+				tune.pressed.connect(func(): _open_route_tuning_popup(_route_train_id, _route_origin_id, _route_stops[-1].get("node_id", ""), ""))
+				row.add_child(tune)
+
+				var undo := _make_hud_button("Undo Stop", COLOR_WARN)
+				undo.pressed.connect(func():
+					if _route_stops.size() > 1:
+						_route_stops.pop_back()
+						_refresh_construction_hud()
+						if _canvas_panel != null:
+							_canvas_panel.queue_redraw()
+				)
+				row.add_child(undo)
+			else:
+				_add_planner_note("Click next node to add stop...", COLOR_STEEL)
 
 	if _active_tool == TOOL_SELECT and not _selected_local_id.is_empty():
 		_add_select_inspection()
@@ -2881,7 +4077,7 @@ func _active_tool_label() -> String:
 		TOOL_WIRE:
 			return "Wire Ports"
 		TOOL_GATE:
-			return "Gate Hub"
+			return "Railgate"
 		TOOL_TRAIN:
 			return "Train / Route"
 		TOOL_DEMOLISH:
@@ -2892,6 +4088,85 @@ func _active_tool_label() -> String:
 			return "Pan"
 		_:
 			return "Select"
+
+
+func _tutorial_snapshot() -> Dictionary:
+	var raw = _latest_snapshot.get("tutorial", {})
+	if typeof(raw) == TYPE_DICTIONARY:
+		var tutorial: Dictionary = raw
+		if _flag(tutorial.get("active", false)) or tutorial.has("next_action"):
+			return tutorial
+	return {}
+
+
+func _add_tutorial_action_controls() -> void:
+	var tutorial := _tutorial_snapshot()
+	if tutorial.is_empty():
+		return
+	var action_raw = tutorial.get("next_action", {})
+	if typeof(action_raw) != TYPE_DICTIONARY:
+		return
+	var action: Dictionary = action_raw
+	if action.is_empty():
+		return
+
+	var step_label := str(tutorial.get("current_step_label", tutorial.get("current_step_id", "")))
+	if not step_label.is_empty():
+		_add_planner_line("Tutorial", step_label, COLOR_CYAN)
+
+	var button := _make_hud_button(str(action.get("label", "Advance tutorial")), COLOR_CYAN)
+	button.pressed.connect(func(): _run_tutorial_next_action(action.duplicate(true)))
+	_queue_list.add_child(button)
+
+
+func _run_tutorial_next_action(action: Dictionary) -> void:
+	var kind := str(action.get("kind", ""))
+	if kind == "step_ticks":
+		var ticks := int(max(1, int(action.get("ticks", 1))))
+		_set_status_text(str(action.get("label", "Running tutorial")) + "...", COLOR_CYAN)
+		GateRailBridge.send_message({"ticks": ticks})
+		return
+
+	var commands: Array = []
+	if kind == "command":
+		var command_raw = action.get("command", {})
+		if typeof(command_raw) == TYPE_DICTIONARY:
+			commands.append(command_raw)
+	elif kind == "commands":
+		var command_list: Array = action.get("commands", []) if typeof(action.get("commands", [])) == TYPE_ARRAY else []
+		for command_item in command_list:
+			if typeof(command_item) == TYPE_DICTIONARY:
+				commands.append(command_item)
+	else:
+		_set_status_text("Unsupported tutorial action: %s" % kind, COLOR_ERR)
+		return
+
+	if commands.is_empty():
+		_set_status_text("Tutorial action has no backend commands.", COLOR_ERR)
+		return
+
+	var supported_command_types := [
+		"BuildInternalConnection",
+		"BuildLink",
+		"BuildFacilityComponent",
+		"local.connect_entities",
+		"local.place_entity",
+		"local.rotate_entity",
+		"local.delete_entity",
+		"CreateSchedule",
+		"SetScheduleEnabled",
+		"SurveySpaceSite",
+		"DispatchMiningMission",
+	]
+	for command in commands:
+		var command_type := str(command.get("type", ""))
+		if not supported_command_types.has(command_type):
+			_set_status_text("Unsupported tutorial command: %s" % command_type, COLOR_ERR)
+			return
+
+	var command_ticks := int(max(0, int(action.get("ticks", 0))))
+	_set_status_text(str(action.get("label", "Running tutorial command")) + "...", COLOR_CYAN)
+	GateRailBridge.send_message({"commands": commands, "ticks": command_ticks})
 
 
 func _preview_kind_display(kind: String) -> String:
@@ -2905,9 +4180,13 @@ func _preview_kind_display(kind: String) -> String:
 		"schedule":
 			return "Route Schedule"
 		"gate_link":
-			return "Gate Link"
+			return "Railgate Link"
 		"internal_connection":
 			return "Internal Wire"
+		"local_entity":
+			return "Local Entity"
+		"local_signal":
+			return "Local Signal"
 		_:
 			return kind.capitalize()
 
@@ -2997,7 +4276,7 @@ func _add_gate_preview_context(result: Dictionary) -> void:
 	var power_color := COLOR_OK if powered else COLOR_ERR
 	_add_planner_line("Power Check", "%d MW available · short %d" % [available, shortfall], power_color)
 	if not powered:
-		_add_planner_note("Gate can be built now but will stay offline until the power shortfall is resolved.", COLOR_ERR)
+		_add_planner_note("Railgate can be built now but will stay offline until the power shortfall is resolved.", COLOR_ERR)
 
 
 func _add_route_segment_context(result: Dictionary) -> void:
@@ -3034,7 +4313,7 @@ func _add_route_gate_context(result: Dictionary) -> void:
 	if gate_ids.is_empty() and handoffs.is_empty() and warnings.is_empty():
 		return
 	if not gate_ids.is_empty():
-		_add_planner_line("Gate Route", ", ".join(_string_list(gate_ids)), COLOR_AMBER_HOT)
+		_add_planner_line("Railgate Route", ", ".join(_string_list(gate_ids)), COLOR_AMBER_HOT)
 	for item in handoffs:
 		if typeof(item) != TYPE_DICTIONARY:
 			continue
@@ -3128,6 +4407,21 @@ func _add_normalized_command_details(command: Dictionary) -> void:
 			_add_planner_line("Node", _node_display_name(str(command.get("node_id", ""))), COLOR_ICE)
 			_add_planner_line("From", "%s.%s" % [str(command.get("source_component_id", "")), str(command.get("source_port_id", ""))], COLOR_CYAN)
 			_add_planner_line("To", "%s.%s" % [str(command.get("destination_component_id", "")), str(command.get("destination_port_id", ""))], COLOR_CYAN)
+		"local.place_signal":
+			_add_planner_line("Signal", str(command.get("kind", "stop")).capitalize(), COLOR_CYAN)
+			_add_planner_line("Track", str(command.get("track_entity_id", "")), COLOR_ICE)
+			_add_planner_line("Node", _node_display_name(str(command.get("node_id", ""))), COLOR_STEEL_2)
+		"local.place_entity":
+			_add_planner_line("Entity", str(command.get("entity_type", "")).replace("_", " "), COLOR_ICE)
+			_add_planner_line("Cell", "%d, %d" % [int(command.get("x", 0)), int(command.get("y", 0))], COLOR_STEEL_2)
+			var command_path_cells: Array = command.get("path_cells", []) if typeof(command.get("path_cells")) == TYPE_ARRAY else []
+			if not command_path_cells.is_empty():
+				_add_planner_line("Path", "%d cells" % command_path_cells.size(), COLOR_STEEL_2)
+			if str(command.get("platform_side", "")) != "":
+				_add_planner_line("Side", str(command.get("platform_side", "")).capitalize(), COLOR_STEEL_2)
+			if str(command.get("entity_type", "")) == "track_segment":
+				_add_planner_line("From", _node_display_name(str(command.get("origin_node_id", ""))), COLOR_ICE)
+				_add_planner_line("To", _node_display_name(str(command.get("destination_node_id", ""))), COLOR_ICE)
 
 
 func _add_idle_planner_guidance() -> void:
@@ -3137,7 +4431,7 @@ func _add_idle_planner_guidance() -> void:
 		TOOL_WIRE:
 			_add_planner_note("Select a node with a facility, then drag an output port to an input port in the drill-in panel.", COLOR_STEEL)
 		TOOL_GATE:
-			_add_planner_note("Click an empty grid tile to preview a gate hub. Click an existing gate hub to preview an interworld gate link.", COLOR_STEEL)
+			_add_planner_note("Click an empty grid tile to preview a Railgate anchor. Click an existing endpoint to preview an interworld Railgate link.", COLOR_STEEL)
 		TOOL_RAIL:
 			_add_planner_note("Click an origin node, then a destination node. Backend validates same-world rail and cost.", COLOR_STEEL)
 		TOOL_TRAIN:
@@ -3156,8 +4450,131 @@ func _add_select_inspection() -> void:
 			_add_node_inspection(_selected_local_id)
 		"link":
 			_add_link_inspection(_selected_local_id)
+		"operational_entity":
+			_add_operational_entity_inspection(_selected_local_id)
 		_:
 			_add_planner_note("Nothing selected.", COLOR_STEEL)
+
+
+func _operational_entity_snapshot(entity_id: String) -> Dictionary:
+	for entity in _world_operational_entities:
+		if typeof(entity) == TYPE_DICTIONARY and str(entity.get("id", "")) == entity_id:
+			return entity
+	return {}
+
+
+func _add_operational_entity_inspection(entity_id: String) -> void:
+	var entity := _operational_entity_snapshot(entity_id)
+	if entity.is_empty():
+		_add_planner_line("Local Entity", entity_id, COLOR_ERR)
+		_add_planner_note("Entity not in current operational area.", COLOR_ERR)
+		return
+	_add_planner_line("Local Entity", str(entity.get("id", entity_id)), COLOR_ICE)
+	_add_planner_line("Type", str(entity.get("entity_type", entity.get("kind", ""))).replace("_", " ").capitalize(), COLOR_AMBER_HOT)
+	var cell: Dictionary = entity.get("cell", {}) if typeof(entity.get("cell")) == TYPE_DICTIONARY else {}
+	_add_planner_line("Cell", "%d, %d" % [int(cell.get("x", 0)), int(cell.get("y", 0))], COLOR_STEEL_2)
+	_add_planner_line("Rotation", "%d deg" % int(entity.get("rotation", 0)), COLOR_STEEL_2)
+	var path_cells: Array = entity.get("path_cells", []) if typeof(entity.get("path_cells")) == TYPE_ARRAY else []
+	if not path_cells.is_empty():
+		_add_planner_line("Path", "%d cells" % path_cells.size(), COLOR_STEEL_2)
+	if str(entity.get("platform_side", "")) != "":
+		_add_planner_line("Side", str(entity.get("platform_side", "")).capitalize(), COLOR_STEEL_2)
+	if typeof(entity.get("adjacency")) == TYPE_DICTIONARY:
+		var adjacency: Dictionary = entity.get("adjacency", {})
+		_add_planner_line("Adjacent", "%s · %s" % [str(adjacency.get("entity_id", "")), str(adjacency.get("port_id", ""))], COLOR_STEEL_2)
+	if typeof(entity.get("rail_diagnostics")) == TYPE_DICTIONARY:
+		var rail_diagnostics: Dictionary = entity.get("rail_diagnostics", {})
+		var signal_ids: Array = rail_diagnostics.get("signal_ids", []) if typeof(rail_diagnostics.get("signal_ids")) == TYPE_ARRAY else []
+		if not signal_ids.is_empty():
+			_add_planner_line("Signals", ", ".join(signal_ids), COLOR_CYAN)
+		if typeof(rail_diagnostics.get("block")) == TYPE_DICTIONARY:
+			var block: Dictionary = rail_diagnostics.get("block", {})
+			var reserved_by := str(block.get("reserved_by", ""))
+			if not reserved_by.is_empty() and reserved_by != "<null>":
+				_add_planner_line("Reserved", reserved_by, COLOR_AMBER_HOT)
+			var occupiers: Array = block.get("occupiers", []) if typeof(block.get("occupiers")) == TYPE_ARRAY else []
+			if not occupiers.is_empty():
+				_add_planner_line("Occupiers", ", ".join(occupiers), COLOR_AMBER_HOT)
+		var trains: Array = rail_diagnostics.get("trains", []) if typeof(rail_diagnostics.get("trains")) == TYPE_ARRAY else []
+		if not trains.is_empty():
+			_add_planner_line("Trains", ", ".join(trains), COLOR_STEEL_2)
+		var blocked_events: Array = rail_diagnostics.get("blocked_events", []) if typeof(rail_diagnostics.get("blocked_events")) == TYPE_ARRAY else []
+		if not blocked_events.is_empty():
+			_add_planner_line("Blocked", "%d route waits" % blocked_events.size(), COLOR_ERR)
+	if str(entity.get("entity_type", entity.get("kind", ""))) == "track_segment":
+		_add_local_track_controls(entity)
+	_add_inspection_dict_line("Cargo", entity.get("cargo_buffers", {}))
+	var blockers: Array = entity.get("blocked_reasons", []) if typeof(entity.get("blocked_reasons")) == TYPE_ARRAY else []
+	if not blockers.is_empty():
+		var blocker_text := ""
+		for i in blockers.size():
+			if i > 0:
+				blocker_text += ", "
+			blocker_text += str(blockers[i])
+		_add_planner_line("Blocked", blocker_text, COLOR_ERR)
+
+	if not _world_operational_area.is_empty():
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		_queue_list.add_child(row)
+		var next_rotation := (int(entity.get("rotation", 0)) + 90) % 360
+		var rotate := _make_hud_button("Rotate", COLOR_CYAN)
+		rotate.pressed.connect(func():
+			GateRailBridge.send_message({
+				"commands": [{
+					"type": "local.rotate_entity",
+					"operational_area_id": str(_world_operational_area.get("id", "")),
+					"entity_id": entity_id,
+					"rotation": next_rotation,
+				}],
+				"ticks": 0
+			})
+		)
+		row.add_child(rotate)
+		var delete := _make_hud_button("Delete", COLOR_ERR)
+		delete.pressed.connect(func():
+			GateRailBridge.send_message({
+				"commands": [{
+					"type": "local.delete_entity",
+					"operational_area_id": str(_world_operational_area.get("id", "")),
+					"entity_id": entity_id,
+				}],
+				"ticks": 0
+			})
+		)
+		row.add_child(delete)
+
+
+func _add_local_track_controls(entity: Dictionary) -> void:
+	if _world_operational_area.is_empty():
+		return
+	var link_id: String = str(entity.get("link_id", ""))
+	if link_id.is_empty() and typeof(entity.get("rail_diagnostics")) == TYPE_DICTIONARY:
+		var rail_diagnostics: Dictionary = entity.get("rail_diagnostics", {})
+		link_id = str(rail_diagnostics.get("link_id", ""))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_queue_list.add_child(row)
+
+	var signal_button := _make_hud_button("Signal", COLOR_CYAN)
+	signal_button.pressed.connect(func(): _request_local_signal_preview(entity.duplicate(true)))
+	row.add_child(signal_button)
+
+	if link_id.is_empty():
+		return
+	var switches: Array = _local_switches_for_link(link_id)
+	for switch_payload_raw in switches:
+		if typeof(switch_payload_raw) != TYPE_DICTIONARY:
+			continue
+		var switch_payload: Dictionary = switch_payload_raw
+		var node_label: String = _node_display_name(str(switch_payload.get("node_id", "")))
+		var selected_link_id: String = str(switch_payload.get("selected_link_id", ""))
+		var label: String = "Route" if selected_link_id != link_id else "Routed"
+		if not node_label.is_empty():
+			label = "%s %s" % [label, node_label]
+		var route_button := _make_hud_button(label, COLOR_AMBER_HOT if selected_link_id != link_id else COLOR_OK)
+		route_button.pressed.connect(func(): _set_local_switch_route(switch_payload.duplicate(true), link_id))
+		row.add_child(route_button)
 
 
 func _add_node_inspection(node_id: String) -> void:
@@ -3292,7 +4709,8 @@ func _add_facility_inspection(node: Dictionary) -> void:
 	if power > 0:
 		_add_planner_line("  Power Draw", "%d MW" % power, COLOR_AMBER_HOT)
 
-	var storage := int(facility.get("storage_capacity_override", 0))
+	var storage_value = facility.get("storage_capacity_override", 0)
+	var storage := int(storage_value) if typeof(storage_value) in [TYPE_INT, TYPE_FLOAT] else 0
 	if storage > 0:
 		_add_planner_line("  Storage+", "+%d units" % storage, COLOR_OK)
 
@@ -3436,7 +4854,7 @@ func _on_preview_confirm_pressed() -> void:
 	if _pending_build_command.is_empty():
 		return
 	var command_type := str(_pending_build_command.get("type", ""))
-	var color := COLOR_CYAN if command_type in ["PurchaseTrain", "CreateSchedule", "BuildInternalConnection"] else COLOR_AMBER_HOT
+	var color := COLOR_CYAN if command_type in ["PurchaseTrain", "CreateSchedule", "BuildInternalConnection", "local.place_entity", "local.place_signal"] else COLOR_AMBER_HOT
 	_send_pending_build(_pending_commit_status(), color)
 	if command_type == "CreateSchedule":
 		_clear_route_builder()
@@ -3460,8 +4878,16 @@ func _pending_commit_status() -> String:
 			return "Building %s..." % _kind_display(str(_pending_build_command.get("kind", "node")))
 		"BuildLink":
 			if str(_pending_build_command.get("mode", "")) == "gate":
-				return "Building gate link %s -> %s..." % [str(_pending_build_command.get("origin", "")), str(_pending_build_command.get("destination", ""))]
+				return "Building Railgate link %s -> %s..." % [str(_pending_build_command.get("origin", "")), str(_pending_build_command.get("destination", ""))]
 			return "Building rail %s -> %s..." % [str(_pending_build_command.get("origin", "")), str(_pending_build_command.get("destination", ""))]
+		"local.place_entity":
+			var entity_type := str(_pending_build_command.get("entity_type", "local entity"))
+			if entity_type == "track_segment":
+				return "Building rail %s -> %s..." % [
+					str(_pending_build_command.get("origin_node_id", "")),
+					str(_pending_build_command.get("destination_node_id", "")),
+				]
+			return "Placing %s..." % entity_type.replace("_", " ")
 		"PurchaseTrain":
 			return "Purchasing train at %s..." % str(_pending_build_command.get("node_id", ""))
 		"CreateSchedule":
@@ -3475,6 +4901,8 @@ func _pending_commit_status() -> String:
 				str(_pending_build_command.get("destination_component_id", "")),
 				str(_pending_build_command.get("destination_port_id", "")),
 			]
+		"local.place_signal":
+			return "Placing signal on %s..." % str(_pending_build_command.get("track_entity_id", "track"))
 		_:
 			return "Committing preview..."
 
@@ -3621,7 +5049,7 @@ func _build_statusbar() -> void:
 	row.add_child(_statusbar_mode_chip)
 
 	var hotkeys := Label.new()
-	hotkeys.text = "  R rail · N node · C wire · G gate · X demolish · WASD/arrows pan · MMB drag · wheel zoom · HOME reset · ESC cancel"
+	hotkeys.text = "  R rail · N node · C wire · G Railgate · X demolish · WASD/arrows pan · MMB drag · wheel zoom · HOME reset · ESC cancel"
 	hotkeys.add_theme_color_override("font_color", COLOR_STEEL)
 	hotkeys.add_theme_font_size_override("font_size", 11)
 	hotkeys.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -3667,7 +5095,7 @@ func _update_status_mode_chip() -> void:
 		TOOL_RAIL: text = "RAIL MODE · drag from source node"; color = COLOR_AMBER_HOT
 		TOOL_NODE: text = "PLACE NODE · 24-unit grid snap"; color = COLOR_AMBER_HOT
 		TOOL_WIRE: text = "WIRE PORTS · drag output to input"; color = COLOR_CYAN
-		TOOL_GATE: text = "GATE HUB · 24-unit grid snap"; color = COLOR_AMBER_HOT
+		TOOL_GATE: text = "RAILGATE · 24-unit grid snap"; color = COLOR_AMBER_HOT
 		TOOL_TRAIN: text = "PURCHASE TRAIN · assign to route"; color = COLOR_CYAN
 		TOOL_DEMOLISH: text = "DEMOLISH · click node or link"; color = COLOR_ERR
 		TOOL_LAYERS: text = "LAYERS · toggle overlays"; color = COLOR_CYAN
@@ -3762,6 +5190,12 @@ func _handle_command_result(result: Dictionary) -> void:
 			_handle_preview_result(result, "schedule")
 		"PreviewBuildInternalConnection":
 			_handle_preview_result(result, "internal_connection")
+		"local.validate_placement":
+			_handle_preview_result(result, "local_entity")
+		"local.validate_signal":
+			_handle_preview_result(result, "local_signal")
+		"PreviewSurveySpaceSite":
+			_handle_preview_result(result, "survey")
 		"PreviewDispatchMiningMission":
 			_handle_preview_result(result, "mining_mission")
 		"BuildNode", "BuildLink":
@@ -3789,15 +5223,38 @@ func _handle_command_result(result: Dictionary) -> void:
 				_clear_pending_preview()
 				_clear_wire_builder()
 				_set_status_text("WIRE · %s" % str(result.get("message", "ports connected")), COLOR_OK)
+		"local.place_entity", "local.connect_entities", "local.rotate_entity", "local.delete_entity", "local.place_signal", "local.set_switch_route":
+			if _flag(result.get("ok", false)):
+				_clear_pending_preview()
+				_clear_wire_builder()
+				_set_status_text("LOCAL · %s" % str(result.get("message", "local operation complete")), COLOR_OK)
+			else:
+				_set_status_text("LOCAL FAILED · %s" % str(result.get("message", "unknown")), COLOR_ERR)
+		"local.inspect_entity", "local.get_operational_area", "local.list_build_options":
+			if _flag(result.get("ok", false)):
+				_set_status_text("LOCAL · %s" % str(result.get("message", "ok")), COLOR_CYAN)
 		"DispatchMiningMission":
 			if _flag(result.get("ok", false)):
 				_clear_pending_preview()
 				_set_status_text("MISSION · %s" % str(result.get("message", "mission dispatched")), COLOR_CYAN)
+		"SurveySpaceSite":
+			if _flag(result.get("ok", false)):
+				_clear_pending_preview()
+				_set_status_text("SURVEY · %s" % str(result.get("message", "site surveyed")), COLOR_CYAN)
 
 
 func _handle_preview_result(result: Dictionary, preview_kind: String) -> void:
 	_last_preview_result = result.duplicate(true)
 	if not _flag(result.get("ok", false)):
+		var failed_normalized = result.get("normalized_command", {})
+		if preview_kind == "mining_mission" and typeof(failed_normalized) == TYPE_DICTIONARY and str(failed_normalized.get("type", "")) == "SurveySpaceSite":
+			var survey_command: Dictionary = failed_normalized
+			_pending_build_command = survey_command.duplicate(true)
+			_pending_preview_kind = "survey"
+			_pending_preview_target_id = str(result.get("target_id", ""))
+			_set_status_text("SURVEY REQUIRED · %s" % str(result.get("message", "survey site")), COLOR_WARN)
+			_refresh_construction_hud()
+			return
 		_pending_build_command = {}
 		_pending_preview_kind = preview_kind
 		_pending_preview_target_id = str(result.get("target_id", ""))
@@ -3830,11 +5287,11 @@ func _on_bridge_auto_run_changed(_running: bool) -> void:
 
 func _apply_snapshot(snapshot: Dictionary) -> void:
 	_latest_snapshot = snapshot
-	var worlds: Array = snapshot.get("worlds", [])
+	var worlds: Array = snapshot.get("worlds", []) if typeof(snapshot.get("worlds", [])) == TYPE_ARRAY else []
+	var operational_areas: Array = snapshot.get("operational_areas", []) if typeof(snapshot.get("operational_areas")) == TYPE_ARRAY else []
 	var prev_world_id := _world_id
-	_selected_world = _find_world(worlds, _world_id)
-	if _selected_world.is_empty() and _world_id.is_empty() and not worlds.is_empty():
-		_selected_world = worlds[0]
+	_selected_world = _select_snapshot_world(worlds, operational_areas)
+	if not _selected_world.is_empty():
 		_world_id = str(_selected_world.get("id", ""))
 
 	# Regenerate terrain when world changes
@@ -3876,6 +5333,19 @@ func _apply_snapshot(snapshot: Dictionary) -> void:
 		if (origin_in or dest_in) and str(link.get("mode", "")) == "gate" and gate_link.is_empty():
 			gate_link = link
 
+	_world_operational_area = {}
+	_world_operational_entities = []
+	for area in operational_areas:
+		if typeof(area) != TYPE_DICTIONARY:
+			continue
+		if str(area.get("world_id", "")) != _world_id:
+			continue
+		_world_operational_area = area
+		var entities: Array = area.get("entities", []) if typeof(area.get("entities")) == TYPE_ARRAY else []
+		for entity in entities:
+			if typeof(entity) == TYPE_DICTIONARY:
+				_world_operational_entities.append(entity)
+
 	_update_topbar_stats(snapshot)
 	_update_breadcrumb()
 	_update_region_label()
@@ -3886,6 +5356,33 @@ func _apply_snapshot(snapshot: Dictionary) -> void:
 	_refresh_construction_hud()
 	if _canvas_panel != null:
 		_canvas_panel.queue_redraw()
+
+
+func _select_snapshot_world(worlds: Array, operational_areas: Array) -> Dictionary:
+	var requested_world := _find_world(worlds, _world_id)
+	var requested_world_is_valid := not requested_world.is_empty()
+	if requested_world_is_valid:
+		return requested_world
+	if not _world_id.is_empty() and not _latest_snapshot.has("bridge"):
+		return {}
+	for world in worlds:
+		if typeof(world) != TYPE_DICTIONARY:
+			continue
+		var world_id := str(world.get("id", ""))
+		if _world_has_operational_area(operational_areas, world_id):
+			return world
+	if not worlds.is_empty() and typeof(worlds[0]) == TYPE_DICTIONARY:
+		return worlds[0]
+	return {}
+
+
+func _world_has_operational_area(operational_areas: Array, world_id: String) -> bool:
+	if world_id.is_empty():
+		return false
+	for area in operational_areas:
+		if typeof(area) == TYPE_DICTIONARY and str(area.get("world_id", "")) == world_id:
+			return true
+	return false
 
 
 func _find_world(worlds: Array, world_id: String) -> Dictionary:
@@ -4049,11 +5546,11 @@ func _update_gate_card(gate_link: Dictionary) -> void:
 		child.queue_free()
 
 	if _gate_hub_node_id == "":
-		_gate_title_value.text = "NO GATE HUB"
+		_gate_title_value.text = "NO RAILGATE ANCHOR"
 		_gate_status_value.text = "offline"
 		_gate_status_value.add_theme_color_override("font_color", COLOR_STEEL)
 		var msg := Label.new()
-		msg.text = "Build a Gate Hub to route cargo into the galaxy network."
+		msg.text = "Build a Railgate anchor to route cargo into the galaxy network."
 		msg.add_theme_color_override("font_color", COLOR_STEEL)
 		msg.add_theme_font_size_override("font_size", 10)
 		msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -4065,11 +5562,11 @@ func _update_gate_card(gate_link: Dictionary) -> void:
 		return
 
 	if gate_link.is_empty():
-		_gate_title_value.text = "UNLINKED GATE HUB"
+		_gate_title_value.text = "UNLINKED RAILGATE ANCHOR"
 		_gate_status_value.text = "ready"
 		_gate_status_value.add_theme_color_override("font_color", COLOR_AMBER_HOT)
 		var link_msg := Label.new()
-		link_msg.text = "Gate hub exists locally. Select the Gate Hub tool and click it to preview an interworld gate link."
+		link_msg.text = "Railgate endpoint exists locally. Select the Railgate tool and click it to preview an interworld Railgate link."
 		link_msg.add_theme_color_override("font_color", COLOR_STEEL)
 		link_msg.add_theme_font_size_override("font_size", 10)
 		link_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -4093,7 +5590,7 @@ func _update_gate_card(gate_link: Dictionary) -> void:
 		destination_id = str(gate_link.get("origin", ""))
 
 	var world_name := str(_selected_world.get("name", _world_id)).to_upper()
-	_gate_title_value.text = "%s GATE" % world_name
+	_gate_title_value.text = "%s RAILGATE" % world_name
 	if powered and capacity > 0:
 		_gate_status_value.text = "POWERED · active"
 		_gate_status_value.add_theme_color_override("font_color", COLOR_OK)

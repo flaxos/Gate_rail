@@ -60,21 +60,21 @@ Ship slice 1 first (HUD + map + schedules), then slice 2 (dispatch + orders + co
 
 You are designing the "Local Region Construction" layout for GateRail, a 2D sci-fi logistics and industrial supply chain game.
 
-Context: The game has a macro "Galaxy Map" (already designed) but we are currently designing the micro "Local/Planetary Map". In this mode, players manage a specific planet/region, extract local resources, lay transit rails, and eventually build a massive Wormhole Gate to bridge this local economy out to the Galaxy Map.
+Context: The game has a macro corridor map (already designed) but we are currently designing the micro "Local/Planetary Map". In this mode, players manage a specific planet/region, extract local resources, lay transit rails, and eventually build a route-bound Railgate anchor to bridge this local economy into the corridor network.
 
 Aesthetics:
 
 Theme: Deep space frontier logistics, planetary surfaces (or local orbit), industrial rail corridors.
-Palette: Deep blue/charcoal base (#1e3a5f, #2c3e50), slate/steel accents for rails (#95a5a6), glowing amber for the Gate (#f39c12), and green/red for status indicators.
+Palette: Deep blue/charcoal base (#1e3a5f, #2c3e50), slate/steel accents for rails (#95a5a6), glowing amber for the Railgate (#f39c12), and green/red for status indicators.
 Core Elements to Include in the Mockup:
 
 The Regional Canvas: A local planetary or orbital terrain view. It should contain a few local nodes (e.g., a "Titanium Deposit" and a "Fabricator").
 Build Tool & Rail Laying:
 Show a "drag-to-connect" track-laying interaction in progress. The player is dragging a steel rail line from the extractors to a central depot.
 Include a cursor layout/tooltip showing the rail distance and the immediate credit/material cost to build that segment.
-The Wormhole Gate Hub: A distinct, massive centerpiece node labeled "Wormhole Gate Site".
-This node should have an interactive UI overlay or button indicating "Link to Galaxy Network" or "View Galaxy Map", cementing its role as the bridge between the two game modes.
-Validation/Overlay: Show a glowing valid connection for the rail being built, perhaps alongside a sidebar HUD displaying local planetary inventory vs what is being routed through the Gate.
+The Railgate Anchor: A distinct, massive centerpiece node labeled "Railgate Anchor".
+This node should have an interactive UI overlay or button indicating "Link Corridor" or "View Corridor Map", cementing its role as the bridge between the two game modes.
+Validation/Overlay: Show a glowing valid connection for the rail being built, perhaps alongside a sidebar HUD displaying local planetary inventory vs what is being routed through the Railgate corridor.
 Output: Generate a visual layout artifact (React/Tailwind or SVG diagram) that demonstrates this interactive local rail construction view. It should feel like a premium, utilitarian sci-fi blueprint or command interface.
 
 ## Assistant
@@ -85,7 +85,7 @@ _[tool: update_todos]_
 
 _[tool: snip]_
 
-I'll build a premium sci-fi blueprint-style local region construction view. Single hi-fi HTML with SVG terrain, rail-drag in progress, gate hub centerpiece, and inventory/routing HUD.
+I'll build a premium sci-fi blueprint-style local region construction view. Single hi-fi HTML with SVG terrain, rail-drag in progress, Railgate-anchor centerpiece, and inventory/routing HUD.
 
 _[tool: write_file]_
 
@@ -100,9 +100,9 @@ Local Region Construction view is live. Highlights:
 - **Canvas** — planetary terrain with contour lines, micro/macro grid, region boundary, compass and scale bar
 - **Drag-to-connect rail** — green glowing ghost path from Titanium Deposit → Fabricator with snap-lock pulse and arrowhead
 - **Cursor tooltip** — distance (1.42 km), segments, material, build cost (₡12,480), build time, valid-connection chip
-- **Wormhole Gate Site** — animated triple-ring centerpiece with rotating segments + glowing core, amber halo, and a "Link to Galaxy Network" CTA right under it
-- **Existing rails** — steel with flowing tie-dashes; the Depot→Gate rail uses amber dashes to show active routing
-- **Right HUD** — planet card, local inventory (with `→ gate X/t` route indicators), gate throughput card showing what's flowing out, construction queue
+- **Railgate Anchor** — animated industrial-ring centerpiece with rotating segments + glowing core, amber halo, and a "Link Corridor" CTA right under it
+- **Existing rails** — steel with flowing tie-dashes; the Depot->Railgate rail uses amber dashes to show active routing
+- **Right HUD** — planet card, local inventory (with `-> Railgate X/t` route indicators), Railgate throughput card showing what's flowing out, construction queue
 - **Top bar** — breadcrumb (Galaxy › Sector › Local) + a Galaxy Map switch button cementing the bridge between modes
 
 ## User
@@ -147,5 +147,4 @@ _[tool: snip]_
 
 _[tool: fork_verifier_agent]_
 
-Fixed: SVG and overlays now share one 1200×760 coordinate space, scaled together via JS to fit the canvas. Gate badge sits directly under the gate, rail tooltip anchors next to the snapping Fabricator, and node labels no longer overlap.
-
+Fixed: SVG and overlays now share one 1200x760 coordinate space, scaled together via JS to fit the canvas. Railgate badge sits directly under the Railgate anchor, rail tooltip anchors next to the snapping Fabricator, and node labels no longer overlap.

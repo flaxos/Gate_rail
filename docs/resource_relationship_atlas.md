@@ -1,6 +1,6 @@
 # Resource Relationship Atlas
 
-This is the text-first atlas for understanding how ores, refined elements, manufactured parts, nodes, power, gates, and remote extraction sites relate to each other. It is intentionally a Markdown document instead of an HTML page so it stays inside the repository's CLI/stdio-first product surface.
+This is the text-first atlas for understanding how ores, refined elements, manufactured parts, nodes, power, Railgates, and remote extraction sites relate to each other. It is intentionally a Markdown document instead of an HTML page so it stays inside the repository's CLI/stdio-first product surface.
 
 ## Placeholder Glyph Key
 
@@ -11,7 +11,7 @@ This is the text-first atlas for understanding how ores, refined elements, manuf
 | `[PROC]` | smelter, refiner, or processor | `ResourceRecipe(kind=smelting/refining)` |
 | `[ASM]` | assembler, semiconductor line, or fabricator | `ResourceRecipe(kind=electronics_assembly/semiconductor/fabrication)` |
 | `[PWR]` | power plant or power support | `PowerPlant`, `GatePowerSupport` |
-| `[GATE]` | gate hub or wormhole link | `NetworkNode(kind=gate_hub)`, `NetworkLink(mode=gate)` |
+| `[RGATE]` | Railgate anchor, receiving terminal, or derivative aperture corridor | `NetworkNode(kind=gate_hub)`, `NetworkLink(mode=gate)` |
 | `[ORBIT]` | spaceport, orbital yard, or collection station | `NetworkNode(kind=spaceport)` |
 | `[EXO]` | undiscovered exotic resource | `ResourceDefinition(discovered_by_default=false)` |
 
@@ -43,14 +43,14 @@ flowchart LR
     silicon --> semiconductor_line
     semiconductor_line --> semiconductors["semiconductors"]
 
-    iron --> gate_fabricator["[ASM] gate_frame_fabrication"]
+    iron --> gate_fabricator["[ASM] aperture_control_fabrication"]
     semiconductors --> gate_fabricator
-    gate_fabricator --> gate_components["gate_components"]
+    gate_fabricator --> gate_components["aperture control components"]
 
     carbon_rig --> thermal["[PWR] frontier_low_basin_thermal"]
     thermal --> generated_power["generated world power"]
     gate_components --> support["[PWR] frontier_gate_component_support"]
-    generated_power --> gate["[GATE] gate_frontier_outer"]
+    generated_power --> gate["[RGATE] gate_frontier_outer"]
     support --> gate
 ```
 
@@ -62,8 +62,8 @@ flowchart LR
 | Refined elements | `iron`, `copper`, `aluminum`, `silicon`, `carbon`, `hydrogen`, `oxygen`, `nitrogen`, `lithium`, `cobalt`, `uranium`, `thorium`, `helium_3` | Convert messy deposits into recipe-ready inputs. |
 | Industrial materials | `fuel`, `coolant`, `steel`, `ceramics` | Feed plants, processors, construction, and later reactor loops. |
 | Manufactured goods | `parts`, `electronics`, `semiconductors` | Build automation, controls, and higher-tier factory outputs. |
-| Advanced systems | `reactor_parts`, `gate_components` | Unlock durable power, gate stability, and expansion systems. |
-| Exotic discoveries | `gate_reactive_isotope`, `null_lattice_crystal` | Support late-game research, gate overcharging, and remote anomalies. |
+| Advanced systems | `reactor_parts`, `gate_components` | Unlock durable power, Railgate stability, and expansion systems. |
+| Exotic discoveries | `gate_reactive_isotope`, `null_lattice_crystal` | Support late-game research, Railgate overcharging, and remote anomalies. |
 
 ## Implemented Recipe Cards
 
@@ -74,7 +74,7 @@ flowchart LR
 | `copper_refining` | `[PROC]` | `4 copper_sulfide_ore` | `2 copper` | `frontier_copper_refinery` |
 | `electronics_assembly` | `[ASM]` | `1 copper`, `2 silicon` | `2 electronics` | `frontier_electronics_assembler` |
 | `semiconductor_lithography` | `[ASM]` | `1 electronics`, `1 silicon` | `1 semiconductors` | `frontier_semiconductor_line` |
-| `gate_frame_fabrication` | `[ASM]` | `4 iron`, `1 semiconductors` | `1 gate_components` | `frontier_gate_fabricator` |
+| `aperture_control_fabrication` | `[ASM]` | `4 iron`, `1 semiconductors` | `1 gate_components` | `frontier_gate_fabricator` |
 | `frontier_low_basin_thermal` | `[PWR]` | `1 carbon_feedstock` | `40 generated power` | `frontier_thermal_plant` |
 
 ## Node Relationship Cards
@@ -84,19 +84,19 @@ flowchart LR
 | Extractor | Deposit id, resource output, storage, transfer limit | Deposit glyph, yield, grade, storage pressure, rail outlet direction. |
 | Industry | Resource recipe, input inventory, output inventory | Input ports, blocked inputs, output port, active recipe, local rail links. |
 | Depot / warehouse | Cargo and resource inventory | Stockpile bars, transfer pressure, connected rail branches. |
-| Gate hub | Gate links, power status, handoff slots | Powered/unpowered state, gate capacity, support inputs, destination world. |
+| Railgate anchor / receiving terminal | Railgate links, power status, handoff slots | Powered/unpowered state, corridor capacity, support inputs, destination world. |
 | Spaceport | Remote sites and mining missions | Launch buttons, mission status, returned resource target, fuel/power blockers. |
 | Power plant | Plant inputs, generated power, blockers | Fuel input, output MW, blocked state, connected gate burden. |
 
-## Power And Gate Relationships
+## Power And Railgate Relationships
 
 | Relationship | Current rule |
 | --- | --- |
 | Static world power | `WorldState.power_available - power_used` gives the base margin before gates. |
 | Generated power | Active `PowerPlant` inputs add `power_generated_this_tick` for that world. |
-| Gate reservation | Gate links reserve effective power from their source world when evaluated. |
-| Gate support | `GatePowerSupport` checks required advanced resources and reduces effective gate draw while support is available. |
-| Blocked state | Missing plant fuel or missing gate-support resources appear in reports and snapshots. |
+| Railgate reservation | Railgate links reserve effective power from their source world when evaluated. |
+| Railgate support | `GatePowerSupport` checks required advanced resources and reduces effective Railgate draw while support is available. |
+| Blocked state | Missing plant fuel or missing Railgate-support resources appear in reports and snapshots. |
 
 ## Remote Extraction Hooks
 
@@ -121,7 +121,7 @@ Future remote sites should add fuel or power costs, construction requirements fo
 | Resource relationship atlas | Gives designers and implementers a shared map of current and planned chains. |
 | Node drill-in cards | Lets the 2D client show why a chain is blocked before any 3D scene exists. |
 | Rail branch and signal overlays | Makes dense industry clusters legible as branching networks rather than simple A-to-B lines. |
-| Power/gate overlay | Connects plant fuel, generated power, support inputs, and gate status in one inspection path. |
+| Power/Railgate overlay | Connects plant fuel, generated power, support inputs, and Railgate status in one inspection path. |
 
 ## Generation Plan
 

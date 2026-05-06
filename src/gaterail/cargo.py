@@ -42,6 +42,7 @@ class CargoMetadata:
     base_unit_revenue: float
     preferred_origin: str
     preferred_destination: str
+    display_name: str | None = None
 
 
 CARGO_METADATA: dict[CargoType, CargoMetadata] = {
@@ -134,6 +135,7 @@ CARGO_METADATA: dict[CargoType, CargoMetadata] = {
         base_unit_revenue=14.0,
         preferred_origin="Core",
         preferred_destination="Frontier",
+        display_name="Rail Infrastructure Materials",
     ),
     CargoType.CONSUMER_GOODS: CargoMetadata(
         priority=60,
@@ -164,6 +166,7 @@ CARGO_METADATA: dict[CargoType, CargoMetadata] = {
         base_unit_revenue=70.0,
         preferred_origin="Core",
         preferred_destination="Frontier",
+        display_name="Aperture Control Components",
     ),
 }
 
@@ -215,9 +218,11 @@ def cargo_catalog_payload() -> list[dict[str, object]]:
     payload: list[dict[str, object]] = []
     for cargo_type in sorted(CargoType, key=lambda item: item.value):
         metadata = metadata_for(cargo_type)
+        name = metadata.display_name or cargo_type.value.replace("_", " ").title()
         payload.append(
             {
                 "id": cargo_type.value,
+                "name": name,
                 "priority": metadata.priority,
                 "base_unit_revenue": metadata.base_unit_revenue,
                 "preferred_origin": metadata.preferred_origin,

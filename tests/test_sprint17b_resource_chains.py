@@ -61,7 +61,7 @@ def test_resource_recipe_blockers_are_recorded_and_snapshotted() -> None:
             kind=NodeKind.INDUSTRY,
             resource_inventory={"iron": 2},
             resource_recipe=ResourceRecipe(
-                id="gate_frame_fabrication",
+                id="aperture_control_fabrication",
                 kind=ResourceRecipeKind.FABRICATION,
                 inputs={"electronics": 1, "iron": 4},
                 outputs={"gate_components": 1},
@@ -74,7 +74,7 @@ def test_resource_recipe_blockers_are_recorded_and_snapshotted() -> None:
     assert result["blocked"] == [
         {
             "node": "frontier_fabricator",
-            "recipe": "gate_frame_fabrication",
+            "recipe": "aperture_control_fabrication",
             "recipe_kind": "fabrication",
             "reason": "missing resource inputs",
             "missing": {"electronics": 1, "iron": 2},
@@ -86,7 +86,7 @@ def test_resource_recipe_blockers_are_recorded_and_snapshotted() -> None:
     fabricator = next(node for node in snapshot["nodes"] if node["id"] == "frontier_fabricator")
     assert fabricator["resource_inventory"] == {"iron": 2}
     assert fabricator["resource_recipe"] == {
-        "id": "gate_frame_fabrication",
+        "id": "aperture_control_fabrication",
         "kind": "fabrication",
         "inputs": {"electronics": 1, "iron": 4},
         "outputs": {"gate_components": 1},
@@ -102,7 +102,7 @@ def test_resource_chain_state_persists_through_save_load() -> None:
 
     fabricator = restored.nodes["frontier_gate_fabricator"]
     assert fabricator.resource_recipe is not None
-    assert fabricator.resource_recipe.id == "gate_frame_fabrication"
+    assert fabricator.resource_recipe.id == "aperture_control_fabrication"
     assert fabricator.resource_recipe.kind == ResourceRecipeKind.FABRICATION
     assert fabricator.resource_stock("gate_components") == 1
     assert restored.nodes["frontier_ore_pit"].resource_deposit_id == "frontier_north_ridge_iron"

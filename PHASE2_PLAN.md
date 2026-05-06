@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Phase 2 proves that GateRail can become a playable 2D prototype without rewriting the Python simulation. The Godot client is a view and input layer. The Python fixed-tick backend remains authoritative for logistics, contracts, finance, progression, routing, train movement, gate power, and snapshots.
+Phase 2 proves that GateRail can become a playable 2D prototype without rewriting the Python simulation. The Godot client is a view and input layer. The Python fixed-tick backend remains authoritative for logistics, contracts, finance, progression, routing, train movement, Railgate power, and snapshots.
 
 ## Locked Decisions
 
@@ -18,7 +18,7 @@ Phase 2 proves that GateRail can become a playable 2D prototype without rewritin
 - Add backend commands only when the Godot UI needs them and tests can lock the contract.
 - Keep Godot files text-serializable and contained under `godot/`.
 - Treat station/depot/hub 3D as presentation over a backend-owned facility layer. Do not begin a 3D facility scene until facilities, components, ports, and internal flow exist in Python snapshots.
-- Treat the deeper industry game as higher priority than 3D. Do not begin a 3D facility scene until elemental resources, refining/manufacturing chains, power/gate energy inputs, space extraction, outpost logistics, and 2D diagnostics are proven.
+- Treat the deeper industry game as higher priority than 3D. Do not begin a 3D facility scene until elemental resources, refining/manufacturing chains, power/Railgate energy inputs, space extraction, outpost logistics, and 2D diagnostics are proven.
 - Treat curved rails, branches, signals, vacuum tubes, train consists, and cargo wagons as backend-owned systems that should mature alongside industry. Godot may edit and render track plans, but Python owns validation, routing, signaling, and wagon compatibility.
 
 ## Sprint 10: Godot Bridge Prototype
@@ -57,7 +57,7 @@ Goal:
 - define the core track-laying game rules before building the Godot construction UI.
 
 Deliverables:
-- construction rules for buildable node roles: extractor, industry, depot, warehouse, settlement connector, and gate hub.
+- construction rules for buildable node roles: extractor, industry, depot, warehouse, settlement connector, and Railgate anchor (`gate_hub`).
 - backend commands for new logistics nodes on existing worlds.
 - backend commands for rail links between valid nodes.
 - validation for duplicate links, world boundaries, invalid endpoints, cash costs, and storage/transfer defaults.
@@ -79,9 +79,9 @@ Goal:
 Canonical wireframe:
 - `docs/design_handoff/local_region_construction/Local Region Construction.html` (Claude Design handoff). The scene scaffold (Sprint 12 prep, already landed) is `godot/scenes/local_region.tscn` + `godot/scripts/local_region.gd`. Panel structure to honour:
   - **Topbar (56px):** brand mark, breadcrumb `GALAXY › <sector> › <world> · LOCAL`, stat chips (Credits / Power / Tick), Galaxy Map back button.
-  - **Left tool rail (64px):** Select (V), Pan (H), Lay Rail (R), Place Node (N), Gate Hub (G), Train (T), Demolish (X), Layers (L). Sprint 13 wires each tool to its backend command.
+  - **Left tool rail (64px):** Select (V), Pan (H), Lay Rail (R), Place Node (N), Railgate (G), Train (T), Demolish (X), Layers (L). Sprint 13 wires each tool to its backend command.
   - **Center canvas:** dark-blue grid wash + corner brackets + compass + scale bar + region label. Sprint 13 adds drag-to-connect ghost path with snap-lock and cost tooltip on the rail tool.
-  - **Right HUD (360px):** planet card, local inventory, gate throughput, construction queue placeholder until delayed build jobs exist.
+  - **Right HUD (360px):** planet card, local inventory, Railgate throughput, construction queue placeholder until delayed build jobs exist.
   - **Bottom status bar (44px):** mode chip, bridge LIVE/OFFLINE chip, hotkey reminders.
 
 Deliverables:
@@ -89,7 +89,7 @@ Deliverables:
 - drag-to-connect interaction: ghost path between source/target with snap-lock, segment length, build cost, power draw, build time, valid/invalid chip.
 - backend-owned cost preview tooltip and validation feedback (matches the HTML design without duplicating simulation rules in Godot).
 - construction queue panel remains placeholder until delayed build jobs are implemented.
-- "Link to Galaxy Network" button on the gate hub returns to the galaxy scene with the chosen destination preselected.
+- "Link Corridor" button on the Railgate anchor returns to the corridor map with the chosen destination preselected.
 - immediate redraw from returned snapshots.
 
 Exit criteria:
@@ -100,7 +100,7 @@ Slice 13A completed state:
 - Preview commands return valid/invalid feedback, cost, build time, normalized build commands, and do not mutate cash or map state.
 - Built nodes persist local layout coordinates through save/load and render snapshots.
 - Rail links can derive travel ticks from persisted local layout when the client omits a manual travel time.
-- Local Region construction uses a preview-then-commit flow for nodes, gate hubs, and same-world rail, so Godot no longer hardcodes node or rail construction costs.
+- Local Region construction uses a preview-then-commit flow for nodes, Railgate anchors, and same-world rail, so Godot no longer hardcodes node or rail construction costs.
 
 Slice 13B completed state:
 - `docs/construction_rules.md` records the authoritative construction rules for this phase.
@@ -152,30 +152,30 @@ Slice 14D completed state:
 ## Sprint 15: Gate Expansion, Trains, and Schedule Creation
 
 Goal:
-- connect local track networks to interworld wormhole logistics.
+- connect local track networks to interworld Railgate logistics.
 
 Deliverables:
-- backend commands for gate hubs and gate links.
+- backend commands for Railgate anchors and links.
 - train purchase/build command.
 - schedule creation command.
-- Godot UI for gate construction, train purchase, and schedule creation.
+- Godot UI for Railgate construction, train purchase, and schedule creation.
 - clear cost, power, capacity, and route feedback.
 
 Exit criteria:
-- the player can expand an existing network with rail, warehouses/depots, gates, trains, and schedules from Godot.
+- the player can expand an existing network with rail, warehouses/depots, Railgates, trains, and schedules from Godot.
 
 Slice 15A completed state:
-- Backend previews/builds explicit gate links via `BuildLink(mode="gate")` between existing gate hubs on different worlds.
-- Gate previews include normalized commands, cost, travel, capacity, endpoint world context, power source, power draw, available power, shortfall, and powered-if-built state.
-- The Local Region Gate Hub tool now supports two flows: empty click previews a local gate hub, existing gate-hub click previews an interworld gate link to an available external gate hub.
-- The Gate Throughput HUD now distinguishes missing, unlinked, and linked gate states.
-- Tests lock gate defaults, validation, build mutation, snapshot fields, and power-shortfall preview behavior.
+- Backend previews/builds explicit Railgate links via `BuildLink(mode="gate")` between existing Railgate endpoints on different worlds.
+- Railgate previews include normalized commands, cost, travel, capacity, endpoint world context, power source, power draw, available power, shortfall, and powered-if-built state.
+- The Local Region Railgate tool now supports two flows: empty click previews a local Railgate endpoint, existing endpoint click previews an interworld Railgate link to an available external endpoint.
+- The Railgate Throughput HUD now distinguishes missing, unlinked, and linked corridor states.
+- Tests lock Railgate defaults, validation, build mutation, snapshot fields, and power-shortfall preview behavior.
 
 Slice 15B completed state:
-- Schedule preview/create results now include backend-owned gate handoff context for routes that cross gates.
+- Schedule preview/create results now include backend-owned Railgate handoff context for routes that cross Railgates.
 - Route context includes gate link ids, endpoint world labels, power state, power shortfall, slot capacity, slot usage, pressure, disruption reasons, and route warnings.
-- Invalid previews caused by unpowered gates can still return structural gate context, making blockers explainable in the client.
-- The Local Region Build Planner renders gate handoff and warning context during route preview.
+- Invalid previews caused by unpowered Railgates can still return structural corridor context, making blockers explainable in the client.
+- The Local Region Build Planner renders Railgate handoff and warning context during route preview.
 - Tests cover normal, saturated, degraded, unpowered, and create-result route handoff cases.
 
 Slice 15C completed state:
@@ -207,7 +207,7 @@ Goal:
 
 Deliverables:
 - resource definitions with stable ids, categories, and metadata for raw sources, refined elements, industrial materials, manufactured goods, advanced systems, and exotics.
-- a first playable subset for raw ore, refined materials, electronics, semiconductors, reactor inputs, and gate components.
+- a first playable subset for raw ore, refined materials, electronics, semiconductors, reactor inputs, and aperture control components.
 - world deposit metadata with grade/yield and deterministic save/load.
 - CLI inspection and snapshot fields for deposits and available resources.
 - rail sidecar: optional link alignment waypoints/control points persisted and exposed in snapshots so local track is no longer only straight A-to-B.
@@ -223,7 +223,7 @@ Implemented slice 17A:
 
 Implemented slice 17B:
 - added node-owned resource inventories, resource recipes, deposit-backed extraction, local resource distribution, and blocked resource recipe reporting.
-- seeded the default playtest with a narrow ore/carbon -> iron -> gate components chain.
+- seeded the default playtest with a narrow ore/carbon -> iron -> aperture control components chain.
 - persisted and snapshotted resource recipes, inventories, deposit ids, and blockers.
 
 ## Sprint 18: Refining and Manufacturing Chains
@@ -234,7 +234,7 @@ Goal:
 Deliverables:
 - smelting/refining recipes.
 - alloying, chemistry, and semiconductor preparation recipes.
-- manufacturing recipes for parts, electronics, construction modules, reactor parts, and gate components.
+- manufacturing recipes for parts, electronics, construction modules, reactor parts, and aperture control components.
 - facility component or typed factory-block support for smelters, refineries, fabricators, electronics assemblers, and semiconductor lines.
 - reports and snapshots that identify missing inputs and blocked processing stages.
 - rail sidecar: branch/junction metadata and station-throat warnings for dense industry districts.
@@ -244,7 +244,7 @@ Exit criteria:
 
 Implemented slice 18:
 - added typed resource recipe kinds for smelting, refining, electronics assembly, semiconductor work, and fabrication.
-- expanded the default playtest from ore/carbon -> iron -> gate components into silica/copper/silicon/electronics/semiconductors feeding gate components.
+- expanded the default playtest from ore/carbon -> iron -> aperture control components into silica/copper/silicon/electronics/semiconductors feeding aperture control components.
 - added resource branch-pressure warnings to reports and snapshots for dense industry rail clusters.
 
 ## Sprint 19: Power and Gate Energy Economy
@@ -263,8 +263,8 @@ Exit criteria:
 - gate availability can be improved through upstream mining, refining, manufacturing, and power construction.
 
 Implemented slice 19:
-- added resource-backed gate support that reduces effective gate power draw when a support node has required resource-chain output.
-- added a `sprint19` scenario where `gate_frontier_outer` stays underpowered until gate components are fabricated.
+- added resource-backed Railgate support that reduces effective Railgate power draw when a support node has required resource-chain output.
+- added a `sprint19` scenario where `gate_frontier_outer` stays underpowered until aperture control components are fabricated.
 - persisted and snapshotted support requirements, support shortages, base/effective power draw, and resource bonuses.
 - implemented the R19 rail sidecar first slice: backend stop/path signals, one-link protected blocks, dispatch-time signal-block queueing before cargo load, JSON build/preview commands, save/load, snapshots, freight queue reasons, traffic alerts, and text reports.
 
@@ -274,7 +274,7 @@ Power-generation placement:
 ## Sprint 20: Space Extraction and Outpost Logistics
 
 Goal:
-- use wormholes and orbital infrastructure to access remote raw resources while keeping Python authoritative.
+- use Railgate corridors and orbital infrastructure to access remote raw resources while keeping Python authoritative.
 
 Deliverables:
 - remote extraction sites such as belts, moons, debris fields, gas pockets, and anomalies.
@@ -391,7 +391,7 @@ Goal:
 
 Implemented Sprint 29A state:
 - `tutorial_six_worlds` / `tutorial_start` is a built-in scenario with six stocked worlds in a powered gate ring.
-- each world has two gate links to two neighbouring worlds, plus local depots, settlements, gate hubs, and construction stock.
+- each world has two Railgate links to two neighbouring worlds, plus local depots, colony logistics hubs, Railgate anchors, and construction stock.
 - active tutorial schedules move ORE to a smelter, METAL to a factory, and PARTS to a settlement contract that pays cash/reputation.
 - `saves/tutorial_six_worlds.json` is generated from the scenario for immediate Godot load/save testing.
 

@@ -10,8 +10,8 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 1 is complete: the fixed-tick backend foundation, graph scenario, CLI runner, and tests are implemented.
 - Sprint 2 is complete: freight trains can load, route, travel, unload, and relieve shortages in the CLI prototype.
 - Sprint 3 is complete: worlds now track tier requirements, stability, support streaks, regression, promotion, and bottlenecks.
-- Sprint 4 is complete: gates now reserve world power, unpowered gates block routes, and expansion pressure is visible.
-- Sprint 5 is complete: Stage 1 operations now have recurring schedules, gate slots, finance, stockpiles, and monthly text tables.
+- Sprint 4 is complete: Railgates now reserve world power, unpowered Railgates block routes, and expansion pressure is visible.
+- Sprint 5 is complete: Stage 1 operations now have recurring schedules, Railgate slots, finance, stockpiles, and monthly text tables.
 - Sprint 6 is complete: worlds now have specialization profiles, recipe-driven exports, and a mining to manufacturing to research dependency chain.
 - Sprint 7 is complete: route dispatch now reserves link capacity, queues overloaded departures, reports traffic pressure, and models recoverable disruptions.
 - Sprint 8 is complete: the CLI now supports scenario discovery, scenario inspection, report filters, JSON save/load, schedule status tables, and a balanced benchmark scenario.
@@ -23,9 +23,9 @@ This roadmap keeps development on rails while preserving room for iteration. Eac
 - Sprint 13 is complete in the Local Region scene: backend-owned previews drive node, rail, train, and route creation, with persisted local-world layout metadata, HUD preview context, cancellation, cargo picking, and Select-tool inspection.
 - Sprint 14 is complete: depots/warehouses move cargo through buffer rules, node snapshots expose transfer bottlenecks, per-node recipes drive local industry, and Local Region overlays make supply/demand/storage/shortage pressure visible.
 - Facility, industry, and rail-depth planning is accepted: station/depot/hub 3D should wait until backend-owned facilities, elemental resource chains, power inputs, space extraction, outpost logistics, and richer rail networks exist.
-- Sprints 16-27 are complete through the current working tree: facility components/internal wiring, resource chains, typed industry, gate power support, power generation, remote extraction/outpost operations, directional gates, train consists, multi-stop schedules, cargo-flow snapshots, schedule edit/delete management, bridge save/load, and early/expanded playtest scenario presets are all covered by backend tests and Godot bridge/UI wiring.
+- Sprints 16-27 are complete through the current working tree: facility components/internal wiring, resource chains, typed industry, Railgate power support, power generation, remote extraction/outpost operations, directional Railgates, train consists, multi-stop schedules, cargo-flow snapshots, schedule edit/delete management, bridge save/load, and early/expanded playtest scenario presets are all covered by backend tests and Godot bridge/UI wiring.
 - Sprint 28A/28B are implemented, with a backend payoff extension now covered by tests: `mining_to_manufacturing` / `mining_loop` can dispatch a mining mission, haul ORE, smelt it into METAL, fabricate PARTS/construction materials, deliver PARTS to a frontier settlement, and fulfill a paid contract. Local Region mission previews and site lists distinguish train-cargo hauls from resource auto-flow hauls.
-- Sprint 29A/29B plus the manual playtest correction are implemented: `tutorial_six_worlds` / `tutorial_start` plus `saves/tutorial_six_worlds.json` provide a stocked six-world gate-ring tutorial start, snapshots expose backend-owned tutorial progress, and Godot renders the loop checklist, alert chip, reward context, circular galaxy layout, and click-filled one-shot dispatch setup.
+- Sprint 29A/29B plus the manual playtest correction are implemented: `tutorial_six_worlds` / `tutorial_start` plus `saves/tutorial_six_worlds.json` provide a stocked six-world Railgate corridor tutorial start, snapshots expose backend-owned tutorial progress, and Godot renders the loop checklist, alert chip, reward context, circular galaxy layout, and click-filled one-shot dispatch setup.
 
 ## Long-term stages
 
@@ -38,14 +38,14 @@ Stage 2: Godot 2D prototype
 - tile-based rail map
 - simple trains moving between stations
 - cargo counters
-- one wormhole gate
-- route UI and gate schedule UI
+- one Railgate corridor
+- route UI and Railgate schedule UI
 - staged construction, starting with existing-galaxy expansion
 
 Stage 3: Proper game expansion
 - elemental resource catalog
 - smelting, refining, manufacturing, and semiconductor chains
-- power-plant and gate-energy economies
+- power-plant and Railgate-energy economies
 - space extraction and remote collection stations
 - outpost construction by delivered cargo
 - more worlds
@@ -75,7 +75,7 @@ Deliverables:
 - accepted game vision document
 - explicit design notes
 - sprint roadmap
-- initial terminology for worlds, tiers, gates, trains, stations, and cargo
+- initial terminology for worlds, tiers, Railgates, trains, stations, and cargo
 - first MVP statement
 
 Exit criteria:
@@ -153,28 +153,28 @@ Completed state:
 - terminal reports show whether worlds are improving, stalled, regressing, promoted, or max tier
 - tests cover stockpile stalls, shortage regression, promotion, next-tier bottlenecks, and CLI progression output
 
-## Sprint 4: Gate Pressure and Expansion
+## Sprint 4: Railgate Pressure and Expansion
 
 Goal:
-- introduce wormholes as strategic infrastructure
+- introduce Railgates as strategic corridor infrastructure
 
 Deliverables:
-- gate hubs and activation rules
+- Railgate anchors and activation rules
 - power cost and throughput limits
-- second world or second region connected through a gate
+- second world or second region connected through a Railgate corridor
 - cross-world dependency in at least one scenario
 - tests for gate availability, power draw, and route selection
 
 Exit criteria:
-- the player can decide when a gate is worth activating to resolve a real bottleneck
+- the player can decide when a Railgate is worth activating to resolve a real bottleneck
 
 Completed state:
-- gate links resolve powered or underpowered status from world power margins each tick
-- powered gates reserve world power and reduce remaining power margin
-- route finding ignores underpowered gate links
-- the Sprint 4 scenario adds Ashfall Spur behind a frontier-powered gate that starts underpowered
-- terminal reports show powered gate counts, gate draw, power shortfalls, blocked freight, and expansion shortages
-- tests cover gate power draw, route availability, blocked freight, powered dispatch, and CLI gate bottleneck output
+- Railgate links resolve powered or underpowered status from world power margins each tick
+- powered Railgates reserve world power and reduce remaining power margin
+- route finding ignores underpowered Railgate links
+- the Sprint 4 scenario adds Ashfall Spur behind a frontier-powered Railgate that starts underpowered
+- terminal reports show powered Railgate counts, Railgate draw, power shortfalls, blocked freight, and expansion shortages
+- tests cover Railgate power draw, route availability, blocked freight, powered dispatch, and CLI Railgate bottleneck output
 
 ## Sprint 5: Stage 1 Operations Ledger
 
@@ -184,20 +184,20 @@ Goal:
 Deliverables:
 - ticks treated as days for operations reporting
 - recurring train schedules
-- gate slot limits and slot exhaustion
+- Railgate slot limits and slot exhaustion
 - colony/world stockpile summaries
 - fixed-tick income, costs, and cash balance
-- month-end text tables for cargo moved, shortages, gate use, stockpiles, and finance
+- month-end text tables for cargo moved, shortages, Railgate use, stockpiles, and finance
 
 Exit criteria:
 - `gaterail --ticks 30` produces a readable month-end operations ledger
-- the player can see whether rail and gate operations are feeding colonies and making or losing money
+- the player can see whether rail and Railgate operations are feeding colonies and making or losing money
 
 Completed state:
 - `FreightSchedule` supports recurring scheduled service
-- dispatches reserve powered gate slots before loading cargo
-- `FinanceState` records delivery revenue, dispatch costs, gate power costs, and cash balance
-- `operations.py` aggregates month-end cargo, shortage, gate, stockpile, and finance summaries
+- dispatches reserve powered Railgate slots before loading cargo
+- `FinanceState` records delivery revenue, dispatch costs, Railgate power costs, and cash balance
+- `operations.py` aggregates month-end cargo, shortage, Railgate, stockpile, and finance summaries
 - the named Sprint 5 scenario prints a monthly operations table after 30 ticks
 - tests cover recurring schedules, gate slot exhaustion, delivery revenue, monthly ledgers, and CLI table output
 
@@ -219,7 +219,7 @@ Exit criteria:
 Completed state:
 - `SpecializationProfile` defines import/export identities for manufacturing, mining, and survey worlds
 - `ProductionRecipe` turns delivered inputs into specialized exports during the fixed-tick economy phase
-- the Sprint 6 scenario links Brink Frontier ore, Vesta Core manufacturing, and Ashfall Spur research equipment
+- the Sprint 6 scenario links Brink Frontier ore, Vesta Core manufacturing, and Ashfall Spur research equipment across Railgate corridors
 - recurring schedules move parts and research equipment so the monthly ledger shows cross-world dependence
 - terminal reports show active economic identities and month-end specialized output totals
 - tests cover specialization profiles, mining output, manufacturing from delivered ore, survey research output, monthly ledgers, and named Sprint 6 CLI output
@@ -232,7 +232,7 @@ Goal:
 Deliverables:
 - congestion and throughput caps
 - maintenance or disruption hooks
-- queueing pressure at stations and gate hubs
+- queueing pressure at stations and Railgate anchors
 - better alerts and telemetry
 - tests for degraded and recovered states
 
@@ -294,14 +294,14 @@ Slice 1 completed state:
 - scenario inspection prints an `Active Contracts` table; the CLI gains a `contracts` report section filter
 - save/load round-trips contract state and reputation deterministically
 
-Post-slice-1 cleanup: legacy daily-colony simulation (`Simulation`, `colony.py`, `world.py`, `train.py`, `schedule.py`, `finance.py`, `WormholeGate`) removed to give Sprint 9 slices 2–4 a single backend path.
+Post-slice-1 cleanup: legacy daily-colony simulation (`Simulation`, `colony.py`, `world.py`, `train.py`, `schedule.py`, `finance.py`, and the old gate model) removed to give Sprint 9 slices 2-4 a single backend path.
 
 Slices 2–4 completed state:
 - `ContractKind.FRONTIER_SUPPORT` tracks supported-or-promoted ticks on a target world via the progression report; the contract's `progress` counter persists across tier promotions so a bump at the moment of promotion still counts
-- `ContractKind.GATE_RECOVERY` tracks consecutive operational ticks on a target gate link (powered and effective capacity > 0); a disruption or power shortfall resets the streak
+- `ContractKind.GATE_RECOVERY` tracks consecutive operational ticks on a target Railgate link (powered and effective capacity > 0); a disruption or power shortfall resets the streak
 - contract resolution now runs after world progression, so FRONTIER_SUPPORT reads the freshly updated trend; cargo-delivery behavior is unchanged
 - `add_contract` validates kind-specific required fields (destination/cargo for CARGO_DELIVERY, target world for FRONTIER_SUPPORT, target gate link for GATE_RECOVERY)
-- three scenario presets ship: `sprint9_logistics` stretches sprint8 with a 10-unit PARTS contract into Ashfall; `sprint9_frontier` adds a support-streak contract on Brink Frontier; `sprint9_recovery` turns the frontier-outer gate into a full outage for ticks 1–12 and adds a 3-tick recovery contract
+- three scenario presets ship: `sprint9_logistics` stretches sprint8 with a 10-unit PARTS contract into Ashfall; `sprint9_frontier` adds a support-streak contract on Brink Frontier; `sprint9_recovery` turns the frontier-outer Railgate into a full outage for ticks 1-12 and adds a 3-tick recovery contract
 - persistence round-trips the new `target_world_id`, `target_link_id`, and `progress` fields; scenario inspection and tick/monthly reports render all three kinds
 
 Stage 2 bridge completed state:
@@ -393,7 +393,7 @@ Goal:
 - define the core track-laying game rules before building the Godot construction UI
 
 Deliverables:
-- construction rules for buildable node roles: extractor, industry, depot, warehouse, settlement connector, and gate hub
+- construction rules for buildable node roles: extractor, industry, depot, warehouse, settlement connector, and Railgate anchor (`gate_hub`)
 - backend command for building logistics nodes on existing worlds
 - backend command for building rail links between valid nodes
 - validation for duplicate links, world boundaries, invalid endpoints, cash costs, and storage/transfer defaults
@@ -498,37 +498,37 @@ Slice 14D completed state:
 - The right HUD now includes a `Local Overlays` summary/legend with counts for supply, demand, stocked nodes, shortages, recipe stalls, and hot transfer nodes.
 - No new backend schema was required; 14D consumes the snapshot contract created by 14A-14C.
 
-## Sprint 15: Gate Expansion, Trains, and Schedule Creation
+## Sprint 15: Railgate Expansion, Trains, and Schedule Creation
 
 Goal:
-- connect local track networks to interworld wormhole logistics
+- connect local track networks to interworld Railgate logistics
 
 Deliverables:
-- backend commands for gate hubs and gate links
+- backend commands for Railgate anchors and Railgate links
 - train purchase/build command
 - schedule creation command
-- Godot UI for gate construction, train purchase, and schedule creation
+- Godot UI for Railgate construction, train purchase, and schedule creation
 - clear cost, power, capacity, and route feedback
 
 Exit criteria:
-- the player can expand an existing network with rail, warehouses/depots, gates, trains, and schedules from Godot
+- the player can expand an existing network with rail, warehouses/depots, Railgates, trains, and schedules from Godot
 
 Slice 15A completed state:
-- `BuildLink` and `PreviewBuildLink` now support `mode="gate"` for explicit interworld gate links between `gate_hub` endpoints on different worlds.
-- Gate-link validation rejects self-links, non-gate endpoints, same-world gate links, duplicate gate endpoint pairs, invalid capacity/travel values, invalid power sources, and insufficient cash.
-- JSON command parsing supplies gate defaults when omitted: 1 travel tick, 4 slots/tick, and 80 MW.
-- Gate previews return normalized build commands plus route context for UI: endpoint world names, power source, required power, available power, shortfall, and whether the link would be powered if built.
-- The Local Region Gate Hub tool keeps empty-click gate-hub construction, and adds existing-gate-hub click to preview a backend gate link to an available external gate hub.
-- The Gate Throughput HUD distinguishes "no gate hub", "unlinked gate hub", and linked gate states with planned slots and power draw context.
+- `BuildLink` and `PreviewBuildLink` now support `mode="gate"` for explicit interworld Railgate links between `gate_hub` endpoints on different worlds.
+- Railgate-link validation rejects self-links, non-Railgate endpoints, same-world Railgate links, duplicate Railgate endpoint pairs, invalid capacity/travel values, invalid power sources, and insufficient cash.
+- JSON command parsing supplies Railgate defaults when omitted: 1 travel tick, 4 slots/tick, and 80 MW.
+- Railgate previews return normalized build commands plus route context for UI: endpoint world names, power source, required power, available power, shortfall, and whether the link would be powered if built.
+- The Local Region Railgate tool keeps empty-click Railgate-anchor construction, and adds existing-anchor click to preview a backend Railgate link to an available external anchor.
+- The Railgate Throughput HUD distinguishes "no Railgate anchor", "unlinked Railgate anchor", and linked Railgate states with planned slots and power draw context.
 - Tests cover command defaults, preview normalization, build mutation, snapshot-powered context, invalid endpoints, same-world rejection, and power-shortfall previews.
 
 Slice 15B completed state:
-- `PreviewCreateSchedule` and `CreateSchedule` now return route gate-handoff context: `gate_link_ids`, `gate_handoffs`, and `route_warnings`.
-- Gate handoffs expose endpoint world names, gate power state, power shortfall, effective slot capacity, used slots, pressure, disruption reasons, and per-gate warnings.
-- Schedule previews warn when a planned route depends on saturated, hot, degraded, blocked, or unpowered gates.
-- If no operational route exists because a gate is unpowered, an invalid schedule preview can still return structural gate-handoff context so the UI can explain the blocker rather than only saying "no route".
-- The Local Region Build Planner renders route gate links, world handoff labels, slot pressure, power shortfalls, and warning notes for route previews.
-- Tests cover normal gate handoff context, saturated gate warnings, disruption/degraded warnings, unpowered-gate invalid preview context, and create-result parity with preview context.
+- `PreviewCreateSchedule` and `CreateSchedule` now return route Railgate-handoff context: `gate_link_ids`, `gate_handoffs`, and `route_warnings`.
+- Railgate handoffs expose endpoint world names, Railgate power state, power shortfall, effective slot capacity, used slots, pressure, disruption reasons, and per-Railgate warnings.
+- Schedule previews warn when a planned route depends on saturated, hot, degraded, blocked, or unpowered Railgates.
+- If no operational route exists because a Railgate is unpowered, an invalid schedule preview can still return structural Railgate-handoff context so the UI can explain the blocker rather than only saying "no route".
+- The Local Region Build Planner renders route Railgate links, world handoff labels, slot pressure, power shortfalls, and warning notes for route previews.
+- Tests cover normal Railgate handoff context, saturated Railgate warnings, disruption/degraded warnings, unpowered-Railgate invalid preview context, and create-result parity with preview context.
 
 Slice 15C completed state:
 - Local Region route creation now opens a route-tuning popup after cargo selection instead of sending fixed `units_per_departure=8` and `interval_ticks=4`.
@@ -589,27 +589,27 @@ Deliverables:
 Exit criteria:
 - a player can improve production by connecting extraction, refining, and manufacturing nodes rather than only hauling generic cargo, with branch-heavy industry districts represented explicitly enough for future signaling
 
-## Sprint 19: Power Plants and Gate Energy Economy
+## Sprint 19: Power Plants and Railgate Energy Economy
 
 Goal:
-- make gate power and industrial power depend on mined and manufactured inputs instead of mostly static world margins
+- make Railgate power and industrial power depend on mined and manufactured inputs instead of mostly static world margins
 
 Deliverables:
-- power-plant models or facility components for thermal, fission, fusion, and advanced gate-support generation
-- recipes for fuel, reactor fuel, coolant, reactor parts, capacitors, and gate-efficiency components
+- power-plant models or facility components for thermal, fission, fusion, and advanced Railgate-support generation
+- recipes for fuel, reactor fuel, coolant, reactor parts, capacitors, and aperture control components
 - world power capacity changes driven by operating plants and their inputs
-- gate charge or gate operating-energy state tied to power infrastructure
-- reports and snapshots explaining power blockers, fuel shortages, and gate operating burden
+- Railgate charge or Railgate operating-energy state tied to power infrastructure
+- reports and snapshots explaining power blockers, fuel shortages, and Railgate operating burden
 - rail sidecar R19: add stop signals, path signals, simple track blocks, and signal/block reasons in freight or traffic reports
-- tests for power generation, input shortages, gate blocking, and gate recovery
+- tests for power generation, input shortages, Railgate blocking, and Railgate recovery
 
 Exit criteria:
-- a gate route can fail or improve because the player did or did not build the upstream fuel, reactor, coolant, or capacitor chain, and dense power/gate approaches can be diagnosed through signal or block reports
+- a Railgate route can fail or improve because the player did or did not build the upstream fuel, reactor, coolant, or capacitor chain, and dense power/Railgate approaches can be diagnosed through signal or block reports
 
 ## Sprint 20: Space Extraction and Collection Stations
 
 Goal:
-- let wormholes and orbital yards open access to remote resources without turning the game into a real-time piloting sim
+- let Railgate corridors and orbital yards open access to remote resources without turning the game into a real-time piloting sim
 
 Deliverables:
 - `SpaceSite` or equivalent model for asteroid fields, moons, debris fields, gas pockets, and anomalies
@@ -698,29 +698,29 @@ Slice 17B completed state:
 - `NetworkNode` now supports `resource_inventory`, `resource_production`, `resource_demand`, `resource_recipe`, and optional `resource_deposit_id`, with shared storage capacity across cargo and resource units.
 - `resource_chains.py` adds three fixed-tick phases: deposit/direct extraction, same-world rail-adjacent resource distribution into resource demand/recipe deficits, and resource recipe processing with all-or-nothing input validation.
 - `TickSimulation.step_tick()` now runs `resource_extraction`, `resource_distribution`, and `resource_recipes` after cargo node recipes and before facility components, and emits a `resource_chains` report section.
-- Sprint 8/default now includes a narrow 17B demo chain: North Ridge ore and Low Basin carbon feed Brink Ore Smelter, which makes iron, then Brink Gate Fabricator turns iron plus seeded electronics into `gate_components`.
+- Sprint 8/default now includes a narrow 17B demo chain: North Ridge ore and Low Basin carbon feed Brink Ore Smelter, which makes iron, then Brink Aperture Control Works turns iron plus seeded electronics into `gate_components` aperture control components.
 - Persistence and snapshots now include resource inventories, resource production/demand, resource recipes, resource deposit ids, and resource recipe blockers.
 - CLI `--report resources` now shows tick-level extraction, resource moves, processing output, and blockers; scenario inspection also lists resource-chain nodes and recipes.
-- 5 new tests in `tests/test_sprint17b_resource_chains.py` cover extraction-to-smelting-to-gate-component output, blocker reporting/snapshots, save/load persistence, CLI resource reports, and invalid resource recipe validation.
+- 5 new tests in `tests/test_sprint17b_resource_chains.py` cover extraction-to-smelting-to-aperture-control output, blocker reporting/snapshots, save/load persistence, CLI resource reports, and invalid resource recipe validation.
 - Full pytest suite passes 203 tests after the 17B resource-chain slice.
 
 Slice 18 completed state:
 - `ResourceRecipeKind` adds typed resource-industry roles: `generic`, `smelting`, `refining`, `electronics_assembly`, `semiconductor`, and `fabrication`.
 - Resource recipes persist and snapshot their `kind`, while older saves without a kind load as `generic`.
-- The default Sprint 8 playtest now has a deeper chain: iron-rich ore plus carbon becomes iron, silica plus carbon becomes silicon, copper ore becomes copper, copper plus silicon becomes electronics, electronics plus silicon becomes semiconductors, and semiconductors plus iron become gate components.
-- The gate-component recipe now depends on `semiconductors` instead of seeded generic electronics, making the advanced component chain visible in blocker reports.
+- The default Sprint 8 playtest now has a deeper chain: iron-rich ore plus carbon becomes iron, silica plus carbon becomes silicon, copper ore becomes copper, copper plus silicon becomes electronics, electronics plus silicon becomes semiconductors, and semiconductors plus iron become aperture control components.
+- The aperture-control recipe now depends on `semiconductors` instead of seeded generic electronics, making the advanced component chain visible in blocker reports.
 - `resource_branch_pressure(state)` identifies dense local resource rail clusters and reports node degree, severity, recipe kind, involved links, and neighbours.
 - Snapshots expose top-level `resource_branch_pressure`; CLI `--report resources` shows branch-pressure warnings in both tick reports and scenario inspection.
-- 5 new tests in `tests/test_sprint18_resource_industry.py` cover typed recipe metadata, silicon/electronics/semiconductor flow, gate-component output, branch-pressure snapshots/reports, CLI resource inspection, and legacy save compatibility.
+- 5 new tests in `tests/test_sprint18_resource_industry.py` cover typed recipe metadata, silicon/electronics/semiconductor flow, aperture-control output, branch-pressure snapshots/reports, CLI resource inspection, and legacy save compatibility.
 - Full pytest suite passes 208 tests after the Sprint 18 typed-industry slice.
 
 Slice 19 completed state:
-- `GatePowerSupport` adds a resource-chain gate support model keyed to one gate link and one support node, with required resource inputs, active state, and a power-bonus value.
-- `GameState.add_gate_support()` validates target gate links, endpoint-world support nodes, positive resource inputs, positive power bonus, duplicate support ids, and duplicate supports for one gate.
-- Gate evaluation now applies available resource support as an effective power-draw reduction while preserving the base link power requirement. Missing support resources surface as gate support shortages instead of silently behaving like static world power.
+- `GatePowerSupport` adds a resource-chain Railgate support model keyed to one gate link and one support node, with required resource inputs, active state, and a power-bonus value.
+- `GameState.add_gate_support()` validates target Railgate links, endpoint-world support nodes, positive resource inputs, positive power bonus, duplicate support ids, and duplicate supports for one Railgate.
+- Railgate evaluation now applies available resource support as an effective power-draw reduction while preserving the base link power requirement. Missing support resources surface as Railgate support shortages instead of silently behaving like static world power.
 - `GatePowerStatus` now records base power required, effective power required, resource power bonus, support id/node, support inputs, and support missing resources.
-- Persistence, snapshots, and tick reports now include gate support data. Link snapshots expose `effective_power_required` and `gate_support`, and gate reports describe whether a gate is waiting on resources or supported by a node.
-- New `sprint19` / `power` / `gate_power` scenario lowers Brink Frontier's static power margin and adds a gate-component support rule for `gate_frontier_outer`, so the gate remains underpowered until the Sprint 18 chain fabricates `gate_components`.
+- Persistence, snapshots, and tick reports now include Railgate support data. Link snapshots expose `effective_power_required` and `gate_support`, and reports describe whether a Railgate is waiting on resources or supported by a node.
+- New `sprint19` / `power` / `gate_power` scenario lowers Brink Frontier's static power margin and adds an aperture-control support rule for `gate_frontier_outer`, so the Railgate remains underpowered until the Sprint 18 chain fabricates `gate_components`.
 - 5 new tests in `tests/test_sprint19_gate_power_resources.py` cover resource-gated power recovery, support persistence/snapshots, CLI report text, non-gate validation, and unknown resource validation.
 - Full pytest suite passes 213 tests after the Sprint 19 resource-backed gate-power slice.
 
@@ -757,14 +757,14 @@ Sprint 21D internal wiring completed state:
 - Full pytest suite passes 230 tests after the 21D internal-wiring slice.
 
 Sprint 22 completed state:
-- directional gates now distinguish source and exit endpoints while preserving bidirectional legacy gates.
-- reciprocal one-way gate links are allowed, but duplicate same-direction links are rejected.
+- directional Railgates now distinguish source and exit endpoints while preserving bidirectional legacy Railgates.
+- reciprocal one-way Railgate links are allowed, but duplicate same-direction links are rejected.
 - train consists are validated at purchase, schedule preview/create, and runtime dispatch, with specialized cargo reporting the required consist.
 - tests cover directional route availability, reverse-link metadata, consist parsing, preview validation, matching specialized schedules, and runtime blocking.
 
 Sprint 23 completed state:
 - schedules support ordered intermediate `stops`.
-- preview/create results include exact `route_stop_ids`, route segments, route nodes/links, gate handoff context, and structural blockers for invalid operational routes.
+- preview/create results include exact `route_stop_ids`, route segments, route nodes/links, Railgate handoff context, and structural blockers for invalid operational routes.
 - command parsing, save/load, snapshot output, dispatch route use, and CLI inspection preserve multi-stop services.
 
 Sprint 24 completed state:
@@ -782,7 +782,7 @@ Sprint 25 completed state:
 Sprint 26 completed state:
 - the stdio bridge accepts `save_path`, `load_path`, and `scenario` frames, replacing the live Python simulation in-place and returning `saved_path`, `loaded_path`, or `loaded_scenario` metadata in the bridge payload.
 - `early_build` / `early` / `starter` / `new_game` adds a sparse two-world start with limited cash, construction stock, one starter train, and one inactive starter schedule for first-build testing.
-- `industrial_expansion` / `industrial` / `expanded` / `large_industry` adds a larger connected web with extra worlds, gates, resource deposits, typed industries, power plants, gate support, and multi-stop services for stress testing industry logistics.
+- `industrial_expansion` / `industrial` / `expanded` / `large_industry` adds a larger connected web with extra worlds, Railgates, resource deposits, typed industries, power plants, Railgate support, and multi-stop services for stress testing industry logistics.
 - the Godot bridge exposes save/load/scenario helpers, and the Galaxy Map control panel has a save path field, Save Game, Load Game, and scenario reset controls.
 - tests cover bridge save/load round-trip, bridge scenario reset, scenario catalog listing, preset scale/content expectations, and Godot script wiring.
 
@@ -798,7 +798,7 @@ Sprint 27 completed state:
 ## Sprint 28: Mining-To-Manufacturing Gameplay Loop
 
 Goal:
-- close the headline gameplay loop in a single playable scenario: dispatch a mining mission, watch it return cargo into a collection station, schedule trains to ferry that cargo through a gate, smelt/build it into useful parts, deliver those parts to a settlement, and receive contract rewards for future expansion.
+- close the headline gameplay loop in a single playable scenario: dispatch a mining mission, watch it return cargo into a receiving terminal, schedule trains to ferry that cargo through a Railgate corridor, smelt/build it into useful parts, deliver those parts to a colony logistics hub, and receive contract rewards for future expansion.
 
 Deliverables:
 - a new scenario preset that demonstrates the closed loop end-to-end and is fully exercised by automated tests.
@@ -829,10 +829,10 @@ Goal:
 - make the real loop approachable from a generous starting state.
 
 Completed 29A state:
-- `tutorial_six_worlds` / `tutorial_start` creates six worlds in a powered ring.
-- every world has two gate neighbours, local depots, stocked construction inventory, settlements, and gate hubs.
-- tutorial schedules move ORE from Brink Mines to Cinder Forge, METAL from Cinder Forge to Atlas Yards, and PARTS from Atlas Yards to Helix Reach.
-- the Helix starter contract pays cash/reputation once PARTS arrive.
+- `tutorial_six_worlds` / `tutorial_start` creates six worlds in a powered Railgate corridor ring.
+- every world has two Railgate neighbours, local depots, stocked construction inventory, colony logistics hubs, and Railgate endpoints.
+- tutorial schedules move ORE from Brink extraction to Cinder refining, METAL from Cinder to Atlas maintenance works, and PARTS from Atlas to Helix Transit Combine.
+- the Helix corridor maintenance contract pays cash/reputation once PARTS arrive.
 - `saves/tutorial_six_worlds.json` is generated from the scenario for immediate save/load testing.
 
 Completed 29B state:
@@ -845,3 +845,18 @@ Manual playtest correction:
 - the six tutorial worlds render in a backend-owned circular galaxy layout instead of a straight line.
 - the Galaxy Map one-shot dispatch form is click-filled from map selection: select a train, select a pickup node, select a dropoff node, then queue the order.
 - backend tests prove the loop can be completed by manual one-shot orders before the player later chooses to automate routes with schedules.
+
+## Sprint 30: Visual Polish And Train Order Lists
+
+Goal:
+- pull the GateRail UI handoff (`docs/ui_design_tokens.md`) into the live Godot UI without restructuring layouts, then add OpenTTD-style ordered route control on top of the existing Schedule/Order machinery.
+
+Slice plan:
+- 30A complete: `UITheme` autoload (`godot/scripts/ui_theme.gd`) holds the design tokens; `main.gd` clear color, HUD, control / operations / inspector / tutorial / alert panel backgrounds, alert chip styling, and schedule-row containers route through it. Also delivered: `docs/ui_design_tokens.md` with the icon-generation prompt and component recipes.
+- 30B backend train orders: extend `Schedule` (and one-shot orders) with an optional ordered list of `TrainStop` entries — each stop is `{node_id, action: pickup|delivery|transfer|passthrough, cargo_type, units}`. Update simulation to walk the stop list per train, persistence + snapshot to round-trip, and add tests covering single-cargo waypoints, transfer-to-warehouse, and conditional skip when origin is empty.
+- 30C train orders UI: schedule edit dialog gains an ordered stop list (per-stop cargo + action picker, reorder up/down buttons); schedule rows render `origin → wp1 → wp2 → destination` with the design's `→` and `⇶` (gate hop) arrows; Local Region inspector exposes "Send to warehouse" and "Pick up here" quick actions on inventory-bearing nodes.
+- 30D polish sweep: lift the remaining `Color(...)` literals in `local_region.gd` and `main.gd` into `UITheme` calls (status pills, contract progress bars, dispatch button states, finance deltas); align the HUD layout closer to the design's three-column shell where it can be done without rewriting the canvas-layer placement code.
+
+Exit criteria:
+- visual: live Godot run matches the design's HUD/panel/chip vocabulary; no remaining inline state-color literals in the touched files.
+- functional: a player can edit a schedule into a multi-stop run (origin → warehouse → destination) and watch the train deliver cargo at each stop; the same loop runs deterministically under pytest.

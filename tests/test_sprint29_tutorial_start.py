@@ -87,14 +87,17 @@ def test_tutorial_six_worlds_is_registered_with_ring_gate_topology() -> None:
     keys = {definition.key for definition in scenario_definitions()}
     aliases = {alias for definition in scenario_definitions() for alias in definition.aliases}
     state = load_scenario("tutorial_start")
+    ring_worlds = {"vesta", "brink", "cinder", "atlas", "helix", "aurora"}
 
     assert "tutorial_six_worlds" in keys
     assert {"tutorial_start", "six_world_tutorial", "starter_ring"}.issubset(aliases)
-    assert len(state.worlds) == 6
+    assert len(state.worlds) == 7
+    assert "sable" in state.worlds
+    assert state.space_sites["site_sable_reach"].discovered is False
     assert len(state.links_by_mode(LinkMode.GATE)) == 6
     assert state.finance.cash >= 120_000
 
-    for world_id in state.worlds:
+    for world_id in ring_worlds:
         assert len(_gate_neighbour_worlds(state, world_id)) == 2
         depot = state.nodes[f"{world_id}_depot"]
         assert depot.stock(CargoType.CONSTRUCTION_MATERIALS) >= 500
@@ -141,7 +144,7 @@ def test_tutorial_six_worlds_snapshot_uses_circular_world_layout() -> None:
 
     positions = {world["id"]: world["position"] for world in snapshot["worlds"]}
 
-    assert set(positions) == {"atlas", "aurora", "brink", "cinder", "helix", "vesta"}
+    assert set(positions) == {"atlas", "aurora", "brink", "cinder", "helix", "sable", "vesta"}
     assert min(position["x"] for position in positions.values()) < 0
     assert max(position["x"] for position in positions.values()) > 0
     assert min(position["y"] for position in positions.values()) < 0
@@ -156,7 +159,8 @@ def test_tutorial_six_worlds_save_round_trips(tmp_path) -> None:
     save_simulation(simulation, save_path)
     loaded = load_simulation(save_path)
 
-    assert len(loaded.state.worlds) == 6
+    assert len(loaded.state.worlds) == 7
+    assert loaded.state.space_sites["site_sable_reach"].discovered is False
     assert loaded.state.finance.cash == simulation.state.finance.cash
     assert set(loaded.state.schedules) == set(simulation.state.schedules)
 
@@ -169,22 +173,37 @@ def test_tutorial_snapshot_reports_loop_progress_and_next_action() -> None:
     assert initial["id"] == "tutorial_six_worlds"
     assert initial["active"] is True
     assert initial["next_action"] == {
-        "kind": "manual_dispatch",
-        "label": "Set up a manual freight order",
+        "kind": "command",
+        "label": "Activate ore haul",
+        "command": {
+            "type": "SetScheduleEnabled",
+            "schedule_id": "tutorial_ore_to_cinder",
+            "enabled": True,
+        },
     }
     assert initial["alerts"] == [
         {
             "kind": "tutorial",
-            "message": "Tutorial active: move ore from Brink Mines to Cinder Forge.",
+            "message": "Tutorial active: move ore through the Brink-Cinder Railgate corridor.",
         }
     ]
     assert [step["id"] for step in initial["steps"]] == [
         "mine_ore",
         "smelt_metal",
         "deliver_parts",
+        "manufacture_gate_components",
+        "deploy_outbound_gate",
+        "survey_destination",
+        "establish_gate_corridor",
+        "send_starter_freight",
     ]
     assert [step["status"] for step in initial["steps"]] == [
         "active",
+        "pending",
+        "pending",
+        "pending",
+        "pending",
+        "pending",
         "pending",
         "pending",
     ]
@@ -195,23 +214,37 @@ def test_tutorial_snapshot_reports_loop_progress_and_next_action() -> None:
     assert initial["steps"][0]["destination"] == "cinder_smelter"
 
     _run_manual_tutorial_loop(simulation)
-    finished = render_snapshot(simulation.state)["tutorial"]
+    progressed = render_snapshot(simulation.state)["tutorial"]
 
-    assert finished["active"] is False
-    assert finished["alerts"] == [
+    assert progressed["active"] is True
+    assert progressed["current_step_id"] == "deploy_outbound_gate"
+    assert progressed["alerts"] == [
         {
             "kind": "tutorial",
-            "message": "Tutorial loop complete: Helix paid for delivered parts.",
+            "message": "Tutorial active: deliver aperture control components to complete the Atlas outbound Railgate terminal.",
         }
     ]
-    assert finished["next_action"] is None
-    assert [step["status"] for step in finished["steps"]] == [
+    assert progressed["next_action"] == {
+        "kind": "command",
+        "label": "Deliver Railgate components",
+        "command": {
+            "type": "SetScheduleEnabled",
+            "schedule_id": "tutorial_components_to_gate",
+            "enabled": True,
+        },
+    }
+    assert [step["status"] for step in progressed["steps"]] == [
         "complete",
         "complete",
         "complete",
+        "complete",
+        "active",
+        "pending",
+        "pending",
+        "pending",
     ]
-    assert finished["steps"][2]["reward_cash"] == 20_000.0
-    assert finished["steps"][2]["reward_reputation"] == 4
+    assert progressed["steps"][2]["reward_cash"] == 20_000.0
+    assert progressed["steps"][2]["reward_reputation"] == 4
 
 
 def test_godot_tutorial_ui_consumes_snapshot_contract_without_rules() -> None:

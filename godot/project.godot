@@ -16,6 +16,7 @@ config/features=PackedStringArray("4.4")
 
 [autoload]
 
+UITheme="*res://scripts/ui_theme.gd"
 GateRailBridge="*res://scripts/gate_rail_bridge.gd"
 SceneNav="*res://scripts/scene_nav.gd"
 
